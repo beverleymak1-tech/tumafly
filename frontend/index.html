@@ -1226,6 +1226,319 @@ mark { background: rgba(61, 149, 245, 0.18); color: inherit; padding: 0 1px; bor
 }
 
 /* ─────────────────────────────────────────────────────────────
+   TRIP PANEL (right-side summary on booking + payment views)
+   ───────────────────────────────────────────────────────────── */
+.trip-panel {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  margin-bottom: 16px;
+  overflow: hidden;
+}
+.tp-leg {
+  border-top: 1px solid var(--border);
+}
+.tp-leg:first-child { border-top: none; }
+.tp-leg-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px 18px;
+  cursor: pointer;
+  user-select: none;
+}
+.tp-leg-head-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--ink);
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.tp-leg-head-title .sep {
+  color: var(--text-3);
+  font-weight: 400;
+}
+.tp-leg-head-title .date {
+  color: var(--text-2);
+  font-weight: 500;
+}
+.tp-leg-chev {
+  font-size: 12px;
+  color: var(--text-3);
+  transition: transform 0.15s;
+  flex-shrink: 0;
+}
+.tp-leg.collapsed .tp-leg-chev { transform: rotate(-90deg); }
+.tp-leg-body {
+  padding: 0 18px 16px;
+  font-size: 13px;
+  color: var(--text);
+}
+.tp-leg.collapsed .tp-leg-body { display: none; }
+.tp-leg-line {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-bottom: 6px;
+}
+.tp-leg-times {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--ink);
+  font-variant-numeric: tabular-nums;
+}
+.tp-leg-stops {
+  font-size: 13px;
+  color: var(--text-2);
+}
+.tp-leg-airline {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: var(--text);
+  margin-bottom: 4px;
+}
+.tp-leg-airline img {
+  width: 18px;
+  height: 18px;
+  object-fit: contain;
+  border-radius: 3px;
+}
+.tp-leg-cabin {
+  font-size: 13px;
+  color: var(--text-2);
+  margin-bottom: 10px;
+}
+.tp-leg-actions {
+  display: flex;
+  gap: 16px;
+  font-size: 13px;
+}
+.tp-leg-actions button {
+  background: none;
+  border: none;
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--brand-dark);
+  cursor: pointer;
+  padding: 0;
+}
+.tp-leg-actions button:hover { text-decoration: underline; }
+
+/* Price panel — its own card under the trip panel */
+.price-panel {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 18px 20px;
+}
+.price-panel h4 {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--ink);
+  margin-bottom: 4px;
+}
+.price-panel .ppp {
+  font-size: 12px;
+  color: var(--text-3);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  font-weight: 600;
+  margin: 10px 0 6px;
+}
+.price-panel .line {
+  display: flex;
+  justify-content: space-between;
+  padding: 6px 0;
+  font-size: 14px;
+  color: var(--text);
+  gap: 12px;
+}
+.price-panel .line .label { color: var(--text-2); }
+.price-panel .line .value { font-weight: 500; color: var(--ink); font-variant-numeric: tabular-nums; }
+.price-panel .divider { border-top: 1px solid var(--border); margin: 8px 0; }
+.price-panel .total {
+  display: flex;
+  justify-content: space-between;
+  padding: 10px 0 4px;
+  font-size: 18px;
+  font-weight: 700;
+  color: var(--ink);
+}
+.price-panel .total .value { font-variant-numeric: tabular-nums; }
+.price-panel .foot {
+  font-size: 11px;
+  color: var(--text-3);
+  margin-top: 8px;
+  line-height: 1.4;
+}
+
+/* Flight-details modal */
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(15, 25, 35, 0.5);
+  z-index: 100;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  animation: fadeIn 0.15s ease-out;
+}
+@keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+.modal-card {
+  background: var(--surface);
+  border-radius: var(--radius);
+  max-width: 640px;
+  width: 100%;
+  max-height: calc(100vh - 48px);
+  overflow-y: auto;
+  position: relative;
+  box-shadow: var(--shadow-lg);
+}
+.modal-close {
+  position: absolute;
+  top: 14px;
+  right: 14px;
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  color: var(--text-2);
+  font-size: 16px;
+  cursor: pointer;
+  display: grid;
+  place-items: center;
+  font-family: inherit;
+  line-height: 1;
+  z-index: 1;
+}
+.modal-close:hover { background: var(--bg); color: var(--ink); }
+.modal-body { padding: 28px 28px 24px; }
+.modal-section { margin-bottom: 24px; }
+.modal-section:last-child { margin-bottom: 0; }
+.modal-section-num {
+  font-size: 12px;
+  color: var(--text-3);
+  font-weight: 500;
+  margin-bottom: 6px;
+}
+.modal-section-route {
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--ink);
+  margin-bottom: 14px;
+  line-height: 1.4;
+}
+.modal-flight-block {
+  background: var(--bg);
+  border-radius: var(--radius-sm);
+  padding: 14px 16px;
+}
+.modal-flight-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 10px;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.modal-flight-airline {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--ink);
+}
+.modal-flight-airline img {
+  width: 20px;
+  height: 20px;
+  object-fit: contain;
+}
+.modal-flight-duration {
+  font-size: 13px;
+  color: var(--text-2);
+  font-variant-numeric: tabular-nums;
+}
+.modal-times {
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  gap: 16px;
+  align-items: baseline;
+  margin-bottom: 4px;
+}
+.modal-times .t {
+  font-size: 22px;
+  font-weight: 600;
+  color: var(--ink);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.4px;
+}
+.modal-times .t.end { text-align: right; }
+.modal-times .dot { color: var(--text-3); font-size: 12px; text-align: center; }
+.modal-iatas {
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  gap: 16px;
+  font-size: 12px;
+  color: var(--text-3);
+  font-weight: 500;
+  margin-bottom: 8px;
+}
+.modal-iatas .end { text-align: right; }
+.modal-dates {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+  font-size: 12px;
+  color: var(--text-3);
+  margin-bottom: 10px;
+}
+.modal-dates .end { text-align: right; }
+.modal-pathline {
+  height: 1.5px;
+  background: var(--border-2);
+  position: relative;
+  margin: 8px 0 14px;
+}
+.modal-pathline::before, .modal-pathline::after {
+  content: '';
+  position: absolute;
+  width: 7px;
+  height: 7px;
+  background: var(--ink);
+  border-radius: 50%;
+  top: 50%;
+  transform: translateY(-50%);
+}
+.modal-pathline::before { left: 0; }
+.modal-pathline::after { right: 0; }
+.modal-amenities {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px 16px;
+  font-size: 13px;
+  color: var(--text-2);
+  margin-top: 10px;
+}
+.modal-layover {
+  background: var(--warning-soft);
+  color: var(--warning);
+  padding: 10px 14px;
+  border-radius: var(--radius-sm);
+  font-size: 13px;
+  font-weight: 500;
+  margin: 12px 0;
+  text-align: center;
+}
+
+/* ─────────────────────────────────────────────────────────────
    BOOKING / PASSENGER FORM
    ───────────────────────────────────────────────────────────── */
 .booking-layout {
@@ -1776,7 +2089,8 @@ input.has-error, select.has-error {
       </div>
 
       <aside>
-        <div class="summary" id="booking-summary"></div>
+        <div id="booking-trip-slot"></div>
+        <div id="booking-price-slot"></div>
       </aside>
     </div>
   </div>
@@ -1835,7 +2149,8 @@ input.has-error, select.has-error {
       </div>
 
       <aside>
-        <div class="summary" id="payment-summary"></div>
+        <div id="payment-trip-slot"></div>
+        <div id="payment-price-slot"></div>
       </aside>
     </div>
   </div>
@@ -2705,48 +3020,10 @@ function updateFilterCounts() {
   if (elAfr) elAfr.textContent = african;
 }
 
-// Fair-price gauge — uses the cheapest offer's lowest cabin price
-// vs the distribution of prices in the current result set
+// Price gauge removed — sort dropdown gives users the cheapest flight directly.
 function updatePriceGauge() {
   const gauge = document.getElementById('price-gauge');
-  if (!gauge || !allOffers.length) {
-    if (gauge) gauge.innerHTML = '';
-    return;
-  }
-  const prices = allOffers
-    .map(o => currentCurrency === 'USD' ? o.lowest_price_usd : o.lowest_price_kes)
-    .filter(p => p > 0)
-    .sort((a, b) => a - b);
-  if (!prices.length) { gauge.innerHTML = ''; return; }
-  const min = prices[0];
-  const max = prices[prices.length - 1];
-  const cheapest = prices[0];
-  // Place pin proportional to where the cheapest sits in the range
-  const pinPct = max === min ? 0 : Math.max(0, Math.min(100, ((cheapest - min) / (max - min)) * 100));
-  // Label by quartile
-  const q1 = prices[Math.floor(prices.length * 0.25)];
-  const q3 = prices[Math.floor(prices.length * 0.75)];
-  let label = 'Great price';
-  if (cheapest > q3) label = 'High price';
-  else if (cheapest > q1) label = 'Fair price';
-
-  gauge.innerHTML = `
-    <div class="price-gauge-bar-wrap">
-      <div class="price-gauge-label">${label}</div>
-      <div class="price-gauge-bar">
-        <div class="price-gauge-pin" style="left:${pinPct}%;"></div>
-      </div>
-      <div class="price-gauge-labels">
-        <span>Great</span>
-        <span>Fair</span>
-        <span>High</span>
-      </div>
-    </div>
-    <div class="price-gauge-right">
-      <div class="label">Lowest price</div>
-      <div class="price">${formatPrice(cheapest / passengerCount)}</div>
-    </div>
-  `;
+  if (gauge) gauge.innerHTML = '';
 }
 
 function sortOffers(offers) {
@@ -3126,26 +3403,248 @@ function bookingFareTotal() {
   return out + inb;
 }
 
-function renderBookingSummary() {
-  const ob = selectedOutbound.offer;
-  const ib = selectedInbound?.offer;
-  const slice = ob.slices[0];
-  const returnSlice = ib ? (ib.slices[1] || ib.slices[0]) : null;
-  const fareTotal = bookingFareTotal();
-  const html = `
-    <h4>Your trip</h4>
-    <div class="flight-summary-block">
-      <strong>${escapeHtml(slice.origin)} → ${escapeHtml(slice.destination)}</strong><br>
-      ${escapeHtml(ob.airline)} · ${formatDateTime(slice.departure)} · ${escapeHtml(CABIN_LABELS[selectedOutbound.cabin])}
-      ${returnSlice ? `<br><br><strong>${escapeHtml(returnSlice.origin)} → ${escapeHtml(returnSlice.destination)}</strong><br>${escapeHtml(ib.airline)} · ${formatDateTime(returnSlice.departure)} · ${escapeHtml(CABIN_LABELS[selectedInbound.cabin])}` : ''}
+// ============================================================
+// SHARED TRIP + PRICE PANELS (booking & payment views)
+// ============================================================
+
+// Renders one leg card (outbound or return) inside the trip panel
+function renderLegCard(kind, label) {
+  const sel = kind === 'outbound' ? selectedOutbound : selectedInbound;
+  if (!sel) return '';
+  const offer = sel.offer;
+  // For outbound: first slice. For return: the second slice on a paired offer,
+  // or the first slice on a separate inbound offer.
+  const slice = (kind === 'outbound') ? offer.slices[0] : (offer.slices[1] || offer.slices[0]);
+  const stops = slice.stops ?? 0;
+  const stopsLabel = stops === 0 ? 'Nonstop' : `${stops} stop${stops > 1 ? 's' : ''}`;
+  const dateLabel = new Date(slice.departure).toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' });
+  return `
+    <div class="tp-leg" id="tp-leg-${kind}">
+      <div class="tp-leg-head" onclick="toggleLegCollapse('${kind}')">
+        <div class="tp-leg-head-title">
+          <span>${label}</span>
+          <span class="sep">|</span>
+          <span class="date">${escapeHtml(dateLabel)}</span>
+          <span class="sep">|</span>
+          <span>${escapeHtml(slice.origin)} <span style="color:var(--text-3);">→</span> ${escapeHtml(slice.destination)}</span>
+        </div>
+        <span class="tp-leg-chev">▾</span>
+      </div>
+      <div class="tp-leg-body">
+        <div class="tp-leg-line">
+          <span class="tp-leg-times tabular">${formatTime(slice.departure)} – ${formatTime(slice.arrival)}${dayOffset(slice.departure, slice.arrival)}</span>
+          <span class="tp-leg-stops">${escapeHtml(stopsLabel)}, ${escapeHtml(formatDuration(slice.duration))}</span>
+        </div>
+        <div class="tp-leg-airline">
+          <img src="${escapeHtml(offer.airline_logo || '')}" alt="${escapeHtml(offer.airline)}" onerror="this.style.opacity=0;">
+          <span>${escapeHtml(offer.airline)}</span>
+          <span style="margin-left:auto;color:var(--text-2);">${escapeHtml(CABIN_LABELS[sel.cabin])}</span>
+        </div>
+        <div class="tp-leg-actions">
+          <button onclick="changeFlightFromSummary('${kind}')">Change flight</button>
+          <button onclick="showFlightDetailsModal('${kind}')">View details</button>
+        </div>
+      </div>
     </div>
-    <div class="summary-line"><span class="label">Travelers</span><span class="value">${passengerCount}</span></div>
-    <div class="summary-line"><span class="label">Flights</span><span class="value">${formatPrice(fareTotal)}</span></div>
-    <div class="summary-divider"></div>
-    <div class="summary-total"><span>Total estimate</span><span class="value">${formatPrice(fareTotal)}</span></div>
-    <div style="font-size:11px;color:var(--text-3);margin-top:6px;">Service and processing fees added at payment.</div>
   `;
-  document.getElementById('booking-summary').innerHTML = html;
+}
+
+function toggleLegCollapse(kind) {
+  const el = document.getElementById('tp-leg-' + kind);
+  if (el) el.classList.toggle('collapsed');
+}
+
+// Renders the trip panel — outbound + (if round trip) return legs
+function renderTripPanel(slotId) {
+  const slot = document.getElementById(slotId);
+  if (!slot) return;
+  const outboundCard = renderLegCard('outbound', 'Outbound');
+  const returnCard = selectedInbound ? renderLegCard('inbound', 'Return') : '';
+  slot.innerHTML = `<div class="trip-panel">${outboundCard}${returnCard}</div>`;
+}
+
+// Renders the price panel. `breakdown` (optional) is the server-computed
+// fee breakdown returned by create-payment; otherwise we show an estimate.
+function renderPricePanel(slotId, breakdown) {
+  const slot = document.getElementById(slotId);
+  if (!slot) return;
+  const fareTotal = bookingFareTotal();
+
+  let breakdownHtml = '';
+  if (breakdown) {
+    breakdownHtml = `
+      <div class="line"><span class="label">Base fare</span><span class="value">KES ${breakdown.base_kes.toLocaleString()}</span></div>
+      <div class="line"><span class="label">Service fee</span><span class="value">KES ${breakdown.service_fee_kes.toLocaleString()}</span></div>
+      <div class="line"><span class="label">Taxes & processing</span><span class="value">KES ${breakdown.processing_fee_kes.toLocaleString()}</span></div>
+      <div class="divider"></div>
+      <div class="total"><span>Total</span><span class="value">KES ${breakdown.total_kes.toLocaleString()}</span></div>
+      <div class="foot">Final price confirmed at checkout based on passenger details and availability.</div>
+    `;
+  } else {
+    breakdownHtml = `
+      <div class="line"><span class="label">Base fare</span><span class="value">${formatPrice(fareTotal)}</span></div>
+      <div class="line"><span class="label">Service fee</span><span class="value">KES 1,500</span></div>
+      <div class="line"><span class="label">Taxes & processing</span><span class="value" style="color:var(--text-3);">added at payment</span></div>
+      <div class="divider"></div>
+      <div class="total"><span>Total estimate</span><span class="value">${formatPrice(fareTotal + 1500)}+</span></div>
+      <div class="foot">Final price confirmed at checkout based on passenger details and availability.</div>
+    `;
+  }
+
+  slot.innerHTML = `
+    <div class="price-panel">
+      <h4>Estimated price</h4>
+      <div class="ppp">Price per ${passengerCount > 1 ? 'booking' : 'passenger'}</div>
+      ${breakdownHtml}
+    </div>
+  `;
+}
+
+function renderBookingSummary() {
+  renderTripPanel('booking-trip-slot');
+  renderPricePanel('booking-price-slot');
+}
+
+function renderPaymentSummary(breakdown) {
+  renderTripPanel('payment-trip-slot');
+  renderPricePanel('payment-price-slot', breakdown);
+}
+
+// ============================================================
+// FLIGHT DETAILS MODAL — segment-by-segment with amenities/layovers
+// ============================================================
+function showFlightDetailsModal(kind) {
+  const sel = kind === 'outbound' ? selectedOutbound : selectedInbound;
+  if (!sel) return;
+  const offer = sel.offer;
+  const slice = (kind === 'outbound') ? offer.slices[0] : (offer.slices[1] || offer.slices[0]);
+  const totalSegments = slice.segments.length;
+
+  const sections = slice.segments.map((seg, i) => {
+    const num = `Flight ${i + 1} of ${totalSegments}`;
+    const depDate = new Date(seg.departure).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' });
+    const arrDate = new Date(seg.arrival).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' });
+    const layoverHtml = seg.layover_formatted ? `
+      <div class="modal-layover">
+        ${seg.layover_overnight ? '🌙' : '⏱'} ${escapeHtml(seg.layover_formatted)} layover · Change planes at ${escapeHtml(slice.segments[i + 1]?.origin || seg.destination)}${seg.layover_overnight ? ' (overnight)' : ''}
+      </div>
+    ` : '';
+    return `
+      <div class="modal-section">
+        <div class="modal-section-num">${num}</div>
+        <div class="modal-section-route">${escapeHtml(seg.origin_name || seg.origin)} (${escapeHtml(seg.origin)}) to ${escapeHtml(seg.destination_name || seg.destination)} (${escapeHtml(seg.destination)})</div>
+        <div class="modal-flight-block">
+          <div class="modal-flight-header">
+            <div class="modal-flight-airline">
+              <img src="${escapeHtml(offer.airline_logo || '')}" alt="" onerror="this.style.display='none';">
+              <span>${escapeHtml(seg.airline)} ${escapeHtml(seg.flight_number)}</span>
+            </div>
+            <div class="modal-flight-duration tabular">${escapeHtml(formatDuration(seg.duration))}</div>
+          </div>
+          <div class="modal-times">
+            <div class="t tabular">${formatTime(seg.departure)}</div>
+            <div class="dot">·</div>
+            <div class="t end tabular">${formatTime(seg.arrival)}${dayOffset(seg.departure, seg.arrival)}</div>
+          </div>
+          <div class="modal-dates">
+            <div>${escapeHtml(depDate)}</div>
+            <div class="end">${escapeHtml(arrDate)}</div>
+          </div>
+          <div class="modal-pathline"></div>
+          <div class="modal-iatas">
+            <div>${escapeHtml(seg.origin)}</div>
+            <div></div>
+            <div class="end">${escapeHtml(seg.destination)}</div>
+          </div>
+          ${renderOperatedByDisclosure(seg)}
+          ${seg.aircraft ? `<div style="font-size:12px;color:var(--text-3);margin-top:4px;text-align:right;">Aircraft: ${escapeHtml(seg.aircraft)}</div>` : ''}
+        </div>
+        ${renderAmenitiesBlock(seg)}
+        ${layoverHtml}
+      </div>
+    `;
+  }).join('');
+
+  const backdrop = document.createElement('div');
+  backdrop.className = 'modal-backdrop';
+  backdrop.innerHTML = `
+    <div class="modal-card" role="dialog" aria-modal="true">
+      <button class="modal-close" onclick="closeModal()" aria-label="Close">✕</button>
+      <div class="modal-body">
+        ${sections}
+      </div>
+    </div>
+  `;
+  backdrop.addEventListener('click', (e) => {
+    if (e.target === backdrop) closeModal();
+  });
+  document.body.appendChild(backdrop);
+  document.body.style.overflow = 'hidden';
+  // Close on Escape
+  document.addEventListener('keydown', escClose);
+}
+
+function escClose(e) {
+  if (e.key === 'Escape') closeModal();
+}
+
+// Renders amenities only when CONFIRMED available. Never makes "No X" claims —
+// Duffel's data is sparse for most African carriers, and unknown ≠ absent.
+// If nothing is confirmed, returns empty string (no section appears).
+function renderAmenitiesBlock(seg) {
+  const a = seg.amenities;
+  if (!a) return '';
+  const items = [];
+  if (a.wifi?.available) {
+    const cost = a.wifi.cost;
+    let label = 'Wi-Fi available';
+    if (cost === 'free') label = 'Free Wi-Fi';
+    else if (cost === 'paid') label = 'Wi-Fi available (paid)';
+    items.push(`<div>✓ ${escapeHtml(label)}</div>`);
+  }
+  if (a.power?.available) {
+    items.push(`<div>✓ Power outlets</div>`);
+  }
+  if (a.seat?.pitch) {
+    items.push(`<div>Seat pitch: ${escapeHtml(a.seat.pitch)}"</div>`);
+  }
+  if (!items.length) return '';
+  return `
+    <div style="margin-top:14px;">
+      <div style="font-size:12px;text-transform:uppercase;letter-spacing:0.05em;color:var(--text-3);font-weight:600;margin-bottom:6px;">Amenities</div>
+      <div class="modal-amenities">${items.join('')}</div>
+    </div>
+  `;
+}
+
+// Per Duffel docs (and US DOT regulation): when the operating carrier differs
+// from the marketing carrier, the operating carrier must be disclosed to the user.
+function renderOperatedByDisclosure(seg) {
+  if (!seg.operating_carrier) return '';
+  if (seg.operating_carrier === seg.airline) return '';
+  return `<div style="font-size:12px;color:var(--text-3);margin-top:4px;">Operated by ${escapeHtml(seg.operating_carrier)}</div>`;
+}
+
+function closeModal() {
+  document.querySelectorAll('.modal-backdrop').forEach(el => el.remove());
+  document.body.style.overflow = '';
+  document.removeEventListener('keydown', escClose);
+}
+
+// Change flight from the summary panel.
+// Outbound: clear both selections, back to results step 1.
+// Inbound: clear only the inbound, back to results step 2 (outbound stays).
+function changeFlightFromSummary(kind) {
+  if (kind === 'outbound') {
+    selectedOutbound = null;
+    selectedInbound = null;
+    selectedOffer = null;
+  } else {
+    selectedInbound = null;
+    selectedOffer = null;
+  }
+  showView('results');
+  renderResults();
 }
 
 // ============================================================
@@ -3174,46 +3673,6 @@ function goToPayment() {
   document.getElementById('poll-area').classList.add('hidden');
   clearAlert('payment-alert');
   showView('payment');
-}
-
-function renderPaymentSummary(breakdown) {
-  const ob = selectedOutbound.offer;
-  const ib = selectedInbound?.offer;
-  const slice = ob.slices[0];
-  const returnSlice = ib ? (ib.slices[1] || ib.slices[0]) : null;
-  const fareTotal = bookingFareTotal();
-
-  let breakdownHtml = '';
-  if (breakdown) {
-    breakdownHtml = `
-      <div class="summary-line"><span class="label">Flights</span><span class="value">KES ${breakdown.base_kes.toLocaleString()}</span></div>
-      <div class="summary-line"><span class="label">Service fee</span><span class="value">KES ${breakdown.service_fee_kes.toLocaleString()}</span></div>
-      <div class="summary-line"><span class="label">Processing</span><span class="value">KES ${breakdown.processing_fee_kes.toLocaleString()}</span></div>
-      <div class="summary-divider"></div>
-      <div class="summary-total"><span>Total</span><span class="value">KES ${breakdown.total_kes.toLocaleString()}</span></div>
-    `;
-  } else {
-    breakdownHtml = `
-      <div class="summary-line"><span class="label">Flights</span><span class="value">${formatPrice(fareTotal)}</span></div>
-      <div class="summary-line"><span class="label">Service fee</span><span class="value">KES 1,500</span></div>
-      <div class="summary-line"><span class="label">Processing</span><span class="value tabular" style="color:var(--text-3);">added at payment</span></div>
-      <div class="summary-divider"></div>
-      <div class="summary-total"><span>Total estimate</span><span class="value">${formatPrice(fareTotal + 1500)}+</span></div>
-    `;
-  }
-
-  document.getElementById('payment-summary').innerHTML = `
-    <h4>Your trip</h4>
-    <div class="flight-summary-block">
-      <strong>${escapeHtml(slice.origin)} → ${escapeHtml(slice.destination)}</strong><br>
-      ${escapeHtml(ob.airline)} · ${formatDateTime(slice.departure)} · ${escapeHtml(CABIN_LABELS[selectedOutbound.cabin])}
-      ${returnSlice ? `<br><br><strong>${escapeHtml(returnSlice.origin)} → ${escapeHtml(returnSlice.destination)}</strong><br>${escapeHtml(ib.airline)} · ${formatDateTime(returnSlice.departure)} · ${escapeHtml(CABIN_LABELS[selectedInbound.cabin])}` : ''}
-    </div>
-    <div class="summary-line"><span class="label">Travelers</span><span class="value">${passengerCount}</span></div>
-    <div class="summary-line"><span class="label">Contact</span><span class="value" style="font-size:12px;">${escapeHtml(contactData.email)}</span></div>
-    <div class="summary-divider"></div>
-    ${breakdownHtml}
-  `;
 }
 
 function selectPayTab(tab) {

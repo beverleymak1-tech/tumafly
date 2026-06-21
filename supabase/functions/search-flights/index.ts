@@ -237,9 +237,26 @@ serve(async (req) => {
 
         slices: o.slices.map((slice: any) => {
           const segments = slice.segments.map((seg: any, idx: number) => {
+            const pax = seg.passengers?.[0];
+            const am = pax?.cabin?.amenities;
+
+            // Normalize amenity flags. Duffel returns `available` as a string "true"/"false".
+            // Per spec: only surface amenities that are EXPLICITLY confirmed available.
+            // Unknown or missing data → null (frontend shows nothing — never fakes "No Wi-Fi").
+            const wifi = am?.wifi && String(am.wifi.available).toLowerCase() === "true"
+              ? { available: true, cost: am.wifi.cost || null }
+              : null;
+            const power = am?.power && String(am.power.available).toLowerCase() === "true"
+              ? { available: true }
+              : null;
+            const seat = am?.seat && (am.seat.pitch || am.seat.legroom || am.seat.type)
+              ? { type: am.seat.type || null, pitch: am.seat.pitch || null, legroom: am.seat.legroom || null }
+              : null;
+
             const segObj: any = {
               flight_number: `${seg.marketing_carrier.iata_code}${seg.marketing_carrier_flight_number}`,
               airline: seg.marketing_carrier.name,
+              operating_carrier: seg.operating_carrier?.name || null,
               aircraft: seg.aircraft?.name || null,
               origin: seg.origin.iata_code,
               origin_name: seg.origin.name,
@@ -252,7 +269,8 @@ serve(async (req) => {
               departure: seg.departing_at,
               arrival: seg.arriving_at,
               duration: seg.duration,
-              cabin_class: seg.passengers?.[0]?.cabin_class_marketing_name || "Economy",
+              cabin_class: pax?.cabin_class_marketing_name || "Economy",
+              amenities: { wifi, power, seat },
             };
             if (idx < slice.segments.length - 1) {
               const nextSeg = slice.segments[idx + 1];
