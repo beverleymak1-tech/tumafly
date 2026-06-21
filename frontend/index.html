@@ -719,6 +719,20 @@ mark { background: rgba(61, 149, 245, 0.18); color: inherit; padding: 0 1px; bor
   box-shadow: 0 0 0 3px rgba(61, 149, 245, 0.12);
 }
 
+/* Card body splits into left (route info) and right (cabin cells) on desktop */
+.fc-body {
+  display: grid;
+  grid-template-columns: 1fr 480px;
+  gap: 24px;
+  align-items: center;
+}
+@media (max-width: 1100px) {
+  .fc-body { grid-template-columns: 1fr 400px; }
+}
+@media (max-width: 900px) {
+  .fc-body { grid-template-columns: 1fr; gap: 14px; }
+}
+
 .fc-badges {
   display: flex;
   gap: 6px;
@@ -766,6 +780,7 @@ mark { background: rgba(61, 149, 245, 0.18); color: inherit; padding: 0 1px; bor
   font-size: 13px;
   color: var(--text-2);
   font-variant-numeric: tabular-nums;
+  font-weight: 500;
 }
 
 /* The route bar */
@@ -840,29 +855,35 @@ mark { background: rgba(61, 149, 245, 0.18); color: inherit; padding: 0 1px; bor
 .fc-line .endpoint.right { right: 0; }
 .fc-line .stop {
   position: absolute;
-  width: 6px;
-  height: 6px;
+  width: 7px;
+  height: 7px;
   border-radius: 50%;
   background: var(--warning);
   top: 50%;
   transform: translate(-50%, -50%);
   z-index: 1;
+  border: 1.5px solid var(--surface);
 }
 
-/* Cabin row — Economy / Premium / Business / First columns */
+/* Cabin row — Economy / Premium / Business / First columns
+   Sits to the right of the route info on desktop, stacks under on mobile */
 .fc-cabins {
   display: grid;
   grid-template-columns: repeat(4, 1fr);
-  gap: 8px;
-  margin-top: 14px;
-  padding-top: 14px;
-  border-top: 1px solid var(--border);
+  gap: 6px;
 }
-@media (max-width: 640px) {
+@media (max-width: 900px) {
+  .fc-cabins {
+    grid-template-columns: repeat(4, 1fr);
+    border-top: 1px solid var(--border);
+    padding-top: 14px;
+  }
+}
+@media (max-width: 560px) {
   .fc-cabins { grid-template-columns: repeat(2, 1fr); }
 }
 .fc-cabin {
-  padding: 10px 12px;
+  padding: 10px 8px;
   border: 1.5px solid var(--border);
   border-radius: var(--radius-sm);
   cursor: pointer;
@@ -873,7 +894,9 @@ mark { background: rgba(61, 149, 245, 0.18); color: inherit; padding: 0 1px; bor
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 2px;
+  gap: 1px;
+  min-height: 88px;
+  justify-content: center;
 }
 .fc-cabin:hover:not(:disabled) { border-color: var(--brand); }
 .fc-cabin:active:not(:disabled) { transform: scale(0.99); }
@@ -893,15 +916,9 @@ mark { background: rgba(61, 149, 245, 0.18); color: inherit; padding: 0 1px; bor
   letter-spacing: 0.05em;
   font-weight: 600;
   color: var(--text-2);
+  margin-bottom: 2px;
 }
 .fc-cabin:disabled .fc-cabin-name { color: var(--text-3); }
-.fc-cabin-price {
-  font-size: 16px;
-  font-weight: 600;
-  color: var(--ink);
-  font-variant-numeric: tabular-nums;
-  letter-spacing: -0.2px;
-}
 .fc-cabin-from {
   font-size: 10px;
   color: var(--text-3);
@@ -909,10 +926,24 @@ mark { background: rgba(61, 149, 245, 0.18); color: inherit; padding: 0 1px; bor
   letter-spacing: 0.05em;
   font-weight: 600;
 }
-.fc-cabin-unavailable {
-  font-size: 12px;
+.fc-cabin-price {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--ink);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.2px;
+  margin: 1px 0;
+}
+.fc-cabin-trip {
+  font-size: 10px;
   color: var(--text-3);
-  padding: 8px 0;
+  font-weight: 500;
+}
+.fc-cabin-unavailable {
+  font-size: 11px;
+  color: var(--text-3);
+  padding: 6px 0;
+  line-height: 1.3;
 }
 
 .fc-expand {
@@ -1697,9 +1728,19 @@ let rDestinationSelectedIata = null;
 const apSelections = {};
 
 // ============================================================
-// VIEW ROUTING
+// VIEW ROUTING (with browser history support)
 // ============================================================
-function showView(name) {
+// We use history.pushState so the browser back button navigates the in-app views,
+// not out of the site. Wrapped in safeHistory because sandboxed iframe contexts
+// (artifact previews, srcdoc) can throw SecurityError on history mutations.
+function safeHistory(op, state, url) {
+  try {
+    if (op === 'push') history.pushState(state, '', url);
+    else if (op === 'replace') history.replaceState(state, '', url);
+  } catch (_) { /* sandboxed context — ignore */ }
+}
+
+function showView(name, opts = {}) {
   ['home','results','booking','payment','success'].forEach(n => {
     document.getElementById('view-' + n).classList.toggle('hidden', n !== name);
   });
@@ -1708,6 +1749,31 @@ function showView(name) {
     clearTimeout(pollHandle);
     pollHandle = null;
   }
+  if (!opts.fromPopState) {
+    const state = { view: name };
+    let currentState = null;
+    try { currentState = history.state; } catch (_) {}
+    if (!currentState || currentState.view !== name) {
+      safeHistory('push', state, '#' + name);
+    }
+  }
+}
+
+// Handle the browser back/forward buttons
+window.addEventListener('popstate', (e) => {
+  const view = e.state?.view || 'home';
+  if (pollHandle) {
+    clearTimeout(pollHandle);
+    pollHandle = null;
+  }
+  showView(view, { fromPopState: true });
+});
+
+// On initial load, set the base state so the first back press doesn't leave the site
+let initialState = null;
+try { initialState = history.state; } catch (_) {}
+if (!initialState) {
+  safeHistory('replace', { view: 'home' }, window.location.pathname);
 }
 
 function resetAndGoHome() {
@@ -1792,8 +1858,20 @@ function formatDateTime(iso) {
   const d = new Date(iso);
   return d.toLocaleString('en-GB', { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', hour12: false });
 }
-function formatDuration(mins) {
-  if (!mins && mins !== 0) return '';
+function formatDuration(value) {
+  if (value == null || value === '') return '';
+  // Accept either a minute count (legacy) or an ISO 8601 duration string like "PT4H27M" / "P1DT8H20M"
+  if (typeof value === 'string') {
+    const m = value.match(/^P(?:(\d+)D)?T?(?:(\d+)H)?(?:(\d+)M)?/);
+    if (!m) return '';
+    const days = parseInt(m[1] || '0', 10);
+    const h = parseInt(m[2] || '0', 10) + days * 24;
+    const min = parseInt(m[3] || '0', 10);
+    if (!h && !min) return '';
+    return (h ? `${h}h ` : '') + (min ? `${min}m` : '').trim();
+  }
+  const mins = Number(value);
+  if (!isFinite(mins)) return '';
   const h = Math.floor(mins / 60);
   const m = mins % 60;
   return (h ? `${h}h ` : '') + (m ? `${m}m` : '').trim();
@@ -2472,19 +2550,21 @@ function renderFlightList(offers, containerId, kind, opts = {}) {
     const stops = slice.stops ?? 0;
     const badges = [];
     if (offer.flight_key === lowestPriceId) badges.push(`<span class="fc-badge lowest">⊘ Lowest price</span>`);
-    if (offer.flight_key === bestId && offer.flight_key !== lowestPriceId) badges.push(`<span class="fc-badge best">★ Best</span>`);
+    if (offer.flight_key === bestId) badges.push(`<span class="fc-badge best">★ Best</span>`);
 
     // Cabin cells
     // For round-trip inbound, only the cabin matching the outbound selection is enabled —
     // Duffel offer_ids tie to a full paired itinerary at a single cabin class.
     const lockedCabin = (kind === 'inbound') ? selectedOutbound?.cabin : null;
+    const isRoundTrip = tripType === 'round';
+    const tripLabel = isRoundTrip ? 'Round-trip' : 'One-way';
     const cabinCells = CABIN_KEYS.map(c => {
       const price = cabinPriceOf(offer, c);
       const isLocked = lockedCabin && c !== lockedCabin;
       if (price == null || isLocked) {
         return `<button class="fc-cabin" disabled>
                   <span class="fc-cabin-name">${CABIN_LABELS[c]}</span>
-                  <span class="fc-cabin-unavailable">${isLocked ? 'Not for this trip' : 'Unavailable'}</span>
+                  <span class="fc-cabin-unavailable">${isLocked ? 'Not for<br>this trip' : 'Unavailable'}</span>
                 </button>`;
       }
       const perPax = price / passengerCount;
@@ -2492,6 +2572,7 @@ function renderFlightList(offers, containerId, kind, opts = {}) {
                 <span class="fc-cabin-name">${CABIN_LABELS[c]}</span>
                 <span class="fc-cabin-from">from</span>
                 <span class="fc-cabin-price">${formatPrice(perPax)}</span>
+                <span class="fc-cabin-trip">${tripLabel}</span>
               </button>`;
     }).join('');
 
@@ -2504,22 +2585,26 @@ function renderFlightList(offers, containerId, kind, opts = {}) {
           ${isAfrican(offer) ? '<span class="fc-badge" style="background:var(--success-soft);color:var(--success);">AFRICAN</span>' : ''}
           <span class="fc-airline-duration tabular">${formatDuration(slice.duration)}</span>
         </div>
-        <div class="fc-route">
-          <div class="fc-time tabular">${formatTime(slice.departure)}</div>
-          <div class="fc-middle">${escapeHtml(midSegmentLabel(slice))}</div>
-          <div class="fc-time end tabular">${formatTime(slice.arrival)}${dayOffset(slice.departure, slice.arrival).replace('vertical-align:super;', '')}</div>
-        </div>
-        <div class="fc-line-wrap">
-          <div class="fc-line-iata">${escapeHtml(slice.origin)}</div>
-          <div class="fc-line">
-            <span class="bar"></span>
-            <span class="endpoint left"></span>
-            ${renderStopDots(stops)}
-            <span class="endpoint right"></span>
+        <div class="fc-body">
+          <div>
+            <div class="fc-route">
+              <div class="fc-time tabular">${formatTime(slice.departure)}</div>
+              <div class="fc-middle">${escapeHtml(midSegmentLabel(slice))}</div>
+              <div class="fc-time end tabular">${formatTime(slice.arrival)}${dayOffset(slice.departure, slice.arrival).replace('vertical-align:super;', '')}</div>
+            </div>
+            <div class="fc-line-wrap">
+              <div class="fc-line-iata">${escapeHtml(slice.origin)}</div>
+              <div class="fc-line">
+                <span class="bar"></span>
+                <span class="endpoint left"></span>
+                ${renderStopDots(stops)}
+                <span class="endpoint right"></span>
+              </div>
+              <div class="fc-line-iata end">${escapeHtml(slice.destination)}</div>
+            </div>
           </div>
-          <div class="fc-line-iata end">${escapeHtml(slice.destination)}</div>
+          <div class="fc-cabins">${cabinCells}</div>
         </div>
-        <div class="fc-cabins">${cabinCells}</div>
         <div class="fc-expand">
           <button class="fc-expand-btn" onclick="toggleFlightDetails('${cardId}','${escapeHtml(offer.flight_key)}','${kind}')" id="exp-${cardId}">Details ▾</button>
         </div>
