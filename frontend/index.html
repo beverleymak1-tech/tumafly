@@ -247,6 +247,81 @@ body {
 }
 .field input::placeholder { color: var(--text-3); }
 
+/* Autocomplete */
+.ap-field { position: relative; }
+.ap-wrap { position: relative; }
+.ap-dropdown {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  right: 0;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  box-shadow: var(--shadow-lg);
+  max-height: 340px;
+  overflow-y: auto;
+  z-index: 30;
+}
+.ap-section-label {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  font-weight: 600;
+  color: var(--text-3);
+  padding: 10px 14px 6px;
+  border-top: 1px solid var(--border);
+}
+.ap-section-label:first-child { border-top: none; }
+.ap-item {
+  padding: 10px 14px;
+  cursor: pointer;
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 10px;
+  align-items: center;
+  font-size: 14px;
+  border-top: 1px solid transparent;
+}
+.ap-item:hover, .ap-item.active {
+  background: var(--brand-soft);
+}
+.ap-item .ap-primary {
+  font-weight: 500;
+  color: var(--ink);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.ap-item .ap-secondary {
+  font-size: 12px;
+  color: var(--text-3);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.ap-item .ap-iata {
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--text-2);
+  background: var(--bg);
+  padding: 3px 8px;
+  border-radius: 4px;
+  font-weight: 500;
+  letter-spacing: 0.05em;
+}
+.ap-item.african .ap-iata {
+  background: var(--success-soft);
+  color: var(--success);
+}
+.ap-empty {
+  padding: 16px;
+  text-align: center;
+  font-size: 13px;
+  color: var(--text-3);
+}
+mark { background: rgba(61, 149, 245, 0.18); color: inherit; padding: 0 1px; border-radius: 2px; font-weight: 600; }
+
 .btn {
   font-family: inherit;
   font-size: 15px;
@@ -998,13 +1073,19 @@ input.has-error, select.has-error {
         <div id="search-alert"></div>
 
         <div class="search-grid">
-          <div class="field">
+          <div class="field ap-field">
             <label>From</label>
-            <input id="origin" type="text" placeholder="NBO" maxlength="3" autocomplete="off">
+            <div class="ap-wrap" id="origin-wrap">
+              <input id="origin" type="text" placeholder="City or airport" autocomplete="off" aria-autocomplete="list" aria-controls="origin-dropdown">
+              <div class="ap-dropdown hidden" id="origin-dropdown" role="listbox"></div>
+            </div>
           </div>
-          <div class="field">
+          <div class="field ap-field">
             <label>To</label>
-            <input id="destination" type="text" placeholder="JNB" maxlength="3" autocomplete="off">
+            <div class="ap-wrap" id="destination-wrap">
+              <input id="destination" type="text" placeholder="City or airport" autocomplete="off" aria-autocomplete="list" aria-controls="destination-dropdown">
+              <div class="ap-dropdown hidden" id="destination-dropdown" role="listbox"></div>
+            </div>
           </div>
           <div class="field">
             <label>Depart</label>
@@ -1262,6 +1343,14 @@ let activeStopsFilter = 'all';
 let currentCurrency = 'KES';
 let rateInfo = { date: null, isLive: true };
 
+// Autocomplete state
+let airportsData = null;
+let airportsLoadPromise = null;
+const RECENT_AIRPORTS_KEY = 'tf_recent_airports';
+const RECENT_MAX = 5;
+let originSelectedIata = null;
+let destinationSelectedIata = null;
+
 let selectedOutbound = null;
 let selectedInbound = null;
 // For one-way, "selectedOffer" = selectedOutbound.
@@ -1324,9 +1413,10 @@ function setTripType(type) {
   document.getElementById('return-field').style.display = type === 'round' ? '' : 'none';
 }
 
-function fillDemo() {
-  document.getElementById('origin').value = 'NBO';
-  document.getElementById('destination').value = 'JNB';
+async function fillDemo() {
+  await loadAirports();
+  pickAirport('origin', 'NBO');
+  pickAirport('destination', 'JNB');
   const dep = new Date(); dep.setDate(dep.getDate() + 32);
   document.getElementById('date').value = dep.toISOString().split('T')[0];
   document.getElementById('date').dispatchEvent(new Event('change'));
@@ -1397,21 +1487,294 @@ function escapeHtml(s) {
 }
 
 // ============================================================
+// AIRPORT AUTOCOMPLETE
+// ============================================================
+function loadAirports() {
+  if (airportsLoadPromise) return airportsLoadPromise;
+  airportsLoadPromise = fetch('/airports.json')
+    .then(r => r.json())
+    .then(data => {
+      airportsData = data;
+      // Precompute a lowercase search blob for each entry to speed up matching
+      airportsData.forEach(a => {
+        a._blob = `${a.iata} ${a.city} ${a.name} ${a.country}`.toLowerCase();
+      });
+      return data;
+    })
+    .catch(err => {
+      console.error('Failed to load airports.json', err);
+      airportsData = [];
+      return [];
+    });
+  return airportsLoadPromise;
+}
+
+function getRecentAirports() {
+  try {
+    const raw = localStorage.getItem(RECENT_AIRPORTS_KEY);
+    return raw ? JSON.parse(raw) : [];
+  } catch { return []; }
+}
+
+function rememberAirport(iata) {
+  if (!iata) return;
+  try {
+    let recent = getRecentAirports();
+    recent = recent.filter(c => c !== iata);
+    recent.unshift(iata);
+    recent = recent.slice(0, RECENT_MAX);
+    localStorage.setItem(RECENT_AIRPORTS_KEY, JSON.stringify(recent));
+  } catch {}
+}
+
+function findAirportByIata(iata) {
+  if (!airportsData) return null;
+  return airportsData.find(a => a.iata === iata) || null;
+}
+
+// Highlight matching parts of a string given a query.
+// Returns HTML-safe string with <mark> wrapping matches.
+function highlight(str, q) {
+  const safe = escapeHtml(str);
+  if (!q) return safe;
+  const ql = q.toLowerCase();
+  const sl = str.toLowerCase();
+  let idx = sl.indexOf(ql);
+  if (idx === -1) return safe;
+  // Find positions in the escaped string by re-tracking — simpler: do it on raw, then escape sides
+  const pre = str.slice(0, idx);
+  const match = str.slice(idx, idx + q.length);
+  const post = str.slice(idx + q.length);
+  return escapeHtml(pre) + '<mark>' + escapeHtml(match) + '</mark>' + escapeHtml(post);
+}
+
+// Score an airport against a query. Lower = better.
+function scoreAirport(a, q) {
+  const ql = q.toLowerCase();
+  // Exact IATA match wins
+  if (a.iata.toLowerCase() === ql) return 0;
+  // IATA prefix
+  if (a.iata.toLowerCase().startsWith(ql)) return 1;
+  // City prefix
+  if (a.city.toLowerCase().startsWith(ql)) return 2;
+  // Airport name prefix
+  if (a.name.toLowerCase().startsWith(ql)) return 3;
+  // City word boundary (e.g. "york" matches "New York")
+  if (a.city.toLowerCase().split(/\s+/).some(w => w.startsWith(ql))) return 4;
+  // Country prefix
+  if (a.country.toLowerCase().startsWith(ql)) return 5;
+  // Substring anywhere
+  if (a._blob.includes(ql)) return 6;
+  return 99;
+}
+
+function searchAirports(query, limit = 8) {
+  if (!airportsData) return { recent: [], african: [], rest: [] };
+  const q = (query || '').trim();
+  const recentIatas = getRecentAirports();
+
+  if (!q) {
+    // No query: show recent + a few popular African hubs as starter suggestions
+    const recent = recentIatas.map(findAirportByIata).filter(Boolean);
+    const popularAfricanHubs = ['NBO','JNB','ADD','LOS','CAI','CPT','DAR','EBB','KGL','ACC'];
+    const african = popularAfricanHubs
+      .filter(c => !recentIatas.includes(c))
+      .map(findAirportByIata)
+      .filter(Boolean);
+    return { recent, african, rest: [] };
+  }
+
+  // Score all airports against query
+  const scored = [];
+  for (const a of airportsData) {
+    const s = scoreAirport(a, q);
+    if (s < 99) {
+      // Bias African airports slightly (subtract 0.5 from score so they tie-break upward)
+      scored.push({ a, s: s - (a.african ? 0.5 : 0) });
+    }
+  }
+  scored.sort((x, y) => x.s - y.s);
+
+  const top = scored.slice(0, limit).map(x => x.a);
+
+  // Split into recent / african / rest for the dropdown sections
+  const recent = top.filter(a => recentIatas.includes(a.iata));
+  const others = top.filter(a => !recentIatas.includes(a.iata));
+  const african = others.filter(a => a.african);
+  const rest = others.filter(a => !a.african);
+  return { recent, african, rest };
+}
+
+function renderAirportDropdown(which, query) {
+  const dropdown = document.getElementById(which + '-dropdown');
+  const { recent, african, rest } = searchAirports(query);
+
+  let html = '';
+  const allItems = []; // flat list for keyboard nav
+
+  function renderSection(label, items) {
+    if (!items.length) return;
+    html += `<div class="ap-section-label">${label}</div>`;
+    items.forEach(a => {
+      const idx = allItems.length;
+      allItems.push(a);
+      html += `
+        <div class="ap-item ${a.african ? 'african' : ''}" data-iata="${a.iata}" data-idx="${idx}" role="option">
+          <div>
+            <div class="ap-primary">${highlight(a.city, query)}, ${highlight(a.country, query)}</div>
+            <div class="ap-secondary">${highlight(a.name, query)}</div>
+          </div>
+          <span class="ap-iata">${highlight(a.iata, query)}</span>
+        </div>
+      `;
+    });
+  }
+
+  if (!recent.length && !african.length && !rest.length) {
+    if (query) {
+      html = `<div class="ap-empty">No airports match "${escapeHtml(query)}". Try a city name or 3-letter IATA code.</div>`;
+    } else {
+      html = `<div class="ap-empty">Type a city, country, or airport code.</div>`;
+    }
+  } else {
+    renderSection('Recent', recent);
+    renderSection('African airports', african);
+    renderSection(query ? 'More airports' : 'Popular African hubs', rest);
+  }
+
+  dropdown.innerHTML = html;
+  dropdown.dataset.activeIdx = '-1';
+  dropdown.dataset.itemCount = String(allItems.length);
+  dropdown.classList.remove('hidden');
+
+  // Attach click handlers
+  dropdown.querySelectorAll('.ap-item').forEach(el => {
+    el.addEventListener('mousedown', (e) => {
+      e.preventDefault(); // don't blur the input
+      pickAirport(which, el.dataset.iata);
+    });
+  });
+}
+
+function pickAirport(which, iata) {
+  const a = findAirportByIata(iata);
+  if (!a) return;
+  const input = document.getElementById(which);
+  input.value = `${a.city} (${a.iata})`;
+  if (which === 'origin') originSelectedIata = a.iata;
+  else destinationSelectedIata = a.iata;
+  document.getElementById(which + '-dropdown').classList.add('hidden');
+}
+
+function moveDropdownActive(which, dir) {
+  const dropdown = document.getElementById(which + '-dropdown');
+  if (dropdown.classList.contains('hidden')) return;
+  const items = dropdown.querySelectorAll('.ap-item');
+  if (!items.length) return;
+  let idx = parseInt(dropdown.dataset.activeIdx || '-1', 10);
+  idx += dir;
+  if (idx < 0) idx = items.length - 1;
+  if (idx >= items.length) idx = 0;
+  items.forEach((el, i) => el.classList.toggle('active', i === idx));
+  dropdown.dataset.activeIdx = String(idx);
+  // Scroll into view
+  items[idx].scrollIntoView({ block: 'nearest' });
+}
+
+function commitDropdownActive(which) {
+  const dropdown = document.getElementById(which + '-dropdown');
+  const idx = parseInt(dropdown.dataset.activeIdx || '-1', 10);
+  if (idx < 0) {
+    // No active selection — if the user typed a clean 3-letter IATA, accept it
+    const val = document.getElementById(which).value.trim().toUpperCase();
+    if (val.length === 3 && /^[A-Z]{3}$/.test(val)) {
+      const a = findAirportByIata(val);
+      if (a) {
+        pickAirport(which, val);
+        return true;
+      }
+    }
+    // Or if only one airport matches, pick it
+    const items = dropdown.querySelectorAll('.ap-item');
+    if (items.length === 1) {
+      pickAirport(which, items[0].dataset.iata);
+      return true;
+    }
+    return false;
+  }
+  const items = dropdown.querySelectorAll('.ap-item');
+  if (items[idx]) {
+    pickAirport(which, items[idx].dataset.iata);
+    return true;
+  }
+  return false;
+}
+
+function attachAutocomplete(which) {
+  const input = document.getElementById(which);
+  const dropdown = document.getElementById(which + '-dropdown');
+
+  input.addEventListener('focus', async () => {
+    await loadAirports();
+    renderAirportDropdown(which, input.value);
+  });
+  input.addEventListener('input', async () => {
+    // Typing wipes any prior selection — only reset if the user actually changed it
+    if (which === 'origin') originSelectedIata = null;
+    else destinationSelectedIata = null;
+    await loadAirports();
+    renderAirportDropdown(which, input.value);
+  });
+  input.addEventListener('keydown', (e) => {
+    if (e.key === 'ArrowDown') { e.preventDefault(); moveDropdownActive(which, 1); }
+    else if (e.key === 'ArrowUp') { e.preventDefault(); moveDropdownActive(which, -1); }
+    else if (e.key === 'Enter') {
+      if (!dropdown.classList.contains('hidden')) {
+        const ok = commitDropdownActive(which);
+        if (ok) e.preventDefault();
+      }
+    }
+    else if (e.key === 'Escape') {
+      dropdown.classList.add('hidden');
+    }
+  });
+  input.addEventListener('blur', () => {
+    // Slight delay so click handlers fire first
+    setTimeout(() => dropdown.classList.add('hidden'), 120);
+  });
+}
+
+// Wire up on page load
+attachAutocomplete('origin');
+attachAutocomplete('destination');
+// Eagerly start the fetch so it's ready by the time the user focuses
+loadAirports();
+
+// ============================================================
 // SEARCH
 // ============================================================
 async function searchFlights() {
-  const origin = document.getElementById('origin').value.trim().toUpperCase();
-  const destination = document.getElementById('destination').value.trim().toUpperCase();
+  // Resolve origin/destination from autocomplete state, with smart fallbacks
+  let origin = originSelectedIata;
+  let destination = destinationSelectedIata;
+
+  // Fallback 1: bare 3-letter IATA typed and never confirmed via the dropdown
+  if (!origin) {
+    const raw = document.getElementById('origin').value.trim().toUpperCase();
+    if (/^[A-Z]{3}$/.test(raw) && findAirportByIata(raw)) origin = raw;
+  }
+  if (!destination) {
+    const raw = document.getElementById('destination').value.trim().toUpperCase();
+    if (/^[A-Z]{3}$/.test(raw) && findAirportByIata(raw)) destination = raw;
+  }
+
   const date = document.getElementById('date').value;
   const returnDate = document.getElementById('return-date').value;
   passengerCount = parseInt(document.getElementById('passengers').value, 10);
   clearAlert('search-alert');
 
   if (!origin || !destination || !date) {
-    return showAlert('search-alert', 'Fill in all search fields.');
-  }
-  if (origin.length !== 3 || destination.length !== 3) {
-    return showAlert('search-alert', 'From and to must be 3-letter airport codes (e.g. NBO, JNB).');
+    return showAlert('search-alert', 'Pick an origin, destination, and departure date.');
   }
   if (origin === destination) {
     return showAlert('search-alert', 'Origin and destination must be different.');
@@ -1445,6 +1808,11 @@ async function searchFlights() {
     if (allOffers[0]) {
       rateInfo = { date: allOffers[0].rate_date, isLive: allOffers[0].rate_is_live };
     }
+
+    // Remember as recent — only persist once we have a successful search
+    rememberAirport(origin);
+    rememberAirport(destination);
+
     activeStopsFilter = 'all';
     document.querySelector('input[name="stops"][value="all"]').checked = true;
     document.getElementById('filter-african').checked = false;
