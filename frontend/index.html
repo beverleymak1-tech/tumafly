@@ -139,7 +139,8 @@
       background: var(--sand);
       padding: 56px 24px 88px;
       position: relative;
-      overflow: hidden;
+      /* No overflow:hidden — would clip the travelers popup. The radial-gradient ::before
+         uses inset:0 so it's naturally bounded to hero anyway. */
     }
     .hero::before {
       /* subtle horizon line — the one decorative element */
@@ -313,7 +314,7 @@
       box-shadow: 0 0 0 3px rgba(61, 149, 245, 0.15);
     }
     .from-to-pill .ft-field {
-      padding: 10px 16px;
+      padding: 10px 16px 10px 20px;
       min-width: 0;
       position: relative;
     }
@@ -430,15 +431,23 @@
       padding: 10px 14px;
       cursor: pointer;
       display: grid;
-      grid-template-columns: 1fr auto;
+      grid-template-columns: auto 1fr;
       gap: 10px;
       align-items: center;
       font-size: 14px;
       border-top: 1px solid transparent;
     }
-    .ap-item:hover, .ap-item.active {
-      background: var(--brand-soft);
+    .ap-item-icon {
+      width: 24px;
+      color: var(--text-3);
+      display: grid;
+      place-items: center;
+      flex-shrink: 0;
     }
+    .ap-item.african .ap-item-icon { color: var(--success); }
+    .ap-item.ap-group .ap-item-icon { color: var(--brand-dark); }
+    .ap-item.ap-group { background: rgba(61, 149, 245, 0.04); }
+    .ap-item:hover, .ap-item.active { background: var(--brand-soft); }
     .ap-item .ap-primary {
       font-weight: 500;
       color: var(--ink);
@@ -1793,6 +1802,54 @@
       text-align: center;
     }
 
+    /* Flexibility block in the flight details modal — shows change/refund conditions */
+    .modal-flex-block {
+      border-top: 1px solid var(--border);
+      padding-top: 20px;
+      margin-top: 24px;
+    }
+    .modal-flex-rows {
+      display: grid;
+      gap: 10px;
+      margin-top: 12px;
+    }
+    .modal-flex-row {
+      display: grid;
+      grid-template-columns: 28px 1fr;
+      gap: 12px;
+      align-items: center;
+      padding: 10px 12px;
+      background: var(--bg);
+      border-radius: var(--radius-sm);
+    }
+    .modal-flex-row.flex-yes { background: var(--success-soft); }
+    .modal-flex-row.flex-no { background: rgba(220, 38, 38, 0.06); }
+    .modal-flex-icon {
+      width: 22px;
+      height: 22px;
+      display: grid;
+      place-items: center;
+      border-radius: 50%;
+      font-size: 12px;
+      font-weight: 700;
+      color: white;
+    }
+    .flex-yes .modal-flex-icon { background: var(--success); }
+    .flex-no .modal-flex-icon { background: #dc2626; }
+    .modal-flex-label {
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      color: var(--text-3);
+      font-weight: 600;
+    }
+    .modal-flex-text {
+      font-size: 14px;
+      color: var(--ink);
+      font-weight: 500;
+      margin-top: 2px;
+    }
+
     /* ─────────────────────────────────────────────────────────────
        BOOKING / PASSENGER FORM
        ───────────────────────────────────────────────────────────── */
@@ -1825,6 +1882,56 @@
       margin-top: -8px;
       margin-bottom: 16px;
     }
+    /* Card heading row with leading icon (Baggage, Seats etc.) */
+    .card-head-icon {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin-bottom: 6px;
+      color: var(--text-2);
+    }
+    .card-head-icon h3 { margin-bottom: 0; }
+
+    /* Per-leg seat row */
+    .seat-row {
+      display: flex;
+      align-items: center;
+      gap: 14px;
+      padding: 14px 16px;
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      margin-top: 10px;
+    }
+    .seat-row-icon {
+      width: 36px;
+      height: 36px;
+      border-radius: 50%;
+      background: var(--bg);
+      color: var(--text-2);
+      display: grid;
+      place-items: center;
+      flex-shrink: 0;
+    }
+    .seat-row-info { flex: 1; min-width: 0; }
+    .seat-row-route {
+      font-size: 15px;
+      font-weight: 600;
+      color: var(--ink);
+      line-height: 1.2;
+    }
+    .seat-row-meta {
+      font-size: 13px;
+      color: var(--text-3);
+      margin-top: 2px;
+    }
+    .seat-row-status {
+      font-size: 13px;
+      color: var(--text-3);
+      font-weight: 500;
+      white-space: nowrap;
+    }
+    .seat-row-status.unavailable { color: var(--text-3); font-style: italic; }
+
     .form-grid {
       display: grid;
       grid-template-columns: 1fr 1fr;
@@ -2033,6 +2140,51 @@
       flex-shrink: 0;
     }
     .saved-traveler-edit:hover { border-color: var(--brand); background: var(--brand-soft); }
+
+    /* International-trip banner at the top of the Travelers card */
+    .intl-banner {
+      display: flex;
+      gap: 10px;
+      align-items: flex-start;
+      padding: 12px 16px;
+      background: var(--brand-soft);
+      border: 1px solid rgba(61, 149, 245, 0.3);
+      color: var(--ink);
+      border-radius: var(--radius-sm);
+      margin-bottom: 16px;
+      font-size: 13px;
+      line-height: 1.45;
+    }
+    .intl-banner svg { color: var(--brand-dark); flex-shrink: 0; margin-top: 2px; }
+    .intl-banner-warn {
+      background: rgba(220, 38, 38, 0.06);
+      border-color: rgba(220, 38, 38, 0.3);
+    }
+    .intl-banner-warn svg { color: #dc2626; }
+
+    /* Required passport field error states — labels and inputs go red, with helper text below */
+    .pax-label-err { color: #dc2626 !important; }
+    .pax-input-err {
+      border-color: #dc2626 !important;
+      background: rgba(220, 38, 38, 0.03);
+    }
+    .pax-input-err:focus { box-shadow: 0 0 0 3px rgba(220, 38, 38, 0.15) !important; }
+    .pax-error {
+      color: #dc2626;
+      font-size: 12px;
+      font-weight: 500;
+      margin-top: 6px;
+    }
+
+    /* "required" tag on collapsible section headers — same slot the optional tag uses */
+    .pax-collapse-head-sub-required {
+      font-size: 12px;
+      color: #dc2626;
+      font-weight: 600;
+      margin-left: 6px;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+    }
 
     /* Order summary side panel */
     .summary {
@@ -2546,6 +2698,7 @@
           <p class="sub">Names must match each traveler's passport or ID exactly.</p>
           <div id="passenger-forms"></div>
         </div>
+
         <div class="card">
           <h3>Contact details</h3>
           <p class="sub">We send confirmation to this email. We may text the phone number if there's an issue with your booking.</p>
@@ -2559,6 +2712,30 @@
               <input id="contact-phone" type="tel" class="pax-input" placeholder="+254 712 345 678">
             </div>
           </div>
+        </div>
+
+        <div class="card">
+          <div class="card-head-icon">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+              <rect x="5" y="8" width="14" height="12" rx="1.5" stroke="currentColor" stroke-width="1.7"/>
+              <path d="M9 8V5.5a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1V8" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/>
+              <path d="M12 11v6" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/>
+            </svg>
+            <h3>Baggage</h3>
+          </div>
+          <p class="sub" style="margin-top:6px;">If you're travelling with bags, you can add them on the airline's website after completing your purchase. Additional fees may apply depending on the airline and fare.</p>
+        </div>
+
+        <div class="card">
+          <div class="card-head-icon">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+              <path d="M6 4h3a2 2 0 0 1 2 2v8H8a2 2 0 0 1-2-2V4z" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/>
+              <path d="M6 20h14M6 16h12" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/>
+            </svg>
+            <h3>Seats</h3>
+          </div>
+          <p class="sub" style="margin-top:6px;">Available seat options for this flight. Selection may not be available on every airline; in that case you can choose seats at check-in.</p>
+          <div id="seats-list"></div>
         </div>
         <div id="booking-alert"></div>
         <div style="display:flex;justify-content:space-between;gap:12px;">
@@ -2668,8 +2845,9 @@
   <div class="footer-inner">
     <div>© TumaFly · Nairobi</div>
     <div>
-      <a href="#">Terms</a>
-      <a href="#">Privacy</a>
+      <a href="/terms.html">Terms</a>
+      <a href="/privacy.html">Privacy</a>
+      <a href="mailto:support@tumafly.com">Support</a>
       <a href="https://www.iatatravelcentre.com" target="_blank" rel="noopener">Travel requirements</a>
     </div>
   </div>
@@ -2976,6 +3154,64 @@
   // ============================================================
   // AIRPORT AUTOCOMPLETE
   // ============================================================
+  // City IATA codes for the major multi-airport cities Duffel recognises.
+  // Key format: "City|Country" (lowercased) → code. When a user picks "All airports"
+  // for one of these cities, we send the city code; Duffel returns offers across
+  // every airport in the city group.
+  const CITY_IATA_CODES = {
+    'new york|united states': 'NYC',
+    'london|united kingdom': 'LON',
+    'paris|france': 'PAR',
+    'tokyo|japan': 'TYO',
+    'washington|united states': 'WAS',
+    'chicago|united states': 'CHI',
+    'milan|italy': 'MIL',
+    'moscow|russia': 'MOW',
+    'buenos aires|argentina': 'BUE',
+    'sao paulo|brazil': 'SAO',
+    'rio de janeiro|brazil': 'RIO',
+    'stockholm|sweden': 'STO',
+    'osaka|japan': 'OSA',
+    'seoul|south korea': 'SEL',
+    'bangkok|thailand': 'BKK',
+    'shanghai|china': 'SHA',
+    'beijing|china': 'BJS',
+    'jakarta|indonesia': 'JKT',
+    'rome|italy': 'ROM',
+    'houston|united states': 'HOU',
+  };
+
+  // Synthetic "city group" entries built at airports.json load time. Each entry
+  // represents an "All airports" pick for a city that has 2+ commercial airports
+  // in our dataset. iata = city IATA code (Duffel-aware) when known, otherwise
+  // the largest airport's IATA as a graceful fallback.
+  let cityGroups = []; // array of group objects (same shape as airports + isCityGroup flag)
+
+  function buildCityGroups() {
+    const byCity = new Map(); // "city|country" → airports[]
+    for (const a of airportsData) {
+      const key = `${a.city}|${a.country}`.toLowerCase();
+      if (!byCity.has(key)) byCity.set(key, []);
+      byCity.get(key).push(a);
+    }
+    cityGroups = [];
+    for (const [key, airports] of byCity.entries()) {
+      if (airports.length < 2) continue;
+      const cityIata = CITY_IATA_CODES[key] || airports[0].iata;
+      const sample = airports[0];
+      cityGroups.push({
+        iata: cityIata,
+        city: sample.city,
+        country: sample.country,
+        name: 'All airports',
+        isCityGroup: true,
+        african: !!sample.african,
+        airportCount: airports.length,
+        _blob: `${sample.city} ${sample.country} all airports`.toLowerCase(),
+      });
+    }
+  }
+
   function loadAirports() {
     if (airportsLoadPromise) return airportsLoadPromise;
     airportsLoadPromise = fetch('/airports.json')
@@ -2986,6 +3222,7 @@
         airportsData.forEach(a => {
           a._blob = `${a.iata} ${a.city} ${a.name} ${a.country}`.toLowerCase();
         });
+        buildCityGroups();
         return data;
       })
       .catch(err => {
@@ -3056,7 +3293,7 @@
   }
 
   function searchAirports(query, limit = 8) {
-    if (!airportsData) return { recent: [], african: [], rest: [] };
+    if (!airportsData) return { recent: [], african: [], rest: [], groups: [] };
     const q = (query || '').trim();
     const recentIatas = getRecentAirports();
 
@@ -3068,7 +3305,7 @@
         .filter(c => !recentIatas.includes(c))
         .map(findAirportByIata)
         .filter(Boolean);
-      return { recent, african, rest: [] };
+      return { recent, african, rest: [], groups: [] };
     }
 
     // Score all airports against query
@@ -3084,20 +3321,54 @@
 
     const top = scored.slice(0, limit).map(x => x.a);
 
-    // Split into recent / african / rest for the dropdown sections
+    // Find any city groups whose city name matches the query AND whose airports appear
+    // in the top results. Surface up to 2 groups (typical: at most 1 per query).
+    const ql = q.toLowerCase();
+    const matchedCities = new Set(top.map(a => `${a.city}|${a.country}`.toLowerCase()));
+    const groups = cityGroups
+      .filter(g => {
+        const key = `${g.city}|${g.country}`.toLowerCase();
+        if (!matchedCities.has(key)) return false;
+        // Require the query to actually match the city name (avoid false group matches)
+        return g.city.toLowerCase().startsWith(ql) || g.city.toLowerCase().includes(ql);
+      })
+      .slice(0, 2);
+
+    // Split airports into recent / african / rest for the dropdown sections
     const recent = top.filter(a => recentIatas.includes(a.iata));
     const others = top.filter(a => !recentIatas.includes(a.iata));
     const african = others.filter(a => a.african);
     const rest = others.filter(a => !a.african);
-    return { recent, african, rest };
+    return { recent, african, rest, groups };
   }
 
   function renderAirportDropdown(which, query) {
     const dropdown = document.getElementById(which + '-dropdown');
-    const { recent, african, rest } = searchAirports(query);
+    const { recent, african, rest, groups } = searchAirports(query);
 
     let html = '';
     const allItems = []; // flat list for keyboard nav
+
+    // City-group entries — render at the top, before any airport sections.
+    // Visually distinct: location pin icon, "All airports" label, no IATA badge on the right.
+    function renderGroup(g) {
+      const idx = allItems.length;
+      allItems.push(g);
+      html += `
+        <div class="ap-item ap-group ${g.african ? 'african' : ''}" data-iata="${escapeHtml(g.iata)}" data-group="1" data-idx="${idx}" role="option">
+          <div class="ap-item-icon">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+              <path d="M12 22s-7-7.5-7-13a7 7 0 1 1 14 0c0 5.5-7 13-7 13z" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/>
+              <circle cx="12" cy="9" r="2.5" stroke="currentColor" stroke-width="1.7"/>
+            </svg>
+          </div>
+          <div>
+            <div class="ap-primary"><strong>${highlight(g.city, query)}</strong> · All airports</div>
+            <div class="ap-secondary">${highlight(g.country, query)}</div>
+          </div>
+        </div>
+      `;
+    }
 
     function renderSection(label, items) {
       if (!items.length) return;
@@ -3107,23 +3378,28 @@
         allItems.push(a);
         html += `
           <div class="ap-item ${a.african ? 'african' : ''}" data-iata="${a.iata}" data-idx="${idx}" role="option">
-            <div>
-              <div class="ap-primary">${highlight(a.city, query)}, ${highlight(a.country, query)}</div>
-              <div class="ap-secondary">${highlight(a.name, query)}</div>
+            <div class="ap-item-icon">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                <path d="M2 16l20-9-7 14-3-7-10-2z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/>
+              </svg>
             </div>
-            <span class="ap-iata">${highlight(a.iata, query)}</span>
+            <div>
+              <div class="ap-primary">${highlight(a.iata, query)} <span style="font-weight:400;">${highlight(a.name, query)}</span></div>
+              <div class="ap-secondary">${highlight(a.city, query)}, ${highlight(a.country, query)}</div>
+            </div>
           </div>
         `;
       });
     }
 
-    if (!recent.length && !african.length && !rest.length) {
+    if (!recent.length && !african.length && !rest.length && !groups.length) {
       if (query) {
         html = `<div class="ap-empty">No airports match "${escapeHtml(query)}". Try a city name or 3-letter IATA code.</div>`;
       } else {
         html = `<div class="ap-empty">Type a city, country, or airport code.</div>`;
       }
     } else {
+      groups.forEach(renderGroup);
       renderSection('Recent', recent);
       renderSection('African airports', african);
       renderSection(query ? 'More airports' : 'Popular African hubs', rest);
@@ -3138,23 +3414,43 @@
     dropdown.querySelectorAll('.ap-item').forEach(el => {
       el.addEventListener('mousedown', (e) => {
         e.preventDefault(); // don't blur the input
-        pickAirport(which, el.dataset.iata);
+        pickAirport(which, el.dataset.iata, el.dataset.group === '1');
       });
     });
   }
 
-  function pickAirport(which, iata) {
-    const a = findAirportByIata(iata);
-    if (!a) return;
+  function pickAirport(which, iata, isGroup) {
     const input = document.getElementById(which);
-    input.value = `${a.city} (${a.iata})`;
-    // Track selection per-input via a map so any field id works
-    apSelections[which] = a.iata;
-    // Keep legacy alias vars in sync for the existing code paths
-    if (which === 'origin') originSelectedIata = a.iata;
-    else if (which === 'destination') destinationSelectedIata = a.iata;
-    else if (which === 'r-origin') rOriginSelectedIata = a.iata;
-    else if (which === 'r-destination') rDestinationSelectedIata = a.iata;
+    let displayLabel = '';
+    let storedIata = iata;
+
+    if (isGroup) {
+      // City group: find a sample airport at that city (any one in the group) for the
+      // city/country labels, but store the city IATA code Duffel expects.
+      const group = cityGroups.find(g => g.iata === iata);
+      if (group) {
+        displayLabel = `${group.city} (All airports)`;
+        storedIata = group.iata;
+      } else {
+        // Fallback: treat as a normal airport pick
+        const a = findAirportByIata(iata);
+        if (!a) return;
+        displayLabel = `${a.city} (${a.iata})`;
+        storedIata = a.iata;
+      }
+    } else {
+      const a = findAirportByIata(iata);
+      if (!a) return;
+      displayLabel = `${a.city} (${a.iata})`;
+      storedIata = a.iata;
+    }
+
+    input.value = displayLabel;
+    apSelections[which] = storedIata;
+    if (which === 'origin') originSelectedIata = storedIata;
+    else if (which === 'destination') destinationSelectedIata = storedIata;
+    else if (which === 'r-origin') rOriginSelectedIata = storedIata;
+    else if (which === 'r-destination') rDestinationSelectedIata = storedIata;
     document.getElementById(which + '-dropdown').classList.add('hidden');
 
     // On the results page, picking triggers a re-search (after both fields are set)
@@ -3194,14 +3490,14 @@
       // Or if only one airport matches, pick it
       const items = dropdown.querySelectorAll('.ap-item');
       if (items.length === 1) {
-        pickAirport(which, items[0].dataset.iata);
+        pickAirport(which, items[0].dataset.iata, items[0].dataset.group === '1');
         return true;
       }
       return false;
     }
     const items = dropdown.querySelectorAll('.ap-item');
     if (items[idx]) {
-      pickAirport(which, items[idx].dataset.iata);
+      pickAirport(which, items[idx].dataset.iata, items[idx].dataset.group === '1');
       return true;
     }
     return false;
@@ -3975,6 +4271,20 @@
     if (!container) return;
     const { lowestPriceId, bestId } = opts;
 
+    // For inbound (round-trip), compute the baseline = cheapest available round-trip
+    // pair in the locked cabin. Each card then shows the price DIFFERENCE from that
+    // baseline ("Cheapest" or "+KES X"), Priceline-style — much clearer than repeating
+    // the same absolute round-trip total on every card.
+    let inboundBaselineTotal = null;  // in current display currency, full booking (not per-pax)
+    if (kind === 'inbound' && tripType === 'round' && selectedOutbound) {
+      const lockedCabin = selectedOutbound.cabin;
+      const priceField = currentCurrency === 'USD' ? 'price_usd' : 'price_kes';
+      const candidates = offers
+        .map(o => o.cabins?.[lockedCabin]?.[priceField])
+        .filter(p => p != null);
+      if (candidates.length) inboundBaselineTotal = Math.min(...candidates);
+    }
+
     container.innerHTML = offers.slice(0, 60).map(offer => {
       const slice = kind === 'inbound' ? (offer.slices[1] || offer.slices[0]) : offer.slices[0];
       if (!slice) return '';
@@ -4002,7 +4312,6 @@
       // Duffel offer_ids tie to a full paired itinerary at a single cabin class.
       const lockedCabin = (kind === 'inbound') ? selectedOutbound?.cabin : null;
       const isRoundTrip = tripType === 'round';
-      const tripLabel = isRoundTrip ? 'Round-trip' : 'One-way';
       const cabinCells = CABIN_KEYS.map(c => {
         const price = cabinPriceOf(offer, c);
         const isLocked = lockedCabin && c !== lockedCabin;
@@ -4013,6 +4322,25 @@
                   </button>`;
         }
         const perPax = price / passengerCount;
+
+        // Inbound + round-trip: render diff-from-baseline instead of absolute.
+        // Outbound + round-trip: render full round-trip total (per pax).
+        // One-way: render one-way total (per pax).
+        if (kind === 'inbound' && inboundBaselineTotal != null && c === lockedCabin) {
+          const diffPerPax = (price - inboundBaselineTotal) / passengerCount;
+          const isCheapest = Math.abs(diffPerPax) < 1;
+          return `<button class="fc-cabin" onclick="selectFlightCabin('${escapeHtml(offer.flight_key)}','${kind}','${c}')">
+                    <span class="fc-cabin-name">${CABIN_LABELS[c]}</span>
+                    ${isCheapest
+                      ? `<span class="fc-cabin-price" style="color:var(--success);">Cheapest</span>`
+                      : `<span class="fc-cabin-from">from</span>
+                         <span class="fc-cabin-price">+${formatPrice(diffPerPax)}</span>`
+                    }
+                    <span class="fc-cabin-trip">vs cheapest pair</span>
+                  </button>`;
+        }
+
+        const tripLabel = isRoundTrip ? 'Round-trip total' : 'One-way';
         return `<button class="fc-cabin" onclick="selectFlightCabin('${escapeHtml(offer.flight_key)}','${kind}','${c}')">
                   <span class="fc-cabin-name">${CABIN_LABELS[c]}</span>
                   <span class="fc-cabin-from">from</span>
@@ -4108,6 +4436,29 @@
   // On first booking render we initialise these to one-per-passenger.
   let travelerStates = [];
 
+  // True when the selected trip crosses borders (origin_country !== destination_country
+  // on any slice). When true, passport details are required to save a traveler.
+  let tripRequiresPassport = false;
+
+  function computeTripInternational() {
+    const slices = [];
+    if (selectedOutbound?.offer?.slices) slices.push(...selectedOutbound.offer.slices);
+    if (selectedInbound?.offer?.slices && selectedInbound !== selectedOutbound) {
+      slices.push(...selectedInbound.offer.slices);
+    }
+    for (const s of slices) {
+      if (s.origin_country && s.destination_country && s.origin_country !== s.destination_country) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  // Passport completeness check for a single traveler entry
+  function travelerHasPassport(d) {
+    return !!(d.passport?.country && d.passport?.number && d.passport?.expires);
+  }
+
   function initTravelerStates() {
     travelerStates = [];
     for (let i = 0; i < passengerCount; i++) {
@@ -4133,12 +4484,67 @@
   }
 
   function proceedToBooking() {
+    // Compute international status before deciding traveler state — we need it for
+    // the force-expand logic and for re-validating saved travelers.
+    tripRequiresPassport = computeTripInternational();
+
     // Only reset states if count changed or no states yet — preserve in-progress data
     // when user navigates back to results then re-enters booking with the same selections.
     if (travelerStates.length !== passengerCount) initTravelerStates();
+
+    // Re-validate saved travelers against the (possibly changed) trip requirements.
+    // If the trip is now international and a saved traveler lacks passport info,
+    // un-save them and force-expand their passport section so the missing fields
+    // are obvious on the next render.
+    if (tripRequiresPassport) {
+      travelerStates.forEach(s => {
+        if (s.saved && !travelerHasPassport(s.data)) {
+          s.saved = false;
+          s.openSections.add('passport');
+        } else if (!s.saved) {
+          // Always open passport for unsaved travelers on international trips
+          s.openSections.add('passport');
+        }
+      });
+    }
+
     renderPassengerForms();
+    renderSeatsList();
     renderBookingSummary();
     showView('booking');
+  }
+
+  // Renders a row per slice (Outbound + Return if round-trip) inside the Seats card.
+  // For v1 every slice shows "Select at check-in" since we haven't wired Duffel's
+  // seat-maps endpoint yet. Coverage is patchy for African carriers anyway — when we
+  // later add seat-map fetching, replace the status text with a real picker per leg.
+  function renderSeatsList() {
+    const slot = document.getElementById('seats-list');
+    if (!slot) return;
+    const legs = [];
+    if (selectedOutbound) {
+      const s = selectedOutbound.offer.slices[0];
+      legs.push({ origin: s.origin, destination: s.destination, airline: selectedOutbound.offer.airline });
+    }
+    if (selectedInbound) {
+      const ib = selectedInbound.offer;
+      const s = ib.slices[1] || ib.slices[0];
+      legs.push({ origin: s.origin, destination: s.destination, airline: ib.airline });
+    }
+    slot.innerHTML = legs.map(leg => `
+      <div class="seat-row">
+        <div class="seat-row-icon">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+            <path d="M3 12l9-7 9 7M5 11v9h14v-9" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+        </div>
+        <div class="seat-row-info">
+          <div class="seat-row-route">${escapeHtml(leg.origin)} <span style="color:var(--text-3);font-weight:400;">→</span> ${escapeHtml(leg.destination)}</div>
+          <div class="seat-row-meta">${escapeHtml(leg.airline)}</div>
+        </div>
+        <div class="seat-row-status unavailable">Select at check-in</div>
+      </div>
+    `).join('');
   }
 
   // Capture current form values into the state without saving (used before re-rendering
@@ -4200,15 +4606,26 @@
     if (!d.family_name) errors.push('Last name');
     if (!d.born_on) errors.push('Date of birth');
     if (!d.gender) errors.push('Gender');
+
+    // When the trip is international, passport details become required for every traveler.
+    // We use the showPassportErrors flag to surface per-field red errors only after a
+    // failed save attempt — first render stays clean even when fields are empty.
+    if (tripRequiresPassport && !travelerHasPassport(d)) {
+      s.showPassportErrors = true;
+      s.openSections.add('passport');
+      errors.push('Passport details');
+    }
+
     if (errors.length) {
       const alertBox = document.getElementById('booking-alert');
       if (alertBox) showAlert(alertBox, `Please fill in: ${errors.join(', ')} for Traveler ${i + 1}.`);
+      renderPassengerForms();
       return;
     }
     s.saved = true;
+    s.showPassportErrors = false;
     s.openSections.clear();
     renderPassengerForms();
-    // Clear any prior alert
     const alertBox = document.getElementById('booking-alert');
     if (alertBox) alertBox.innerHTML = '';
   }
@@ -4223,37 +4640,66 @@
     const container = document.getElementById('passenger-forms');
     if (!container) return;
 
-    container.innerHTML = travelerStates.map((s, i) => {
+    // Banner shown at the top of the Travelers card when the trip is international —
+    // tells the user upfront that passport details are required for everyone.
+    let banner = '';
+    if (tripRequiresPassport) {
+      const anyUnsavedNeedsPassport = travelerStates.some(s => !s.saved);
+      banner = `
+        <div class="intl-banner ${anyUnsavedNeedsPassport ? 'intl-banner-warn' : ''}">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+            <path d="M12 2L4 5v7c0 4.5 3 8.5 8 10 5-1.5 8-5.5 8-10V5l-8-3z" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/>
+            <path d="M9 12l2 2 4-4" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+          <div>
+            <strong>Passport details required</strong> — this is an international trip, so every traveler must save passport details to continue.
+          </div>
+        </div>
+      `;
+    }
+
+    container.innerHTML = banner + travelerStates.map((s, i) => {
       if (s.saved) return renderSavedTraveler(i);
       return renderTravelerForm(i);
     }).join('');
-  }
-
-  function renderSavedTraveler(i) {
-    const d = travelerStates[i].data;
-    const fullName = [d.title.replace(/^\w/, c => c.toUpperCase()), d.given_name, d.middle_name, d.family_name]
-      .filter(Boolean).join(' ');
-    const role = i === 0 ? 'Adult · Primary' : 'Adult';
-    return `
-      <div class="saved-traveler">
-        <div class="saved-traveler-check">✓</div>
-        <div class="saved-traveler-info">
-          <div class="saved-traveler-name">${escapeHtml(fullName)}</div>
-          <div class="saved-traveler-role">${escapeHtml(role)}</div>
-        </div>
-        <button class="saved-traveler-edit" onclick="editTraveler(${i})" aria-label="Edit traveler">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none">
-            <path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04a1 1 0 0 0 0-1.41l-2.34-2.34a1 1 0 0 0-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z" fill="currentColor"/>
-          </svg>
-        </button>
-      </div>
-    `;
   }
 
   function renderTravelerForm(i) {
     const d = travelerStates[i].data;
     const sections = travelerStates[i].openSections;
     const REQ = '<span class="pax-required">*</span>';
+
+    // When the trip is international, surface passport fields as required: open by
+    // default, asterisks on labels, red borders + error text on empty fields.
+    const passportRequired = tripRequiresPassport;
+    const showPassportErrors = passportRequired && (travelerStates[i].showPassportErrors || false);
+    const ppCountryErr = showPassportErrors && !d.passport.country;
+    const ppNumberErr = showPassportErrors && !d.passport.number;
+    const ppExpiresErr = showPassportErrors && !d.passport.expires;
+
+    const passportBody = `
+      <div class="pax-collapse-note">${passportRequired
+        ? '<strong>A passport is required for this booking.</strong> All fields must be completed to save this traveler.'
+        : 'Certain airlines may require passport information when booking an international flight.'}</div>
+      <div class="form-grid">
+        <div class="full">
+          <label class="pax-label ${ppCountryErr ? 'pax-label-err' : ''}">Country of issue${passportRequired ? REQ : ''}</label>
+          <input id="p${i}-pp-country" type="text" class="pax-input ${ppCountryErr ? 'pax-input-err' : ''}" value="${escapeHtml(d.passport.country)}" placeholder="e.g. Kenya">
+          ${ppCountryErr ? '<div class="pax-error">Please select a country of issue</div>' : ''}
+        </div>
+        <div>
+          <label class="pax-label ${ppNumberErr ? 'pax-label-err' : ''}">Passport number${passportRequired ? REQ : ''}</label>
+          <input id="p${i}-pp-number" type="text" class="pax-input ${ppNumberErr ? 'pax-input-err' : ''}" value="${escapeHtml(d.passport.number)}">
+          ${ppNumberErr ? '<div class="pax-error">Please enter the passport number</div>' : ''}
+        </div>
+        <div>
+          <label class="pax-label ${ppExpiresErr ? 'pax-label-err' : ''}">Passport expiration${passportRequired ? REQ : ''}</label>
+          <input id="p${i}-pp-expires" type="date" class="pax-input ${ppExpiresErr ? 'pax-input-err' : ''}" value="${escapeHtml(d.passport.expires)}">
+          ${ppExpiresErr ? '<div class="pax-error">Please enter the passport expiration date</div>' : ''}
+        </div>
+      </div>
+    `;
+
     return `
       <div class="pax-block">
         <div class="pax-block-title">Traveler ${i + 1}${i === 0 ? ' · Primary' : ''}</div>
@@ -4298,23 +4744,12 @@
           </div>
         </div>
 
-        ${renderCollapsibleSection(i, 'passport', 'Passport details', null, sections.has('passport'), `
-          <div class="pax-collapse-note">Certain airlines may require passport information when booking an international flight.</div>
-          <div class="form-grid">
-            <div class="full">
-              <label class="pax-label">Country of issue</label>
-              <input id="p${i}-pp-country" type="text" class="pax-input" value="${escapeHtml(d.passport.country)}" placeholder="e.g. Kenya">
-            </div>
-            <div>
-              <label class="pax-label">Passport number</label>
-              <input id="p${i}-pp-number" type="text" class="pax-input" value="${escapeHtml(d.passport.number)}">
-            </div>
-            <div>
-              <label class="pax-label">Passport expiration</label>
-              <input id="p${i}-pp-expires" type="date" class="pax-input" value="${escapeHtml(d.passport.expires)}">
-            </div>
-          </div>
-        `)}
+        ${renderCollapsibleSection(i, 'passport',
+          passportRequired ? 'Passport details' : 'Passport details',
+          passportRequired ? 'required' : null,
+          sections.has('passport') || passportRequired,
+          passportBody
+        )}
 
         ${renderCollapsibleSection(i, 'ff', 'Frequent flyer programs', 'optional', sections.has('ff'), `
           <div class="pax-collapse-note">Add your loyalty account so the airline can credit miles to your booking. We pass these directly to the airline at booking time.</div>
@@ -4359,8 +4794,35 @@
     `;
   }
 
+  function renderSavedTraveler(i) {
+    const d = travelerStates[i].data;
+    const fullName = [d.title.replace(/^\w/, c => c.toUpperCase()), d.given_name, d.middle_name, d.family_name]
+      .filter(Boolean).join(' ');
+    const role = i === 0 ? 'Adult · Primary' : 'Adult';
+    return `
+      <div class="saved-traveler">
+        <div class="saved-traveler-check">✓</div>
+        <div class="saved-traveler-info">
+          <div class="saved-traveler-name">${escapeHtml(fullName)}</div>
+          <div class="saved-traveler-role">${escapeHtml(role)}</div>
+        </div>
+        <button class="saved-traveler-edit" onclick="editTraveler(${i})" aria-label="Edit traveler">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none">
+            <path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04a1 1 0 0 0 0-1.41l-2.34-2.34a1 1 0 0 0-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z" fill="currentColor"/>
+          </svg>
+        </button>
+      </div>
+    `;
+  }
+
+
   function renderCollapsibleSection(i, key, title, optionalLabel, isOpen, bodyHtml) {
-    const sub = optionalLabel ? `<span class="pax-collapse-head-sub">(${escapeHtml(optionalLabel)})</span>` : '';
+    let sub = '';
+    if (optionalLabel === 'required') {
+      sub = `<span class="pax-collapse-head-sub-required">Required</span>`;
+    } else if (optionalLabel) {
+      sub = `<span class="pax-collapse-head-sub">(${escapeHtml(optionalLabel)})</span>`;
+    }
     return `
       <div class="pax-collapse ${isOpen ? 'open' : ''}">
         <div class="pax-collapse-head" onclick="toggleSection(${i},'${key}')">
@@ -4490,36 +4952,53 @@
 
   // Renders the price panel. `breakdown` (optional) is the server-computed
   // fee breakdown returned by create-payment; otherwise we show an estimate.
+  // Fee constants — kept in sync with create-payment.ts so the booking-page
+  // estimate matches the amount the customer is charged on the payment page.
+  // NOTE: there's a known follow-up to switch the backend to S / (1 - 0.035)
+  // proper gross-up math; when that ships, update the formula here too.
+  const TUMAFLY_SERVICE_FEE_KES = 1500;
+  const PESAPAL_FEE_RATE = 0.035;
+
+  function estimateBreakdown() {
+    // Whole-booking total in KES (sum of outbound + inbound for round-trip, all passengers)
+    const cab = currentCurrency === 'USD' ? 'price_usd' : 'price_kes';
+    const baseKes = (selectedOutbound?.cabinPricing?.price_kes || 0)
+                  + (selectedInbound?.cabinPricing?.price_kes || 0);
+    const subtotal = baseKes + TUMAFLY_SERVICE_FEE_KES;
+    const processingFeeKes = Math.ceil(subtotal * PESAPAL_FEE_RATE);
+    const totalKes = subtotal + processingFeeKes;
+    return {
+      base_kes: baseKes,
+      service_fee_kes: TUMAFLY_SERVICE_FEE_KES,
+      processing_fee_kes: processingFeeKes,
+      total_kes: totalKes,
+    };
+  }
+
   function renderPricePanel(slotId, breakdown) {
     const slot = document.getElementById(slotId);
     if (!slot) return;
-    const fareTotal = bookingFareTotal();
 
-    let breakdownHtml = '';
-    if (breakdown) {
-      breakdownHtml = `
-        <div class="line"><span class="label">Base fare</span><span class="value">KES ${breakdown.base_kes.toLocaleString()}</span></div>
-        <div class="line"><span class="label">Service fee</span><span class="value">KES ${breakdown.service_fee_kes.toLocaleString()}</span></div>
-        <div class="line"><span class="label">Taxes & processing</span><span class="value">KES ${breakdown.processing_fee_kes.toLocaleString()}</span></div>
-        <div class="divider"></div>
-        <div class="total"><span>Total</span><span class="value">KES ${breakdown.total_kes.toLocaleString()}</span></div>
-        <div class="foot">Final price confirmed at checkout based on passenger details and availability.</div>
-      `;
-    } else {
-      breakdownHtml = `
-        <div class="line"><span class="label">Base fare</span><span class="value">${formatPrice(fareTotal)}</span></div>
-        <div class="line"><span class="label">Service fee</span><span class="value">KES 1,500</span></div>
-        <div class="line"><span class="label">Taxes & processing</span><span class="value" style="color:var(--text-3);">added at payment</span></div>
-        <div class="divider"></div>
-        <div class="total"><span>Total estimate</span><span class="value">${formatPrice(fareTotal + 1500)}+</span></div>
-        <div class="foot">Final price confirmed at checkout based on passenger details and availability.</div>
-      `;
-    }
+    // Booking page: estimate client-side using same formula as backend.
+    // Payment page: pass `breakdown` from the create-payment server response (authoritative).
+    const b = breakdown || estimateBreakdown();
+    const isEstimate = !breakdown;
+
+    const breakdownHtml = `
+      <div class="line"><span class="label">Flight <span style="color:var(--text-3);font-size:12px;">(taxes included)</span></span><span class="value">KES ${b.base_kes.toLocaleString()}</span></div>
+      <div class="line"><span class="label">TumaFly service fee</span><span class="value">KES ${b.service_fee_kes.toLocaleString()}</span></div>
+      <div class="line"><span class="label">Payment processing</span><span class="value">KES ${b.processing_fee_kes.toLocaleString()}</span></div>
+      <div class="divider"></div>
+      <div class="total"><span>${isEstimate ? 'Total estimate' : 'Total'}</span><span class="value">KES ${b.total_kes.toLocaleString()}</span></div>
+      <div class="foot">${isEstimate
+        ? "Estimate based on the airline's current fare. Final price confirmed at checkout — airline fares can move between selection and payment."
+        : 'Final price confirmed at checkout based on passenger details and availability.'}</div>
+    `;
 
     slot.innerHTML = `
       <div class="price-panel">
-        <h4>Estimated price</h4>
-        <div class="ppp">Price per ${passengerCount > 1 ? 'booking' : 'passenger'}</div>
+        <h4>${isEstimate ? 'Estimated price' : 'Price'}</h4>
+        <div class="ppp">${passengerCount > 1 ? `Total for ${passengerCount} travelers` : 'Price per passenger'}</div>
         ${breakdownHtml}
       </div>
     `;
@@ -4600,6 +5079,7 @@
         <button class="modal-close" onclick="closeModal()" aria-label="Close">✕</button>
         <div class="modal-body">
           ${sections}
+          ${renderFlexibilityBlock(offer)}
         </div>
       </div>
     `;
@@ -4610,6 +5090,72 @@
     document.body.style.overflow = 'hidden';
     // Close on Escape
     document.addEventListener('keydown', escClose);
+  }
+
+  // Flight flexibility — change/refund conditions read straight from Duffel's offer
+  // conditions. Only renders fields Duffel actually returned (no defaults). When a
+  // condition is absent from the API we say so honestly rather than assuming the worst.
+  function renderFlexibilityBlock(offer) {
+    const c = offer.conditions;
+    if (!c) return '';
+
+    const rows = [];
+
+    if (c.change_before_departure) {
+      const allowed = c.change_before_departure.allowed;
+      const fee = c.change_before_departure.penalty_amount;
+      const currency = c.change_before_departure.penalty_currency || '';
+      if (allowed === false) {
+        rows.push({ icon: '✕', label: 'Changes', text: 'Non-changeable' });
+      } else if (allowed === true) {
+        if (fee && parseFloat(fee) > 0) {
+          rows.push({ icon: '✓', label: 'Changes', text: `Allowed · Fee from ${escapeHtml(currency)} ${escapeHtml(fee)}` });
+        } else if (fee === '0' || fee === 0) {
+          rows.push({ icon: '✓', label: 'Changes', text: 'Allowed · No change fee' });
+        } else {
+          rows.push({ icon: '✓', label: 'Changes', text: 'Allowed' });
+        }
+      }
+    }
+
+    if (c.refund_before_departure) {
+      const allowed = c.refund_before_departure.allowed;
+      const fee = c.refund_before_departure.penalty_amount;
+      const currency = c.refund_before_departure.penalty_currency || '';
+      if (allowed === false) {
+        rows.push({ icon: '✕', label: 'Refunds', text: 'Non-refundable' });
+      } else if (allowed === true) {
+        if (fee && parseFloat(fee) > 0) {
+          rows.push({ icon: '✓', label: 'Refunds', text: `Allowed · Fee from ${escapeHtml(currency)} ${escapeHtml(fee)}` });
+        } else if (fee === '0' || fee === 0) {
+          rows.push({ icon: '✓', label: 'Refunds', text: 'Fully refundable' });
+        } else {
+          rows.push({ icon: '✓', label: 'Refunds', text: 'Allowed' });
+        }
+      }
+    }
+
+    if (!rows.length) return '';
+
+    return `
+      <div class="modal-flex-block">
+        <div class="modal-section-num">Flexibility</div>
+        <div class="modal-flex-rows">
+          ${rows.map(r => `
+            <div class="modal-flex-row ${r.icon === '✕' ? 'flex-no' : 'flex-yes'}">
+              <div class="modal-flex-icon">${r.icon}</div>
+              <div>
+                <div class="modal-flex-label">${escapeHtml(r.label)}</div>
+                <div class="modal-flex-text">${r.text}</div>
+              </div>
+            </div>
+          `).join('')}
+        </div>
+        <div style="font-size:12px;color:var(--text-3);margin-top:10px;line-height:1.5;">
+          Conditions shown reflect the airline's fare rules at the time of search. Exact fees may vary at the time of change or refund.
+        </div>
+      </div>
+    `;
   }
 
   function escClose(e) {
