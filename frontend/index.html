@@ -5852,7 +5852,7 @@
   //   https://dash.cloudflare.com → Turnstile → Add site
   // The default below is Cloudflare's "always passes" test sitekey, useful for
   // local development. With this default, real bots will not actually be blocked.
-  const TURNSTILE_SITEKEY = '1x00000000000000000000AA';
+  const TURNSTILE_SITEKEY = '0x4AAAAAADpPM2PIaZcEwdQX';
 
   let turnstileSearchToken = '';
   let turnstilePaymentToken = '';
@@ -5865,7 +5865,6 @@
     try {
       turnstileSearchWidgetId = turnstile.render('#turnstile-host-search', {
         sitekey: TURNSTILE_SITEKEY,
-        size: 'invisible',
         action: 'search',
         callback: (token) => { turnstileSearchToken = token; },
         'error-callback': () => { turnstileSearchToken = ''; },
@@ -5873,7 +5872,6 @@
       });
       turnstilePaymentWidgetId = turnstile.render('#turnstile-host-payment', {
         sitekey: TURNSTILE_SITEKEY,
-        size: 'invisible',
         action: 'payment',
         callback: (token) => { turnstilePaymentToken = token; },
         'error-callback': () => { turnstilePaymentToken = ''; },
