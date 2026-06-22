@@ -4629,6 +4629,16 @@
     // when user navigates back to results then re-enters booking with the same selections.
     if (travelerStates.length !== passengerCount) initTravelerStates();
 
+    // Clear ALL validation flags whenever we (re-)enter the booking view. Validation
+    // highlights should only ever appear as a direct result of a Save click in this
+    // session — not survive navigation. Without this, a failed save on Traveler 1,
+    // then "Back → Forward", would re-load the booking page with red fields still
+    // showing even though the user has just arrived.
+    travelerStates.forEach(s => {
+      s.showRequiredErrors = false;
+      s.showPassportErrors = false;
+    });
+
     // Re-validate saved travelers against the (possibly changed) trip requirements.
     // If the trip is now international and a saved traveler lacks passport info,
     // un-save them and force-expand their passport section so the missing fields
@@ -4688,6 +4698,48 @@
 
   // Capture current form values into the state without saving (used before re-rendering
   // so partially-filled forms don't lose their text when collapsibles toggle).
+  // Returns today's date in YYYY-MM-DD (local timezone) — used to constrain
+  // date pickers (DOB can't be in the future, passport expiry can't be in the past).
+  function todayIso() {
+    const d = new Date();
+    const m = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    return `${d.getFullYear()}-${m}-${day}`;
+  }
+
+  // Live-clear: when the user types into / picks a value for a red-bordered field,
+  // strip the err styling immediately. Saves them having to click Save again just
+  // to see that they've fixed the field. Attached once via delegation below.
+  function clearFieldErrorIfFixed(el) {
+    if (!el || !el.classList.contains('pax-input-err')) return;
+    // Treat any non-empty value as "fixed" — server-side / save-time will catch any
+    // remaining issues (e.g. invalid date strings).
+    if (!el.value) return;
+    el.classList.remove('pax-input-err');
+    // Walk up to the field's wrapper (the immediate parent div from form-grid layout)
+    // and clear the label-err class + remove the inline error message.
+    const wrapper = el.closest('.form-grid > div');
+    if (!wrapper) return;
+    wrapper.querySelectorAll('.pax-label-err').forEach(l => l.classList.remove('pax-label-err'));
+    wrapper.querySelectorAll('.pax-error').forEach(m => m.remove());
+  }
+
+  // Delegated listener — set up once on script load. We attach to document because
+  // the passenger-forms container's children are wiped and re-rendered, but the
+  // document itself is stable.
+  document.addEventListener('input', (e) => {
+    const t = e.target;
+    if (t && (t.matches('.pax-input.pax-input-err') || t.matches('.pax-select.pax-input-err'))) {
+      clearFieldErrorIfFixed(t);
+    }
+  });
+  document.addEventListener('change', (e) => {
+    const t = e.target;
+    if (t && (t.matches('.pax-input.pax-input-err') || t.matches('.pax-select.pax-input-err'))) {
+      clearFieldErrorIfFixed(t);
+    }
+  });
+
   function snapshotTraveler(i) {
     const s = travelerStates[i];
     if (!s || s.saved) return;
@@ -4762,10 +4814,15 @@
       const alertBox = document.getElementById('booking-alert');
       if (alertBox) showAlert(alertBox, `Please fill in: ${errors.join(', ')} for Traveler ${i + 1}.`);
       renderPassengerForms();
-      // Scroll the first error field into view so user sees what's wrong
+      // Scroll the first error field of THIS traveler into view (not the global first —
+      // earlier travelers may also have red fields from prior failed saves, and we
+      // shouldn't yank the user back up away from the card they just clicked).
       setTimeout(() => {
-        const firstErr = document.querySelector(`.pax-input-err, .pax-select-err`);
+        const card = document.querySelector(`[data-traveler-card="${i}"]`);
+        if (!card) return;
+        const firstErr = card.querySelector('.pax-input-err');
         if (firstErr) firstErr.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        else card.scrollIntoView({ behavior: 'smooth', block: 'start' });
       }, 50);
       return;
     }
@@ -4850,14 +4907,14 @@
         </div>
         <div>
           <label class="pax-label ${ppExpiresErr ? 'pax-label-err' : ''}">Passport expiration${passportRequired ? REQ : ''}</label>
-          <input id="p${i}-pp-expires" type="date" class="pax-input ${ppExpiresErr ? 'pax-input-err' : ''}" value="${escapeHtml(d.passport.expires)}">
+          <input id="p${i}-pp-expires" type="date" class="pax-input ${ppExpiresErr ? 'pax-input-err' : ''}" value="${escapeHtml(d.passport.expires)}" min="${todayIso()}">
           ${ppExpiresErr ? '<div class="pax-error">Please enter the passport expiration date</div>' : ''}
         </div>
       </div>
     `;
 
     return `
-      <div class="pax-block">
+      <div class="pax-block" data-traveler-card="${i}">
         <div class="pax-block-title">Traveler ${i + 1}${i === 0 ? ' · Primary' : ''}</div>
         <div class="pax-section-title">Traveler details</div>
         <div class="form-grid">
@@ -4895,7 +4952,7 @@
           </div>
           <div>
             <label class="pax-label ${dobErr ? 'pax-label-err' : ''}">Date of birth${REQ}</label>
-            <input id="p${i}-dob" type="date" class="pax-input ${dobErr ? 'pax-input-err' : ''}" value="${escapeHtml(d.born_on)}">
+            <input id="p${i}-dob" type="date" class="pax-input ${dobErr ? 'pax-input-err' : ''}" value="${escapeHtml(d.born_on)}" max="${todayIso()}">
             ${dobErr ? '<div class="pax-error">Please enter the date of birth</div>' : ''}
           </div>
           <div>
