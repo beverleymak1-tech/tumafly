@@ -208,12 +208,13 @@ body {
 }
 .search-grid {
   display: grid;
-  grid-template-columns: 1fr 1fr 1fr 1fr auto;
+  grid-template-columns: 2fr 1fr 1fr auto;
   gap: 10px;
   align-items: end;
 }
 @media (max-width: 900px) {
   .search-grid { grid-template-columns: 1fr 1fr; }
+  .search-grid .from-to-pair { grid-column: 1 / -1; }
   .search-grid > button { grid-column: 1 / -1; }
 }
 .field {
@@ -246,6 +247,60 @@ body {
   box-shadow: 0 0 0 3px rgba(61, 149, 245, 0.15);
 }
 .field input::placeholder { color: var(--text-3); }
+
+/* From + Swap + To pair — used on home search card and results summary bar.
+   The swap button bridges the two field columns so users can flip origin & destination. */
+.from-to-pair {
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  align-items: end;
+  gap: 0;
+}
+.from-to-pair > .field {
+  min-width: 0; /* let inputs shrink without overflow */
+}
+.swap-btn {
+  width: 36px;
+  height: 44px;
+  display: grid;
+  place-items: center;
+  background: var(--surface);
+  border: 1px solid var(--border-2);
+  border-radius: 50%;
+  cursor: pointer;
+  color: var(--brand-dark);
+  font-family: inherit;
+  padding: 0;
+  margin: 0 -6px;
+  position: relative;
+  z-index: 2;
+  align-self: end;
+  /* On home page the labels above push the field down; align with input vertical center */
+  margin-bottom: 4px;
+  transition: border-color 0.15s, background 0.15s, transform 0.15s;
+}
+.swap-btn:hover {
+  border-color: var(--brand);
+  background: var(--brand-soft);
+}
+.swap-btn:active { transform: scale(0.94) rotate(180deg); }
+/* Results-page variant lives inside .summary-bar — smaller, less margin */
+.summary-bar .swap-btn {
+  width: 32px;
+  height: 36px;
+  margin: 0;
+  align-self: center;
+}
+.summary-bar .from-to-pair {
+  align-items: stretch;
+}
+
+/* Prompt state for empty return-date when in round-trip mode — draws the eye */
+input.needs-input,
+.sf input.needs-input {
+  border-color: var(--warning) !important;
+  box-shadow: 0 0 0 3px rgba(217, 119, 6, 0.12) !important;
+}
 
 /* Autocomplete */
 .ap-field { position: relative; }
@@ -341,7 +396,14 @@ mark { background: rgba(61, 149, 245, 0.18); color: inherit; padding: 0 1px; bor
   width: 100%;
   cursor: pointer;
   text-align: left;
+  display: flex;
+  align-items: center;
+  gap: 8px;
   transition: border-color 0.15s, box-shadow 0.15s;
+}
+.tp-person-icon {
+  color: var(--text-2);
+  flex-shrink: 0;
 }
 .tp-trigger:hover { border-color: var(--brand); }
 .tp-trigger.open {
@@ -551,17 +613,18 @@ mark { background: rgba(61, 149, 245, 0.18); color: inherit; padding: 0 1px; bor
   margin-bottom: 20px;
   box-shadow: var(--shadow);
   display: grid;
-  grid-template-columns: auto 1fr 1fr 1fr 1fr 1fr auto;
+  grid-template-columns: auto 2fr 1fr 1fr 1fr auto;
   gap: 10px;
   align-items: stretch;
 }
 @media (max-width: 1100px) {
-  .summary-bar { grid-template-columns: auto 1fr 1fr 1fr 1fr 1fr; }
+  .summary-bar { grid-template-columns: auto 2fr 1fr 1fr 1fr; }
   .summary-bar .update-btn { grid-column: 1 / -1; }
 }
 @media (max-width: 1000px) {
   .summary-bar { grid-template-columns: 1fr 1fr; }
   .summary-bar .trip-toggle { grid-column: 1 / -1; }
+  .summary-bar .from-to-pair { grid-column: 1 / -1; }
   .summary-bar .update-btn { grid-column: 1 / -1; }
 }
 
@@ -688,6 +751,105 @@ mark { background: rgba(61, 149, 245, 0.18); color: inherit; padding: 0 1px; bor
   color: var(--text-3);
   font-weight: 400;
 }
+.filter-divider {
+  height: 1px;
+  background: var(--border);
+  margin: 12px 0;
+}
+.filter-expand-btn {
+  background: none;
+  border: none;
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--brand-dark);
+  cursor: pointer;
+  padding: 8px 0 0;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+.filter-expand-btn:hover { color: var(--brand); }
+
+/* Range slider component — used for Duration, Departure, Arrival, Price.
+   Single-value sliders use a normal range input.
+   Dual-value sliders stack two range inputs over a visible track + fill bar. */
+.range-block {
+  position: relative;
+  padding: 4px 0 14px;
+}
+.range-label {
+  font-size: 13px;
+  color: var(--text-2);
+  margin-bottom: 10px;
+  font-weight: 500;
+}
+.range-block input[type="range"] {
+  width: 100%;
+  background: transparent;
+  appearance: none;
+  -webkit-appearance: none;
+  margin: 0;
+  outline: none;
+}
+.range-block:not(.range-dual) input[type="range"] {
+  /* Solo single-handle slider — show its own track */
+  height: 4px;
+  background: var(--border-2);
+  border-radius: 2px;
+}
+.range-block input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: var(--surface);
+  border: 2px solid var(--brand);
+  cursor: pointer;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.15);
+}
+.range-block input[type="range"]::-moz-range-thumb {
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: var(--surface);
+  border: 2px solid var(--brand);
+  cursor: pointer;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.15);
+}
+
+/* Dual-handle: two range inputs stacked over a shared track */
+.range-dual { height: 32px; }
+.range-dual .range-track {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: calc(50% + 9px);
+  height: 4px;
+  background: var(--border-2);
+  border-radius: 2px;
+  pointer-events: none;
+}
+.range-dual .range-fill {
+  position: absolute;
+  height: 100%;
+  background: var(--brand);
+  border-radius: 2px;
+}
+.range-dual .range-label {
+  margin-bottom: 14px;
+}
+.range-dual input[type="range"] {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: calc(50% + 4px);
+  height: 18px;
+  pointer-events: none;  /* re-enable on thumb */
+  background: none;
+}
+.range-dual input[type="range"]::-webkit-slider-thumb { pointer-events: auto; position: relative; z-index: 2; }
+.range-dual input[type="range"]::-moz-range-thumb { pointer-events: auto; }
 .currency-toggle {
   display: inline-flex;
   border: 1px solid var(--border-2);
@@ -709,7 +871,26 @@ mark { background: rgba(61, 149, 245, 0.18); color: inherit; padding: 0 1px; bor
   color: white;
 }
 
-/* Route-header CSS removed — step-row + sort-pill below replaced it. */
+/* Route header card — shows route + meta above the step row.
+   The sort pill and step label now live below this in their own row. */
+.route-header {
+  background: var(--surface);
+  border-radius: var(--radius);
+  padding: 18px 20px;
+  margin-bottom: 14px;
+  box-shadow: var(--shadow-sm);
+}
+.route-header h2 {
+  font-size: 17px;
+  font-weight: 600;
+  color: var(--ink);
+  letter-spacing: -0.2px;
+}
+.route-header .route-meta {
+  font-size: 13px;
+  color: var(--text-2);
+  margin-top: 2px;
+}
 
 /* Fair-price gradient bar (Hopper-style) */
 .price-gauge {
@@ -1152,11 +1333,11 @@ mark { background: rgba(61, 149, 245, 0.18); color: inherit; padding: 0 1px; bor
   flex-wrap: wrap;
 }
 .step-row .step-label {
-  font-size: 12px;
-  text-transform: uppercase;
-  letter-spacing: 0.07em;
-  font-weight: 600;
-  color: var(--text-3);
+  font-size: 18px;
+  font-weight: 700;
+  color: var(--ink);
+  line-height: 1.2;
+  letter-spacing: -0.2px;
 }
 
 /* Sort pill — icon on the left + select. Native select chevron hidden. */
@@ -1862,18 +2043,26 @@ input.has-error, select.has-error {
         <div id="search-alert"></div>
 
         <div class="search-grid">
-          <div class="field ap-field">
-            <label>From</label>
-            <div class="ap-wrap" id="origin-wrap">
-              <input id="origin" type="text" placeholder="City or airport" autocomplete="off" aria-autocomplete="list" aria-controls="origin-dropdown">
-              <div class="ap-dropdown hidden" id="origin-dropdown" role="listbox"></div>
+          <div class="from-to-pair">
+            <div class="field ap-field">
+              <label>From</label>
+              <div class="ap-wrap" id="origin-wrap">
+                <input id="origin" type="text" placeholder="City or airport" autocomplete="off" aria-autocomplete="list" aria-controls="origin-dropdown">
+                <div class="ap-dropdown hidden" id="origin-dropdown" role="listbox"></div>
+              </div>
             </div>
-          </div>
-          <div class="field ap-field">
-            <label>To</label>
-            <div class="ap-wrap" id="destination-wrap">
-              <input id="destination" type="text" placeholder="City or airport" autocomplete="off" aria-autocomplete="list" aria-controls="destination-dropdown">
-              <div class="ap-dropdown hidden" id="destination-dropdown" role="listbox"></div>
+            <button type="button" class="swap-btn" onclick="swapOriginDestination('home')" aria-label="Swap From and To">
+              <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+                <path d="M2 5h10M12 5L9 2M12 5L9 8" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
+                <path d="M14 11H4M4 11l3-3M4 11l3 3" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
+              </svg>
+            </button>
+            <div class="field ap-field">
+              <label>To</label>
+              <div class="ap-wrap" id="destination-wrap">
+                <input id="destination" type="text" placeholder="City or airport" autocomplete="off" aria-autocomplete="list" aria-controls="destination-dropdown">
+                <div class="ap-dropdown hidden" id="destination-dropdown" role="listbox"></div>
+              </div>
             </div>
           </div>
           <div class="field">
@@ -1882,7 +2071,7 @@ input.has-error, select.has-error {
           </div>
           <div class="field" id="return-field">
             <label>Return</label>
-            <input id="return-date" type="date">
+            <input id="return-date" type="date" onchange="applyReturnDatePrompt()">
           </div>
           <button class="btn btn-primary btn-lg" id="search-btn" onclick="searchFlights()">Search</button>
         </div>
@@ -1891,6 +2080,10 @@ input.has-error, select.has-error {
           <div class="field" style="position: relative;">
             <label>Travelers</label>
             <button type="button" class="tp-trigger" id="tp-home-trigger" onclick="toggleTravelerPicker('home')">
+              <svg class="tp-person-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                <circle cx="12" cy="8" r="3.5" stroke="currentColor" stroke-width="1.7"/>
+                <path d="M5 20c0-3.5 3.1-6 7-6s7 2.5 7 6" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/>
+              </svg>
               <span id="tp-home-label">1 traveler</span>
             </button>
             <div class="tp-popup hidden" id="tp-home-popup"></div>
@@ -1929,18 +2122,26 @@ input.has-error, select.has-error {
         <button id="r-trip-one" onclick="setResultsTrip('one')">One-way</button>
         <button id="r-trip-round" onclick="setResultsTrip('round')">Round-trip</button>
       </div>
-      <div class="sf ap-field">
-        <span class="sf-label">From</span>
-        <div class="ap-wrap" id="r-origin-wrap">
-          <input id="r-origin" type="text" placeholder="City or airport" autocomplete="off">
-          <div class="ap-dropdown hidden" id="r-origin-dropdown" role="listbox"></div>
+      <div class="from-to-pair">
+        <div class="sf ap-field">
+          <span class="sf-label">From</span>
+          <div class="ap-wrap" id="r-origin-wrap">
+            <input id="r-origin" type="text" placeholder="City or airport" autocomplete="off">
+            <div class="ap-dropdown hidden" id="r-origin-dropdown" role="listbox"></div>
+          </div>
         </div>
-      </div>
-      <div class="sf ap-field">
-        <span class="sf-label">To</span>
-        <div class="ap-wrap" id="r-destination-wrap">
-          <input id="r-destination" type="text" placeholder="City or airport" autocomplete="off">
-          <div class="ap-dropdown hidden" id="r-destination-dropdown" role="listbox"></div>
+        <button type="button" class="swap-btn" onclick="swapOriginDestination('results')" aria-label="Swap From and To">
+          <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+            <path d="M2 5h10M12 5L9 2M12 5L9 8" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
+            <path d="M14 11H4M4 11l3-3M4 11l3 3" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+        </button>
+        <div class="sf ap-field">
+          <span class="sf-label">To</span>
+          <div class="ap-wrap" id="r-destination-wrap">
+            <input id="r-destination" type="text" placeholder="City or airport" autocomplete="off">
+            <div class="ap-dropdown hidden" id="r-destination-dropdown" role="listbox"></div>
+          </div>
         </div>
       </div>
       <div class="sf">
@@ -1949,11 +2150,15 @@ input.has-error, select.has-error {
       </div>
       <div class="sf" id="r-return-field">
         <span class="sf-label">Return</span>
-        <input id="r-return-date" type="date" onchange="onSummaryChange()">
+        <input id="r-return-date" type="date" onchange="applyReturnDatePrompt(); onSummaryChange();">
       </div>
       <div class="sf" style="position: relative;">
         <span class="sf-label">Travelers</span>
         <button class="tp-trigger" id="tp-results-trigger" onclick="toggleTravelerPicker('results')">
+          <svg class="tp-person-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+            <circle cx="12" cy="8" r="3.5" stroke="currentColor" stroke-width="1.7"/>
+            <path d="M5 20c0-3.5 3.1-6 7-6s7 2.5 7 6" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/>
+          </svg>
           <span id="tp-results-label">1 traveler</span>
         </button>
         <div class="tp-popup hidden" id="tp-results-popup"></div>
@@ -1991,18 +2196,55 @@ input.has-error, select.has-error {
             <span class="filter-count" id="count-1stop">0</span>
           </label>
         </div>
-        <div class="group">
+        <div class="group" id="airlines-group">
           <h4>Airlines</h4>
           <label class="filter-row">
             <input type="checkbox" id="filter-african" onchange="renderResults()">
             <span>African carriers only</span>
             <span class="filter-count" id="count-african">0</span>
           </label>
+          <div class="filter-divider"></div>
+          <div id="airlines-list"></div>
+          <button type="button" class="filter-expand-btn" id="airlines-expand-btn" onclick="toggleAirlinesExpanded()">View more</button>
+        </div>
+        <div class="group" id="range-filters-group">
+          <h4>Duration</h4>
+          <div class="range-block">
+            <div class="range-label" id="dur-label">Any duration</div>
+            <input type="range" id="dur-max" min="0" max="100" value="100" oninput="onRangeChange()">
+          </div>
+          <div class="filter-divider"></div>
+          <h4>Departure (local time)</h4>
+          <div class="range-block range-dual">
+            <div class="range-label" id="dep-label">12:00 AM - 11:59 PM</div>
+            <div class="range-track"><div class="range-fill" id="dep-fill"></div></div>
+            <input type="range" id="dep-min" min="0" max="1440" step="15" value="0" oninput="onRangeChange()">
+            <input type="range" id="dep-max" min="0" max="1440" step="15" value="1440" oninput="onRangeChange()">
+          </div>
+          <div class="filter-divider"></div>
+          <h4>Arrival (local time)</h4>
+          <div class="range-block range-dual">
+            <div class="range-label" id="arr-label">12:00 AM - 11:59 PM</div>
+            <div class="range-track"><div class="range-fill" id="arr-fill"></div></div>
+            <input type="range" id="arr-min" min="0" max="1440" step="15" value="0" oninput="onRangeChange()">
+            <input type="range" id="arr-max" min="0" max="1440" step="15" value="1440" oninput="onRangeChange()">
+          </div>
+          <div class="filter-divider"></div>
+          <h4>Price</h4>
+          <div class="range-block">
+            <div class="range-label" id="price-label">Any price</div>
+            <input type="range" id="price-max" min="0" max="100" value="100" oninput="onRangeChange()">
+          </div>
         </div>
       </aside>
       </div>
 
       <div>
+        <div class="route-header">
+          <h2 id="route-h2">Outbound</h2>
+          <div class="route-meta" id="route-meta">Price per traveler, includes taxes and fees</div>
+        </div>
+
         <div id="results-alert"></div>
         <span id="results-count" class="hidden">0</span>
 
@@ -2213,6 +2455,40 @@ let rDestinationSelectedIata = null;
 // Generic map: input element id → selected IATA. Used by autocomplete.
 const apSelections = {};
 
+// Swap From ↔ To. Works on both home form and results summary bar.
+// Swaps the input values, the iata selection state, and the apSelections map entries.
+function swapOriginDestination(scope) {
+  const isResults = scope === 'results';
+  const originId = isResults ? 'r-origin' : 'origin';
+  const destId = isResults ? 'r-destination' : 'destination';
+  const oEl = document.getElementById(originId);
+  const dEl = document.getElementById(destId);
+  if (!oEl || !dEl) return;
+
+  // Swap visible input text
+  const tmp = oEl.value;
+  oEl.value = dEl.value;
+  dEl.value = tmp;
+
+  // Swap iata selection state
+  if (isResults) {
+    const t = rOriginSelectedIata;
+    rOriginSelectedIata = rDestinationSelectedIata;
+    rDestinationSelectedIata = t;
+  } else {
+    const t = originSelectedIata;
+    originSelectedIata = destinationSelectedIata;
+    destinationSelectedIata = t;
+  }
+  // Swap the apSelections map entries
+  const aTmp = apSelections[originId];
+  apSelections[originId] = apSelections[destId];
+  apSelections[destId] = aTmp;
+
+  // On results page, trigger a fresh search now that route flipped
+  if (isResults) onSummaryChange();
+}
+
 // ============================================================
 // VIEW ROUTING (with browser history support)
 // ============================================================
@@ -2295,6 +2571,27 @@ function setTripType(type) {
   document.getElementById('tab-oneway').classList.toggle('active', type === 'one');
   document.getElementById('tab-round').classList.toggle('active', type === 'round');
   document.getElementById('return-field').style.display = type === 'round' ? '' : 'none';
+  // Always clear the return date on trip toggle. If user comes back to round-trip
+  // they should enter a fresh date — never carry a stale value across toggles.
+  document.getElementById('return-date').value = '';
+  // Mirror on the results-page summary bar in case they end up there
+  const rRet = document.getElementById('r-return-date');
+  if (rRet) rRet.value = '';
+  // Visual prompt: highlight empty return-date when round-trip is active
+  applyReturnDatePrompt();
+}
+
+// Adds/removes the .needs-input class on the return-date inputs depending on
+// whether we're in round-trip mode AND the field is empty. Used to draw the
+// eye to the missing field instead of letting the user submit without it.
+function applyReturnDatePrompt() {
+  const inputs = ['return-date', 'r-return-date'];
+  inputs.forEach(id => {
+    const el = document.getElementById(id);
+    if (!el) return;
+    const empty = !el.value;
+    el.classList.toggle('needs-input', tripType === 'round' && empty);
+  });
 }
 
 async function fillDemo() {
@@ -2842,6 +3139,12 @@ async function runSearch({ origin, destination, date, returnDate, fromButton, al
     const africanCb = document.getElementById('filter-african');
     if (africanCb) africanCb.checked = false;
 
+    // Reset airline + range filters to defaults for this fresh result set
+    excludedAirlines = new Set();
+    airlinesExpanded = false;
+    rebuildAirlinesList();
+    recomputeRangeBounds();
+
     syncResultsSummaryBar(origin, destination, date, returnDate);
     renderResults();
     showView('results');
@@ -2896,6 +3199,11 @@ function setResultsTrip(t) {
   document.getElementById('tab-oneway').classList.toggle('active', t === 'one');
   document.getElementById('tab-round').classList.toggle('active', t === 'round');
   document.getElementById('return-field').style.display = t === 'round' ? '' : 'none';
+  // Clear return-date on toggle; don't carry stale values across one-way ↔ round flips
+  document.getElementById('r-return-date').value = '';
+  const homeRet = document.getElementById('return-date');
+  if (homeRet) homeRet.value = '';
+  applyReturnDatePrompt();
   // Re-run the search if we have valid inputs
   onSummaryChange();
 }
@@ -2948,13 +3256,231 @@ function setStopsFilter(value) {
 
 function isAfrican(offer) { return AFRICAN_CARRIERS.includes(offer.airline); }
 
+// ============================================================
+// AIRLINE FILTER (per-airline checkboxes)
+// ============================================================
+// Set of currently-excluded airlines. Empty set → no airline filter (all shown).
+// Switching to set-of-included would be simpler but less natural — users typically
+// uncheck airlines they don't want.
+let excludedAirlines = new Set();
+let airlinesExpanded = false;
+const AIRLINES_COLLAPSED_COUNT = 8;
+
+function rebuildAirlinesList() {
+  const list = document.getElementById('airlines-list');
+  if (!list) return;
+  // Count airlines from current allOffers
+  const counts = new Map();
+  for (const o of allOffers) {
+    counts.set(o.airline, (counts.get(o.airline) || 0) + 1);
+  }
+  // Sort alphabetically — predictable for users
+  const airlines = [...counts.entries()].sort((a, b) => a[0].localeCompare(b[0]));
+
+  // Drop any excluded airlines that don't exist in current results (data changed)
+  for (const a of [...excludedAirlines]) {
+    if (!counts.has(a)) excludedAirlines.delete(a);
+  }
+
+  const visible = airlinesExpanded ? airlines : airlines.slice(0, AIRLINES_COLLAPSED_COUNT);
+  list.innerHTML = visible.map(([name, count]) => `
+    <label class="filter-row">
+      <input type="checkbox" data-airline="${escapeHtml(name)}"
+             ${!excludedAirlines.has(name) ? 'checked' : ''}
+             onchange="onAirlineToggle(this)">
+      <span>${escapeHtml(name)}</span>
+      <span class="filter-count">${count}</span>
+    </label>
+  `).join('');
+
+  // Show/hide expand button
+  const btn = document.getElementById('airlines-expand-btn');
+  if (btn) {
+    if (airlines.length <= AIRLINES_COLLAPSED_COUNT) {
+      btn.style.display = 'none';
+    } else {
+      btn.style.display = '';
+      btn.textContent = airlinesExpanded ? 'View less' : `View more (${airlines.length - AIRLINES_COLLAPSED_COUNT})`;
+    }
+  }
+}
+
+function onAirlineToggle(cb) {
+  const name = cb.getAttribute('data-airline');
+  if (cb.checked) excludedAirlines.delete(name);
+  else excludedAirlines.add(name);
+  renderResults();
+}
+
+function toggleAirlinesExpanded() {
+  airlinesExpanded = !airlinesExpanded;
+  rebuildAirlinesList();
+}
+
+// ============================================================
+// RANGE FILTERS (Duration, Departure, Arrival, Price)
+// ============================================================
+// State holds current slider positions. Bounds (min/max possible) are computed
+// from allOffers and stored on the slider inputs themselves.
+const rangeState = {
+  dur: { max: null },               // max duration in minutes
+  dep: { min: 0, max: 1440 },       // departure local-time minutes (0..1440)
+  arr: { min: 0, max: 1440 },
+  price: { max: null },             // max price in current currency
+};
+
+function localMinutes(isoString) {
+  if (!isoString) return 0;
+  const d = new Date(isoString);
+  return d.getHours() * 60 + d.getMinutes();
+}
+
+function isoDurationToMinutes(d) {
+  if (!d) return 0;
+  if (typeof d === 'number') return d;
+  const m = String(d).match(/^P(?:(\d+)D)?T?(?:(\d+)H)?(?:(\d+)M)?/);
+  if (!m) return 0;
+  return (parseInt(m[1] || '0', 10) * 24 * 60) + (parseInt(m[2] || '0', 10) * 60) + parseInt(m[3] || '0', 10);
+}
+
+function fmtMinutesAsClock(m) {
+  m = Math.max(0, Math.min(1440, Math.round(m / 15) * 15));
+  const h = Math.floor(m / 60) % 24;
+  const min = m % 60;
+  const ap = h < 12 ? 'AM' : 'PM';
+  const h12 = ((h + 11) % 12) + 1;
+  return `${h12}:${String(min).padStart(2, '0')} ${ap}`;
+}
+
+function fmtDurationMinutes(m) {
+  const h = Math.floor(m / 60);
+  const min = m % 60;
+  return `${h}h${min ? ' ' + min + 'm' : ''}`;
+}
+
+// Compute bounds from current allOffers, then reset sliders to those bounds
+// (so the panel always reflects the current data set).
+function recomputeRangeBounds() {
+  if (!allOffers.length) return;
+  const durations = allOffers.map(o => isoDurationToMinutes(o.slices[0]?.duration));
+  const maxDur = Math.max(...durations, 60);
+  const prices = allOffers.map(o => currentCurrency === 'USD' ? o.lowest_price_usd : o.lowest_price_kes);
+  const maxPrice = Math.max(...prices, 100);
+
+  const durSlider = document.getElementById('dur-max');
+  if (durSlider) {
+    durSlider.min = 60;
+    durSlider.max = maxDur;
+    durSlider.step = 30;
+    durSlider.value = maxDur;
+    rangeState.dur.max = maxDur;
+  }
+  const priceSlider = document.getElementById('price-max');
+  if (priceSlider) {
+    priceSlider.min = 0;
+    priceSlider.max = Math.ceil(maxPrice);
+    priceSlider.step = Math.max(1, Math.round(maxPrice / 100));
+    priceSlider.value = priceSlider.max;
+    rangeState.price.max = +priceSlider.max;
+  }
+  // Departure & arrival sliders stay 0..1440; reset to full
+  ['dep-min', 'arr-min'].forEach(id => { const el = document.getElementById(id); if (el) el.value = 0; });
+  ['dep-max', 'arr-max'].forEach(id => { const el = document.getElementById(id); if (el) el.value = 1440; });
+  rangeState.dep = { min: 0, max: 1440 };
+  rangeState.arr = { min: 0, max: 1440 };
+
+  updateRangeLabels();
+}
+
+function updateRangeLabels() {
+  const dur = +document.getElementById('dur-max')?.value || 0;
+  const durMax = +document.getElementById('dur-max')?.max || 0;
+  document.getElementById('dur-label').textContent =
+    (dur >= durMax) ? 'Any duration' : `Under ${fmtDurationMinutes(dur)}`;
+
+  const depMin = +document.getElementById('dep-min')?.value || 0;
+  const depMax = +document.getElementById('dep-max')?.value || 1440;
+  document.getElementById('dep-label').textContent =
+    (depMin === 0 && depMax === 1440) ? 'Any time'
+      : `${fmtMinutesAsClock(depMin)} – ${fmtMinutesAsClock(depMax)}`;
+  updateRangeFill('dep');
+
+  const arrMin = +document.getElementById('arr-min')?.value || 0;
+  const arrMax = +document.getElementById('arr-max')?.value || 1440;
+  document.getElementById('arr-label').textContent =
+    (arrMin === 0 && arrMax === 1440) ? 'Any time'
+      : `${fmtMinutesAsClock(arrMin)} – ${fmtMinutesAsClock(arrMax)}`;
+  updateRangeFill('arr');
+
+  const pSlider = document.getElementById('price-max');
+  const p = +pSlider?.value || 0;
+  const pMax = +pSlider?.max || 0;
+  document.getElementById('price-label').textContent =
+    (p >= pMax) ? 'Any price' : `Up to ${formatPrice(p)}`;
+}
+
+function updateRangeFill(prefix) {
+  const minEl = document.getElementById(prefix + '-min');
+  const maxEl = document.getElementById(prefix + '-max');
+  const fill = document.getElementById(prefix + '-fill');
+  if (!minEl || !maxEl || !fill) return;
+  const range = +maxEl.max - +maxEl.min;
+  const leftPct = ((+minEl.value - +minEl.min) / range) * 100;
+  const rightPct = 100 - (((+maxEl.value - +maxEl.min) / range) * 100);
+  fill.style.left = leftPct + '%';
+  fill.style.right = rightPct + '%';
+}
+
+function onRangeChange() {
+  // For dual-handle sliders, keep min < max
+  ['dep', 'arr'].forEach(prefix => {
+    const minEl = document.getElementById(prefix + '-min');
+    const maxEl = document.getElementById(prefix + '-max');
+    if (!minEl || !maxEl) return;
+    if (+minEl.value > +maxEl.value) {
+      // Swap so they stay sane
+      const t = minEl.value;
+      minEl.value = maxEl.value;
+      maxEl.value = t;
+    }
+  });
+  // Snapshot state
+  rangeState.dur.max = +document.getElementById('dur-max')?.value || 0;
+  rangeState.dep.min = +document.getElementById('dep-min')?.value || 0;
+  rangeState.dep.max = +document.getElementById('dep-max')?.value || 1440;
+  rangeState.arr.min = +document.getElementById('arr-min')?.value || 0;
+  rangeState.arr.max = +document.getElementById('arr-max')?.value || 1440;
+  rangeState.price.max = +document.getElementById('price-max')?.value || 0;
+  updateRangeLabels();
+  renderResults();
+}
+
 function filterOffers() {
   const africanOnly = document.getElementById('filter-african')?.checked;
   return allOffers.filter(o => {
-    const stops = o.slices[0]?.stops ?? 0;
+    const slice = o.slices[0];
+    const stops = slice?.stops ?? 0;
     if (activeStopsFilter === 'direct' && stops !== 0) return false;
     if (activeStopsFilter === '1stop' && stops > 1) return false;
     if (africanOnly && !isAfrican(o)) return false;
+    // Per-airline exclusion (empty set = no filter)
+    if (excludedAirlines.size && excludedAirlines.has(o.airline)) return false;
+    // Duration max
+    if (rangeState.dur.max != null) {
+      const dur = isoDurationToMinutes(slice?.duration);
+      if (dur > rangeState.dur.max) return false;
+    }
+    // Departure local time range
+    const depMin = localMinutes(slice?.departure);
+    if (depMin < rangeState.dep.min || depMin > rangeState.dep.max) return false;
+    // Arrival local time range
+    const arrMin = localMinutes(slice?.arrival);
+    if (arrMin < rangeState.arr.min || arrMin > rangeState.arr.max) return false;
+    // Price max
+    if (rangeState.price.max != null) {
+      const price = currentCurrency === 'USD' ? o.lowest_price_usd : o.lowest_price_kes;
+      if (price > rangeState.price.max) return false;
+    }
     return true;
   });
 }
@@ -3026,6 +3552,37 @@ function renderStepRow(stepLabel) {
   `;
 }
 
+// Update the title card above the flight list — shows the route and trip summary.
+function setRouteHeader(mode) {
+  const h2 = document.getElementById('route-h2');
+  const meta = document.getElementById('route-meta');
+  if (!h2 || !meta) return;
+
+  let origin = rOriginSelectedIata || apSelections['r-origin'];
+  let destination = rDestinationSelectedIata || apSelections['r-destination'];
+  if (!origin || !destination) return;
+
+  let dateStr = '';
+  if (mode === 'return') {
+    [origin, destination] = [destination, origin];
+    dateStr = document.getElementById('r-return-date')?.value || '';
+  } else {
+    dateStr = document.getElementById('r-date')?.value || '';
+  }
+
+  const oa = findAirportByIata(origin);
+  const da = findAirportByIata(destination);
+  const oCity = oa?.city || origin;
+  const dCity = da?.city || destination;
+  const dateLabel = dateStr ? new Date(dateStr).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' }) : '';
+
+  const title = mode === 'return' ? 'Return' : 'Outbound';
+  h2.innerHTML =
+    `${title} · <span style="color:var(--text-2);font-weight:500;">${escapeHtml(oCity)} (${escapeHtml(origin)}) → ${escapeHtml(dCity)} (${escapeHtml(destination)})</span>${dateLabel ? ` · ${escapeHtml(dateLabel)}` : ''}`;
+  meta.textContent =
+    `${tripType === 'round' ? 'Round-trip' : 'One-way'} · ${passengerCount} traveler${passengerCount > 1 ? 's' : ''} · Price per traveler, includes taxes and fees`;
+}
+
 function renderResults() {
   let filtered = filterOffers();
   document.getElementById('results-count').textContent = filtered.length;
@@ -3042,14 +3599,13 @@ function renderResults() {
     return;
   }
 
-  // Identify "Best" and "Lowest price" within current filtered/sorted set
   const sorted = sortOffers(filtered);
   const byPrice = [...sorted].sort((a, b) => (currentCurrency === 'USD' ? a.lowest_price_usd - b.lowest_price_usd : a.lowest_price_kes - b.lowest_price_kes));
   const lowestPriceId = byPrice[0]?.flight_key;
   const bestId = sortOffers(filtered)[0]?.flight_key;
 
   if (tripType === 'round' && !selectedOutbound) {
-    // Step 1: pick departure flight
+    setRouteHeader('outbound');
     list.innerHTML = `
       ${renderStepRow('Step 1 of 2 — Choose your departure flight')}
       <div id="outbound-list" class="results-list"></div>
@@ -3059,7 +3615,7 @@ function renderResults() {
   }
 
   if (tripType === 'round' && selectedOutbound) {
-    // Step 2: pick return flight — outbound moves to the left sidebar card
+    setRouteHeader('return');
     if (sideSlot) sideSlot.innerHTML = renderOutboundSideCard(selectedOutbound);
     list.innerHTML = `
       ${renderStepRow('Step 2 of 2 — Choose your return flight')}
@@ -3069,7 +3625,8 @@ function renderResults() {
     return;
   }
 
-  // One-way: no step row (no second step exists)
+  // One-way: no step number (no second step exists)
+  setRouteHeader('outbound');
   list.innerHTML = `
     ${renderStepRow('Choose your flight')}
     <div id="oneway-list" class="results-list"></div>
@@ -3141,6 +3698,19 @@ function renderFlightList(offers, containerId, kind, opts = {}) {
   container.innerHTML = offers.slice(0, 60).map(offer => {
     const slice = kind === 'inbound' ? (offer.slices[1] || offer.slices[0]) : offer.slices[0];
     if (!slice) return '';
+
+    // For inbound cards, if every cabin is either unavailable OR locked to a non-chosen
+    // cabin, skip the whole card — it's a row of disabled buttons and adds no value.
+    if (kind === 'inbound') {
+      const lockedCabin = selectedOutbound?.cabin;
+      const anyAvailable = CABIN_KEYS.some(c => {
+        const price = cabinPriceOf(offer, c);
+        const isLocked = lockedCabin && c !== lockedCabin;
+        return price != null && !isLocked;
+      });
+      if (!anyAvailable) return '';
+    }
+
     const cardId = `card-${kind}-${offer.flight_key}`;
     const stops = slice.stops ?? 0;
     const badges = [];
