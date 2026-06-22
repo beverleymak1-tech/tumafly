@@ -97,7 +97,7 @@ serve(async (req) => {
   const supabase = createClient(SUPABASE_URL, SERVICE_ROLE_KEY);
 
   try {
-    const { offer_id, passengers, contact, turnstile_token } = await req.json();
+    const { offer_id, passengers, contact, seats, turnstile_token } = await req.json();
 
     // 1. Validate
     if (!offer_id || !passengers?.length || !contact?.email) {
@@ -158,7 +158,90 @@ serve(async (req) => {
       parseFloat(offer.total_amount),
       offer.total_currency
     );
-    const subtotal = baseAmountKES + TUMAFLY_SERVICE_FEE_KES;
+
+    // 3a. Validate seat selections — re-fetch the seat map and verify each
+    // selected service_id is still available, matches the segment, and re-cost
+    // it at Duffel's current rate (frontend prices can be stale).
+    // We tolerate the frontend not sending `seats` at all (optional feature).
+    type ValidatedSeat = {
+      passenger_index: number;
+      service_id: string;
+      segment_id: string;
+      designator: string;
+      cost_kes: number;
+      original_amount: string;
+      original_currency: string;
+    };
+    let validatedSeats: ValidatedSeat[] = [];
+    let seatsTotalKES = 0;
+    if (Array.isArray(seats) && seats.length > 0) {
+      const smRes = await fetch(`${DUFFEL_BASE_URL}/air/seat_maps?offer_id=${offer_id}`, {
+        headers: {
+          Authorization: `Bearer ${DUFFEL_API_KEY}`,
+          "Duffel-Version": "v2",
+          Accept: "application/json",
+        },
+      });
+      const smData = await smRes.json();
+      if (!smRes.ok) {
+        return new Response(JSON.stringify({
+          error: "Seat selection no longer available. Please reselect seats.",
+        }), {
+          status: 409,
+          headers: { ...CORS_HEADERS, "Content-Type": "application/json" },
+        });
+      }
+
+      // Build a flat lookup: service_id → { segment_id, total_amount, total_currency }
+      const serviceLookup: Record<string, { segment_id: string; amount: string; currency: string }> = {};
+      for (const segMap of (smData.data || [])) {
+        for (const cabin of (segMap.cabins || [])) {
+          for (const row of (cabin.rows || [])) {
+            for (const section of (row.sections || [])) {
+              for (const el of (section.elements || [])) {
+                if (el.type !== "seat") continue;
+                for (const svc of (el.available_services || [])) {
+                  serviceLookup[svc.id] = {
+                    segment_id: segMap.segment_id,
+                    amount: svc.total_amount,
+                    currency: svc.total_currency,
+                  };
+                }
+              }
+            }
+          }
+        }
+      }
+
+      for (const s of seats) {
+        if (!s.service_id) continue;
+        const svc = serviceLookup[s.service_id];
+        if (!svc) {
+          return new Response(JSON.stringify({
+            error: `Seat ${s.designator || "?"} is no longer available. Please reselect.`,
+          }), {
+            status: 409,
+            headers: { ...CORS_HEADERS, "Content-Type": "application/json" },
+          });
+        }
+        const kes = await toKES(parseFloat(svc.amount), svc.currency);
+        seatsTotalKES += kes;
+        validatedSeats.push({
+          passenger_index: s.passenger_index,
+          service_id: s.service_id,
+          segment_id: svc.segment_id,
+          designator: s.designator,
+          cost_kes: kes,
+          original_amount: svc.amount,
+          original_currency: svc.currency,
+        });
+      }
+    }
+
+    // Roll seat costs into base — they're part of the airline-side cost for fee
+    // and tax purposes (Pesapal gross-up applies on the full subtotal).
+    const baseWithSeatsKES = baseAmountKES + seatsTotalKES;
+    const subtotal = baseWithSeatsKES + TUMAFLY_SERVICE_FEE_KES;
     // Gross-up: Pesapal charges rate on the total they receive, not on our subtotal.
     // So processingFee = subtotal * rate / (1 - rate) to ensure we net the full subtotal.
     const processingFeeKES = Math.ceil(subtotal * PESAPAL_FEE_RATE / (1 - PESAPAL_FEE_RATE));
@@ -167,14 +250,18 @@ serve(async (req) => {
     // 4. Insert pending_booking BEFORE Pesapal call (so webhook can always find it)
     const merchantRef = `TF-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 
+    // Stash seat selections on the contact JSON (no schema change). The webhook
+    // reads contact.seats when building the Duffel order's services array.
+    const contactWithSeats = { ...contact, seats: validatedSeats };
+
     const { data: pending, error: insertErr } = await supabase
       .from("pending_bookings")
       .insert({
         pesapal_order_id: merchantRef,
         duffel_offer_id: offer_id,
         passengers,
-        contact,
-        base_amount_kes: baseAmountKES,
+        contact: contactWithSeats,
+        base_amount_kes: baseWithSeatsKES,
         service_fee_kes: TUMAFLY_SERVICE_FEE_KES,
         processing_fee_kes: processingFeeKES,
         total_kes: totalKES,
@@ -236,6 +323,7 @@ serve(async (req) => {
       merchant_ref: merchantRef,
       breakdown: {
         base_kes: baseAmountKES,
+        seats_kes: seatsTotalKES,
         service_fee_kes: TUMAFLY_SERVICE_FEE_KES,
         processing_fee_kes: processingFeeKES,
         total_kes: totalKES,

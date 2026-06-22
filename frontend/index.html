@@ -1968,6 +1968,270 @@
       white-space: nowrap;
     }
     .seat-row-status.unavailable { color: var(--text-3); font-style: italic; }
+    .seat-row-status.selected { color: var(--brand-dark); font-weight: 600; font-style: normal; }
+    .seat-row-cta {
+      font-family: inherit;
+      font-size: 13px;
+      font-weight: 600;
+      padding: 6px 12px;
+      background: var(--brand-soft);
+      color: var(--brand-dark);
+      border: 1px solid var(--brand);
+      border-radius: var(--radius-sm);
+      cursor: pointer;
+      white-space: nowrap;
+    }
+    .seat-row-cta:hover { background: var(--brand); color: white; }
+
+    /* Seat-map modal — full-screen on mobile, centred dialog on desktop. */
+    .seat-modal-backdrop {
+      position: fixed;
+      inset: 0;
+      background: rgba(15, 23, 42, 0.6);
+      z-index: 200;
+      display: grid;
+      place-items: center;
+      padding: 16px;
+    }
+    .seat-modal {
+      background: var(--surface);
+      border-radius: var(--radius-md);
+      width: 100%;
+      max-width: 720px;
+      max-height: 92vh;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+    .seat-modal-head {
+      padding: 18px 22px;
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+    }
+    .seat-modal-title {
+      font-size: 17px;
+      font-weight: 600;
+      color: var(--ink);
+    }
+    .seat-modal-sub {
+      font-size: 13px;
+      color: var(--text-3);
+      margin-top: 2px;
+    }
+    .seat-modal-close {
+      width: 32px;
+      height: 32px;
+      border: none;
+      background: transparent;
+      cursor: pointer;
+      color: var(--text-2);
+      border-radius: 50%;
+      display: grid;
+      place-items: center;
+      flex-shrink: 0;
+    }
+    .seat-modal-close:hover { background: var(--bg); color: var(--ink); }
+    .seat-modal-tabs {
+      display: flex;
+      gap: 4px;
+      padding: 12px 22px 0;
+      border-bottom: 1px solid var(--border);
+      overflow-x: auto;
+      flex-wrap: nowrap;
+    }
+    .seat-modal-tab {
+      font-family: inherit;
+      font-size: 13px;
+      font-weight: 500;
+      padding: 8px 14px;
+      background: none;
+      color: var(--text-2);
+      border: none;
+      border-bottom: 2px solid transparent;
+      cursor: pointer;
+      white-space: nowrap;
+    }
+    .seat-modal-tab.active {
+      color: var(--brand-dark);
+      border-bottom-color: var(--brand);
+      font-weight: 600;
+    }
+    .seat-modal-body {
+      padding: 18px 22px;
+      overflow-y: auto;
+      flex: 1;
+    }
+    .seat-modal-pax-row {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 10px 12px;
+      border-radius: var(--radius-sm);
+      cursor: pointer;
+      margin-bottom: 4px;
+      border: 1.5px solid transparent;
+    }
+    .seat-modal-pax-row.active {
+      background: var(--brand-soft);
+      border-color: var(--brand);
+    }
+    .seat-modal-pax-row:hover:not(.active) { background: var(--bg); }
+    .seat-modal-pax-name { flex: 1; font-size: 14px; font-weight: 500; color: var(--ink); }
+    .seat-modal-pax-seat {
+      font-size: 13px;
+      font-weight: 600;
+      color: var(--text-2);
+      font-variant-numeric: tabular-nums;
+    }
+    .seat-modal-pax-seat.empty { color: var(--text-3); font-weight: 400; }
+
+    .seat-grid-wrap {
+      margin-top: 14px;
+      padding: 18px 0;
+      background: var(--bg);
+      border-radius: var(--radius-sm);
+      overflow-x: auto;
+    }
+    .seat-grid {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+      width: max-content;
+      margin: 0 auto;
+      padding: 0 14px;
+    }
+    .seat-grid-nose {
+      align-self: center;
+      width: 80px;
+      height: 28px;
+      background: var(--surface);
+      border-top-left-radius: 40px 28px;
+      border-top-right-radius: 40px 28px;
+      border: 1px solid var(--border);
+      border-bottom: none;
+      margin-bottom: 4px;
+    }
+    .seat-grid-row {
+      display: flex;
+      align-items: center;
+      gap: 4px;
+    }
+    .seat-grid-row-num {
+      width: 22px;
+      text-align: right;
+      font-size: 11px;
+      color: var(--text-3);
+      font-variant-numeric: tabular-nums;
+      padding-right: 4px;
+    }
+    .seat-cell {
+      width: 32px;
+      height: 32px;
+      border-radius: 6px;
+      display: grid;
+      place-items: center;
+      font-size: 10px;
+      font-weight: 600;
+      flex-shrink: 0;
+    }
+    .seat-cell.aisle {
+      width: 14px;
+      background: transparent;
+    }
+    .seat-cell.empty,
+    .seat-cell.galley,
+    .seat-cell.lavatory,
+    .seat-cell.exit_row,
+    .seat-cell.bassinet {
+      background: transparent;
+      color: var(--text-3);
+      font-size: 9px;
+      font-style: italic;
+    }
+    .seat-cell.exit_row::before { content: "EXIT"; }
+    .seat-cell.galley::before   { content: "GAL"; }
+    .seat-cell.lavatory::before { content: "WC"; }
+    .seat-cell.seat {
+      background: var(--surface);
+      border: 1.5px solid var(--border-2);
+      color: var(--text-2);
+      cursor: pointer;
+      transition: transform 0.1s, border-color 0.1s, background 0.1s;
+    }
+    .seat-cell.seat:hover:not(.unavailable):not(.taken-by-other) {
+      border-color: var(--brand);
+      transform: scale(1.06);
+    }
+    .seat-cell.seat.unavailable {
+      background: var(--bg);
+      color: var(--text-3);
+      cursor: not-allowed;
+      border-style: dashed;
+    }
+    .seat-cell.seat.selected {
+      background: var(--brand);
+      border-color: var(--brand-dark);
+      color: white;
+    }
+    .seat-cell.seat.taken-by-other {
+      background: var(--brand-soft);
+      border-color: var(--brand);
+      color: var(--brand-dark);
+      cursor: pointer;
+    }
+    .seat-cell.seat.extra-legroom { box-shadow: inset 0 0 0 1px var(--brand-dark); }
+
+    .seat-modal-legend {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 14px;
+      padding: 12px 22px;
+      font-size: 12px;
+      color: var(--text-2);
+      border-top: 1px solid var(--border);
+      background: var(--bg);
+    }
+    .seat-legend-item {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .seat-legend-swatch {
+      width: 14px;
+      height: 14px;
+      border-radius: 4px;
+      border: 1.5px solid var(--border-2);
+    }
+    .seat-legend-swatch.selected { background: var(--brand); border-color: var(--brand-dark); }
+    .seat-legend-swatch.unavailable { background: var(--bg); border-style: dashed; }
+    .seat-legend-swatch.other-pax { background: var(--brand-soft); border-color: var(--brand); }
+
+    .seat-modal-foot {
+      padding: 14px 22px;
+      border-top: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 14px;
+    }
+    .seat-modal-total {
+      font-size: 14px;
+      color: var(--text-2);
+    }
+    .seat-modal-total strong {
+      color: var(--ink);
+      font-weight: 600;
+    }
+    .seat-modal-fallback {
+      padding: 24px;
+      text-align: center;
+      color: var(--text-2);
+      font-size: 14px;
+    }
+    .seat-modal-fallback strong { color: var(--ink); font-size: 15px; display: block; margin-bottom: 8px; }
 
     .form-grid {
       display: grid;
@@ -3113,6 +3377,15 @@
   let fareTimerHandle = null;
   let fareTimerExpiresAtMs = 0;
   let fareTimerExpired = false;
+
+  // Seat selection state. selectedSeats is per-passenger × per-segment.
+  // seatMapsByOffer caches the raw response from get-seat-maps keyed by offer_id.
+  // seatMapsData re-indexes by our synthetic segment key for fast lookup in the UI.
+  // seatModalState is null when the modal is closed, otherwise tracks active leg + pax.
+  let selectedSeats = {};       // { [paxIndex]: { [segmentId]: { service_id, designator, cost_kes } } }
+  let seatMapsByOffer = {};     // { [offerId]: rawResponse }
+  let seatMapsData = {};        // { [segmentId]: normalisedSegment }
+  let seatModalState = null;
 
   // Autocomplete state
   let airportsData = null;
@@ -4773,6 +5046,11 @@
     if (!offer) return;
     const cabinPricing = offer.cabins[cabin];
     if (!cabinPricing) return;
+    // Any new selection invalidates previously-picked seats — different offer means
+    // different service_ids and possibly different cabin/aircraft layout.
+    selectedSeats = {};
+    seatMapsByOffer = {};
+    seatMapsData = {};
     const selection = { offer, cabin, cabinPricing };
     if (kind === 'outbound') {
       selectedOutbound = selection;
@@ -4900,30 +5178,388 @@
   function renderSeatsList() {
     const slot = document.getElementById('seats-list');
     if (!slot) return;
+    const legs = collectLegs();
+    if (!legs.length) { slot.innerHTML = ''; return; }
+
+    slot.innerHTML = legs.map((leg, legIdx) => {
+      // Status: how many passengers have a seat assigned for this leg?
+      const assigned = countAssignedSeatsForLeg(leg.segment_id);
+      const total = passengerCount;
+      let statusHtml;
+      if (seatMapsData[leg.segment_id]?.unavailable) {
+        statusHtml = '<div class="seat-row-status unavailable">Seats assigned at check-in</div>';
+      } else if (assigned > 0) {
+        const seats = passengerData
+          .map((_, i) => selectedSeats[i]?.[leg.segment_id]?.designator)
+          .filter(Boolean)
+          .join(', ');
+        statusHtml = `<div class="seat-row-status selected">${escapeHtml(seats)}</div>
+          <button type="button" class="seat-row-cta" onclick="openSeatModal(${legIdx})">Change</button>`;
+      } else {
+        statusHtml = `<button type="button" class="seat-row-cta" onclick="openSeatModal(${legIdx})">Choose seats</button>`;
+      }
+
+      return `
+        <div class="seat-row">
+          <div class="seat-row-icon">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+              <path d="M3 12l9-7 9 7M5 11v9h14v-9" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/>
+            </svg>
+          </div>
+          <div class="seat-row-info">
+            <div class="seat-row-route">${escapeHtml(leg.origin)} <span style="color:var(--text-3);font-weight:400;">→</span> ${escapeHtml(leg.destination)}</div>
+            <div class="seat-row-meta">${escapeHtml(leg.airline)} · ${escapeHtml(leg.flight_number)}</div>
+          </div>
+          ${statusHtml}
+        </div>
+      `;
+    }).join('');
+  }
+
+  // Walks the selected outbound + inbound offers and produces a flat list of
+  // (segment-level) legs for the seat picker. Each leg = one physical flight =
+  // one seat map. A round-trip with a connection is multiple legs.
+  function collectLegs() {
     const legs = [];
     if (selectedOutbound) {
-      const s = selectedOutbound.offer.slices[0];
-      legs.push({ origin: s.origin, destination: s.destination, airline: selectedOutbound.offer.airline });
+      const offer = selectedOutbound.offer;
+      const slice = offer.slices[0];
+      slice.segments.forEach(seg => {
+        legs.push({
+          which: 'outbound',
+          offer_id: selectedOutbound.cabinPricing.offer_id,
+          segment_id: seg.flight_number + '@' + seg.departure, // synthetic until we have seat-map data
+          flight_number: seg.flight_number,
+          airline: seg.airline,
+          origin: seg.origin,
+          destination: seg.destination,
+        });
+      });
     }
     if (selectedInbound) {
-      const ib = selectedInbound.offer;
-      const s = ib.slices[1] || ib.slices[0];
-      legs.push({ origin: s.origin, destination: s.destination, airline: ib.airline });
+      const offer = selectedInbound.offer;
+      // Inbound is slices[1] when one offer covers both directions (most carriers),
+      // or slices[0] of a separate inbound offer.
+      const slice = offer.slices[1] || offer.slices[0];
+      slice.segments.forEach(seg => {
+        legs.push({
+          which: 'inbound',
+          offer_id: selectedInbound.cabinPricing.offer_id,
+          segment_id: seg.flight_number + '@' + seg.departure,
+          flight_number: seg.flight_number,
+          airline: seg.airline,
+          origin: seg.origin,
+          destination: seg.destination,
+        });
+      });
     }
-    slot.innerHTML = legs.map(leg => `
-      <div class="seat-row">
-        <div class="seat-row-icon">
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-            <path d="M3 12l9-7 9 7M5 11v9h14v-9" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/>
-          </svg>
-        </div>
-        <div class="seat-row-info">
-          <div class="seat-row-route">${escapeHtml(leg.origin)} <span style="color:var(--text-3);font-weight:400;">→</span> ${escapeHtml(leg.destination)}</div>
-          <div class="seat-row-meta">${escapeHtml(leg.airline)}</div>
-        </div>
-        <div class="seat-row-status unavailable">Select at check-in</div>
-      </div>
+    return legs;
+  }
+
+  function countAssignedSeatsForLeg(segmentId) {
+    let n = 0;
+    for (let i = 0; i < passengerCount; i++) {
+      if (selectedSeats[i]?.[segmentId]) n++;
+    }
+    return n;
+  }
+
+  // ============================================================
+  // SEAT MAP MODAL
+  // ============================================================
+  // State shape:
+  //   selectedSeats[paxIndex][segmentId] = { service_id, designator, cost_kes }
+  //   seatMapsData[offerId] = { slices: [...], available: true/false }
+  // The modal lets the user pick one tab per leg, then for each leg pick one
+  // seat per passenger (clicking a passenger row in the sidebar focuses them).
+
+  // Open the seat picker modal at a given leg index.
+  async function openSeatModal(legIdx) {
+    const legs = collectLegs();
+    if (!legs.length) return;
+    seatModalState = {
+      activeLegIdx: legIdx,
+      activePaxIdx: 0,
+      legs,
+    };
+    renderSeatModal(); // initial render with loading state
+    // Load seat map for each unique offer involved (cached if already fetched)
+    const uniqueOffers = Array.from(new Set(legs.map(l => l.offer_id)));
+    await Promise.all(uniqueOffers.map(loadSeatMapForOffer));
+    renderSeatModal();
+  }
+
+  async function loadSeatMapForOffer(offerId) {
+    if (seatMapsByOffer[offerId]) return;
+    try {
+      const res = await fetch(`${SUPABASE_URL}/functions/v1/get-seat-maps`, {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${SUPABASE_ANON_KEY}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ offer_id: offerId }),
+      });
+      const data = await res.json();
+      seatMapsByOffer[offerId] = data;
+      // Normalize: re-key by segment_id so we can look up by leg without thinking about offers
+      if (data.slices) {
+        data.slices.forEach(slice => {
+          slice.segments.forEach(seg => {
+            seatMapsData[seg.segment_id] = {
+              ...seg,
+              unavailable: !seg.available,
+            };
+            // Also key by our synthetic flight_number@departure since the collectLegs
+            // version uses that when we haven't yet correlated. We'll re-map below.
+          });
+        });
+      }
+    } catch (e) {
+      console.warn('Failed to load seat map for offer', offerId, e);
+      seatMapsByOffer[offerId] = { available: false, slices: [] };
+    }
+    // Re-correlate legs to real segment_ids from seat-map data.
+    correlateLegsToSegments();
+  }
+
+  // The frontend doesn't naturally have the Duffel segment_id (search-flights
+  // returns synthetic data); but seat-map response gives both flight_number and
+  // segment_id. We match by flight_number to update our legs' segment_id.
+  function correlateLegsToSegments() {
+    const legs = collectLegs();
+    for (const leg of legs) {
+      for (const offerId of Object.keys(seatMapsByOffer)) {
+        const sm = seatMapsByOffer[offerId];
+        if (!sm.slices) continue;
+        for (const slice of sm.slices) {
+          for (const seg of slice.segments) {
+            if (seg.flight_number === leg.flight_number) {
+              // Re-key seatMapsData entry from synthetic key to real segment_id
+              // (just ensure both keys point at the same object — selectedSeats
+              // uses the synthetic key so we keep it consistent everywhere).
+              seatMapsData[leg.segment_id] = {
+                ...seg,
+                unavailable: !seg.available,
+              };
+            }
+          }
+        }
+      }
+    }
+  }
+
+  function closeSeatModal() {
+    seatModalState = null;
+    const el = document.getElementById('seat-modal-root');
+    if (el) el.remove();
+    renderSeatsList();
+    renderBookingSummary();
+  }
+
+  function renderSeatModal() {
+    // Remove any existing modal
+    let root = document.getElementById('seat-modal-root');
+    if (root) root.remove();
+    if (!seatModalState) return;
+
+    const { legs, activeLegIdx, activePaxIdx } = seatModalState;
+    const leg = legs[activeLegIdx];
+    const segData = seatMapsData[leg.segment_id];
+    const loading = !seatMapsByOffer[leg.offer_id];
+    const unavailable = !loading && (!segData || segData.unavailable);
+
+    // Find the cabin matching the booked cabin class. Frontend stores it on
+    // selectedOutbound.cabin / selectedInbound.cabin.
+    const bookedCabin = (leg.which === 'outbound' ? selectedOutbound : selectedInbound)?.cabin || 'economy';
+    const cabin = !loading && !unavailable
+      ? (segData.cabins.find(c => c.cabin_class === bookedCabin) || segData.cabins[0])
+      : null;
+
+    root = document.createElement('div');
+    root.id = 'seat-modal-root';
+    root.className = 'seat-modal-backdrop';
+    root.addEventListener('click', (e) => {
+      if (e.target === root) closeSeatModal();
+    });
+
+    const tabsHtml = legs.map((l, i) => `
+      <button type="button" class="seat-modal-tab ${i === activeLegIdx ? 'active' : ''}"
+        onclick="switchSeatModalLeg(${i})">${escapeHtml(l.origin)}→${escapeHtml(l.destination)}</button>
     `).join('');
+
+    const paxRowsHtml = Array.from({ length: passengerCount }).map((_, i) => {
+      const data = passengerData[i] || travelerStates[i]?.data || {};
+      const name = (data.given_name || `Traveler ${i + 1}`) + (data.family_name ? ' ' + data.family_name : '');
+      const sel = selectedSeats[i]?.[leg.segment_id];
+      return `
+        <div class="seat-modal-pax-row ${i === activePaxIdx ? 'active' : ''}" onclick="switchSeatModalPax(${i})">
+          <div class="seat-modal-pax-name">${escapeHtml(name)}</div>
+          <div class="seat-modal-pax-seat ${sel ? '' : 'empty'}">${sel ? escapeHtml(sel.designator) : '—'}</div>
+        </div>
+      `;
+    }).join('');
+
+    let bodyHtml;
+    if (loading) {
+      bodyHtml = '<div class="seat-modal-fallback">Loading seat map…</div>';
+    } else if (unavailable) {
+      bodyHtml = `
+        <div class="seat-modal-fallback">
+          <strong>Seat selection isn't available for this flight.</strong>
+          The airline will assign seats at check-in. You can still request a preference at the airport.
+        </div>
+      `;
+    } else {
+      bodyHtml = `
+        <div style="display:grid;grid-template-columns:200px 1fr;gap:18px;">
+          <div>${paxRowsHtml}</div>
+          <div>
+            <div class="seat-grid-wrap">
+              <div class="seat-grid">
+                <div class="seat-grid-nose"></div>
+                ${renderSeatGridRows(cabin, leg, activePaxIdx)}
+              </div>
+            </div>
+          </div>
+        </div>
+      `;
+    }
+
+    const total = seatTotalCostKes();
+
+    root.innerHTML = `
+      <div class="seat-modal">
+        <div class="seat-modal-head">
+          <div>
+            <div class="seat-modal-title">Choose seats</div>
+            <div class="seat-modal-sub">${escapeHtml(leg.flight_number)} · ${escapeHtml(leg.origin)} → ${escapeHtml(leg.destination)}</div>
+          </div>
+          <button type="button" class="seat-modal-close" onclick="closeSeatModal()" aria-label="Close">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><path d="M6 6l12 12M6 18L18 6" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+          </button>
+        </div>
+        <div class="seat-modal-tabs">${tabsHtml}</div>
+        <div class="seat-modal-body">${bodyHtml}</div>
+        ${!loading && !unavailable ? `
+          <div class="seat-modal-legend">
+            <div class="seat-legend-item"><div class="seat-legend-swatch"></div>Available</div>
+            <div class="seat-legend-item"><div class="seat-legend-swatch selected"></div>Selected</div>
+            <div class="seat-legend-item"><div class="seat-legend-swatch other-pax"></div>Other traveler</div>
+            <div class="seat-legend-item"><div class="seat-legend-swatch unavailable"></div>Taken</div>
+          </div>
+        ` : ''}
+        <div class="seat-modal-foot">
+          <div class="seat-modal-total">${total > 0 ? `Seat charges: <strong>KES ${total.toLocaleString()}</strong>` : 'Optional — skip to keep airline assignment'}</div>
+          <button type="button" class="btn btn-primary" onclick="closeSeatModal()">Done</button>
+        </div>
+      </div>
+    `;
+    document.body.appendChild(root);
+  }
+
+  function renderSeatGridRows(cabin, leg, activePaxIdx) {
+    if (!cabin || !cabin.rows?.length) return '<div class="seat-modal-fallback">No seats to display.</div>';
+    return cabin.rows.map(row => {
+      const cellsHtml = row.elements.map(el => {
+        if (el.type !== 'seat') {
+          return `<div class="seat-cell ${el.type}"></div>`;
+        }
+        // Is this seat picked by ANY passenger?
+        let pickedBy = -1;
+        for (let i = 0; i < passengerCount; i++) {
+          if (selectedSeats[i]?.[leg.segment_id]?.designator === el.designator) {
+            pickedBy = i;
+            break;
+          }
+        }
+        let cls = 'seat-cell seat';
+        if (!el.available) cls += ' unavailable';
+        else if (pickedBy === activePaxIdx) cls += ' selected';
+        else if (pickedBy >= 0) cls += ' taken-by-other';
+        if (el.features?.includes('extra_legroom')) cls += ' extra-legroom';
+        const onclick = el.available
+          ? `onclick="pickSeat('${escapeJs(leg.segment_id)}', '${escapeJs(el.service_id)}', '${escapeJs(el.designator)}', ${el.cost_kes})"`
+          : '';
+        const col = el.designator.slice(-1);
+        const cost = el.cost_kes > 0 ? `\nKES ${el.cost_kes}` : '';
+        const title = `${el.designator}${cost}`;
+        return `<div class="${cls}" ${onclick} title="${escapeHtml(title)}">${escapeHtml(col)}</div>`;
+      }).join('');
+      return `<div class="seat-grid-row"><div class="seat-grid-row-num">${escapeHtml(row.row_number || '')}</div>${cellsHtml}</div>`;
+    }).join('');
+  }
+
+  // Tiny escape for inline-onclick JS string args (covers quotes and backslashes).
+  function escapeJs(s) {
+    return String(s).replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+  }
+
+  function pickSeat(segmentId, serviceId, designator, costKes) {
+    if (!seatModalState) return;
+    const paxIdx = seatModalState.activePaxIdx;
+    // If this seat is held by another passenger, swap: clear theirs first.
+    for (let i = 0; i < passengerCount; i++) {
+      if (i !== paxIdx && selectedSeats[i]?.[segmentId]?.designator === designator) {
+        delete selectedSeats[i][segmentId];
+      }
+    }
+    // Toggle: clicking your own seat clears it.
+    if (selectedSeats[paxIdx]?.[segmentId]?.designator === designator) {
+      delete selectedSeats[paxIdx][segmentId];
+    } else {
+      if (!selectedSeats[paxIdx]) selectedSeats[paxIdx] = {};
+      selectedSeats[paxIdx][segmentId] = { service_id: serviceId, designator, cost_kes: costKes };
+    }
+    // Auto-advance to the next passenger who doesn't yet have a seat on this leg
+    for (let i = 1; i < passengerCount; i++) {
+      const next = (paxIdx + i) % passengerCount;
+      if (!selectedSeats[next]?.[segmentId]) {
+        seatModalState.activePaxIdx = next;
+        break;
+      }
+    }
+    renderSeatModal();
+  }
+
+  function switchSeatModalLeg(idx) {
+    if (!seatModalState) return;
+    seatModalState.activeLegIdx = idx;
+    seatModalState.activePaxIdx = 0;
+    renderSeatModal();
+  }
+
+  function switchSeatModalPax(idx) {
+    if (!seatModalState) return;
+    seatModalState.activePaxIdx = idx;
+    renderSeatModal();
+  }
+
+  function seatTotalCostKes() {
+    let total = 0;
+    for (let i = 0; i < passengerCount; i++) {
+      const segs = selectedSeats[i] || {};
+      for (const k of Object.keys(segs)) total += segs[k].cost_kes || 0;
+    }
+    return total;
+  }
+
+  // Returns array of { passenger_id_placeholder, service_id, segment_id, designator, cost_kes }
+  // Backend/webhook will translate passenger_id_placeholder (which is the index)
+  // into the Duffel passenger.id by zipping it with offer.passengers order at booking time.
+  function collectSeatSelections() {
+    const out = [];
+    for (let i = 0; i < passengerCount; i++) {
+      const segs = selectedSeats[i] || {};
+      for (const segmentId of Object.keys(segs)) {
+        const s = segs[segmentId];
+        out.push({
+          passenger_index: i,
+          service_id: s.service_id,
+          segment_id: segmentId,
+          designator: s.designator,
+          cost_kes: s.cost_kes,
+        });
+      }
+    }
+    return out;
   }
 
   // Capture current form values into the state without saving (used before re-rendering
@@ -5411,11 +6047,15 @@
     const cab = currentCurrency === 'USD' ? 'price_usd' : 'price_kes';
     const baseKes = (selectedOutbound?.cabinPricing?.price_kes || 0)
                   + (selectedInbound?.cabinPricing?.price_kes || 0);
-    const subtotal = baseKes + TUMAFLY_SERVICE_FEE_KES;
+    // Seat selection fees roll into the base (treated as part of the flight price
+    // for fee/tax purposes — Pesapal gross-up applies on the full subtotal).
+    const seatsKes = seatTotalCostKes();
+    const subtotal = baseKes + seatsKes + TUMAFLY_SERVICE_FEE_KES;
     const processingFeeKes = Math.ceil(subtotal * PESAPAL_FEE_RATE / (1 - PESAPAL_FEE_RATE));
     const totalKes = subtotal + processingFeeKes;
     return {
       base_kes: baseKes,
+      seats_kes: seatsKes,
       service_fee_kes: TUMAFLY_SERVICE_FEE_KES,
       processing_fee_kes: processingFeeKes,
       total_kes: totalKes,
@@ -5430,9 +6070,11 @@
     // Payment page: pass `breakdown` from the create-payment server response (authoritative).
     const b = breakdown || estimateBreakdown();
     const isEstimate = !breakdown;
+    const seatsKes = b.seats_kes || 0;
 
     const breakdownHtml = `
       <div class="line"><span class="label">Flight <span style="color:var(--text-3);font-size:12px;">(taxes included)</span></span><span class="value">KES ${b.base_kes.toLocaleString()}</span></div>
+      ${seatsKes > 0 ? `<div class="line"><span class="label">Seat selection</span><span class="value">KES ${seatsKes.toLocaleString()}</span></div>` : ''}
       <div class="line"><span class="label">TumaFly service fee</span><span class="value">KES ${b.service_fee_kes.toLocaleString()}</span></div>
       <div class="line"><span class="label">Payment processing</span><span class="value">KES ${b.processing_fee_kes.toLocaleString()}</span></div>
       <div class="divider"></div>
@@ -5729,6 +6371,7 @@
           offer_id: selectedOutbound.cabinPricing.offer_id,
           passengers: passengerData,
           contact: contactData,
+          seats: collectSeatSelections(),
           turnstile_token: turnstileToken,
         }),
       });
@@ -5852,7 +6495,7 @@
   //   https://dash.cloudflare.com → Turnstile → Add site
   // The default below is Cloudflare's "always passes" test sitekey, useful for
   // local development. With this default, real bots will not actually be blocked.
-  const TURNSTILE_SITEKEY = '0x4AAAAAADpPM2PIaZcEwdQX';
+  const TURNSTILE_SITEKEY = '1x00000000000000000000AA';
 
   let turnstileSearchToken = '';
   let turnstilePaymentToken = '';
@@ -5865,6 +6508,7 @@
     try {
       turnstileSearchWidgetId = turnstile.render('#turnstile-host-search', {
         sitekey: TURNSTILE_SITEKEY,
+        size: 'invisible',
         action: 'search',
         callback: (token) => { turnstileSearchToken = token; },
         'error-callback': () => { turnstileSearchToken = ''; },
@@ -5872,6 +6516,7 @@
       });
       turnstilePaymentWidgetId = turnstile.render('#turnstile-host-payment', {
         sitekey: TURNSTILE_SITEKEY,
+        size: 'invisible',
         action: 'payment',
         callback: (token) => { turnstilePaymentToken = token; },
         'error-callback': () => { turnstilePaymentToken = ''; },
