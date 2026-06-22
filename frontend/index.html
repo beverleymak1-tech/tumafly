@@ -5922,9 +5922,11 @@
 
 </script>
 
-<!-- Turnstile widget hosts — kept off-screen. Cloudflare's widget mounts here. -->
-<div id="turnstile-host-search" style="position:fixed;left:-9999px;top:-9999px;width:1px;height:1px;overflow:hidden;" aria-hidden="true"></div>
-<div id="turnstile-host-payment" style="position:fixed;left:-9999px;top:-9999px;width:1px;height:1px;overflow:hidden;" aria-hidden="true"></div>
+<!-- Turnstile widget hosts. Cloudflare requires invisible widgets to be in normal
+     DOM flow (not display:none, not positioned off-screen). The widgets render no
+     visible UI so these divs stay 0×0; no layout impact. -->
+<div id="turnstile-host-search"></div>
+<div id="turnstile-host-payment"></div>
 
 </body>
 </html>
