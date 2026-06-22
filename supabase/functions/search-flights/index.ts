@@ -2,6 +2,8 @@ import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 
 const DUFFEL_API_KEY = Deno.env.get("DUFFEL_API_KEY");
 const DUFFEL_BASE_URL = "https://api.duffel.com";
+const TURNSTILE_SECRET = Deno.env.get("TURNSTILE_SECRET") || "";
+const TURNSTILE_SITEVERIFY_URL = "https://challenges.cloudflare.com/turnstile/v0/siteverify";
 
 const CABIN_CLASSES = ["economy", "premium_economy", "business", "first"] as const;
 type CabinClass = typeof CABIN_CLASSES[number];
@@ -15,6 +17,38 @@ const CORS_HEADERS = {
   "Access-Control-Allow-Headers": "authorization, content-type",
   "Content-Type": "application/json",
 };
+
+// Verify a Cloudflare Turnstile token by calling their siteverify endpoint.
+// Returns true (allow) when no secret is configured — this is intentional: lets
+// the function ship before the Turnstile site is registered at Cloudflare and
+// the secret is set. Once TURNSTILE_SECRET is set in Supabase secrets,
+// verification becomes enforced (returns true only if Cloudflare confirms).
+async function verifyTurnstileToken(token: string, remoteIp?: string): Promise<boolean> {
+  if (!TURNSTILE_SECRET) {
+    // Fail-open: not configured yet
+    return true;
+  }
+  if (!token) {
+    return false;
+  }
+  const body = new URLSearchParams({ secret: TURNSTILE_SECRET, response: token });
+  if (remoteIp) body.set("remoteip", remoteIp);
+  try {
+    const res = await fetch(TURNSTILE_SITEVERIFY_URL, {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body,
+    });
+    const data = await res.json();
+    if (!data.success) {
+      console.warn("Turnstile verification failed:", data["error-codes"]);
+    }
+    return !!data.success;
+  } catch (e) {
+    console.error("Turnstile siteverify network error:", e);
+    return false; // fail-closed on network error when secret IS configured
+  }
+}
 
 // ---------- FX ----------
 
@@ -139,7 +173,22 @@ serve(async (req) => {
   }
 
   try {
-    const { origin, destination, date, return_date, passengers = 1 } = await req.json();
+    const { origin, destination, date, return_date, passengers = 1, turnstile_token } = await req.json();
+
+    // Bot protection (Cloudflare Turnstile). No-op when TURNSTILE_SECRET isn't set,
+    // so this is safe to deploy before the Turnstile site is registered.
+    const clientIp = req.headers.get("x-forwarded-for")?.split(",")[0]?.trim()
+      || req.headers.get("cf-connecting-ip")
+      || undefined;
+    const passesTurnstile = await verifyTurnstileToken(turnstile_token || "", clientIp);
+    if (!passesTurnstile) {
+      return new Response(JSON.stringify({
+        error: "Verification failed. Please refresh the page and try again.",
+      }), {
+        status: 403,
+        headers: CORS_HEADERS,
+      });
+    }
 
     const slices: any[] = [{ origin, destination, departure_date: date }];
     if (return_date) {

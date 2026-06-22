@@ -8,6 +8,9 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <!-- Cloudflare Turnstile — bot-protection for /search-flights and /create-payment.
+       Widgets render invisibly into hidden containers at the bottom of the body. -->
+  <script src="https://challenges.cloudflare.com/turnstile/v0/api.js?onload=onTurnstileLoad" async defer></script>
   <style>
     :root {
       --brand: #3D95F5;
@@ -2186,6 +2189,59 @@
     }
     .intl-banner-warn svg { color: #dc2626; }
 
+    /* Fare-timer bar — shown at the top of booking + payment views. The customer's
+       Duffel offer expires after a fixed window (typically 20 min from search). We
+       surface the remaining time so they're not blindsided by a paid_offer_expired
+       case mid-checkout. Three visual states: normal (slate), warning (<2 min, red),
+       expired (red banner + Search-again CTA). */
+    .fare-timer-bar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      padding: 10px 16px;
+      border-radius: var(--radius-sm);
+      background: var(--surface);
+      border: 1px solid var(--border-2);
+      color: var(--text-2);
+      font-size: 13px;
+      margin-bottom: 16px;
+    }
+    .fare-timer-bar .ft-label {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .fare-timer-bar .ft-time {
+      font-variant-numeric: tabular-nums;
+      font-weight: 600;
+      color: var(--ink);
+    }
+    .fare-timer-bar.warning {
+      background: rgba(220, 38, 38, 0.06);
+      border-color: rgba(220, 38, 38, 0.3);
+      color: #dc2626;
+    }
+    .fare-timer-bar.warning .ft-time { color: #dc2626; }
+    .fare-timer-bar.expired {
+      background: rgba(220, 38, 38, 0.08);
+      border-color: rgba(220, 38, 38, 0.4);
+      color: #dc2626;
+    }
+    .fare-timer-bar.expired .ft-time { color: #dc2626; }
+    .fare-timer-bar .ft-search-again {
+      font-family: inherit;
+      font-size: 13px;
+      font-weight: 600;
+      padding: 6px 14px;
+      background: #dc2626;
+      color: white;
+      border: none;
+      border-radius: var(--radius-sm);
+      cursor: pointer;
+    }
+    .fare-timer-bar .ft-search-again:hover { background: #b91c1c; }
+
     /* Required passport field error states — labels and inputs go red, with helper text below */
     .pax-label-err { color: #dc2626 !important; }
     .pax-input-err {
@@ -2764,6 +2820,7 @@
      ============================================================ -->
 <div id="view-booking" class="hidden">
   <div class="page">
+    <div id="booking-fare-timer" class="fare-timer-bar hidden"></div>
     <div class="booking-layout">
       <div>
         <div class="card">
@@ -2833,6 +2890,7 @@
      ============================================================ -->
 <div id="view-payment" class="hidden">
   <div class="page">
+    <div id="payment-fare-timer" class="fare-timer-bar hidden"></div>
     <div class="booking-layout">
       <div>
         <div class="card">
@@ -3036,6 +3094,16 @@
   let pollHandle = null;
   let pollStartedAt = null;
 
+  // Stashed by runSearch so the fare-timer's "Search again" CTA can re-run the
+  // same query when an offer expires mid-checkout.
+  let lastSearchParams = null;
+
+  // Fare-timer state. Single interval shared between booking + payment views.
+  // expiresAtMs: the earlier of selectedOutbound/selectedInbound offer expires_at.
+  let fareTimerHandle = null;
+  let fareTimerExpiresAtMs = 0;
+  let fareTimerExpired = false;
+
   // Autocomplete state
   let airportsData = null;
   let airportsLoadPromise = null;
@@ -3105,6 +3173,12 @@
       clearTimeout(pollHandle);
       pollHandle = null;
     }
+    // Fare timer: start when entering booking/payment, stop everywhere else.
+    if (name === 'booking' || name === 'payment') {
+      startFareTimer(name);
+    } else {
+      stopFareTimer();
+    }
     if (!opts.fromPopState) {
       const state = { view: name };
       let currentState = null;
@@ -3113,6 +3187,143 @@
         safeHistory('push', state, '#' + name);
       }
     }
+  }
+
+  // ============================================================
+  // FARE TIMER
+  // ============================================================
+  // Duffel offers expire 10-20 min after creation. Show a live countdown on the
+  // booking and payment views so users see how long they have, and force a re-search
+  // if the offer dies mid-checkout. Backend safety still applies: create-payment.ts
+  // 410s if the offer has under 60s left at payment-start time, so the timer's job
+  // is purely UX — preventing the customer from being surprised.
+
+  function getEffectiveExpiresAtMs() {
+    // Returns the EARLIER of outbound/inbound expires_at, in ms-since-epoch. 0 if
+    // we somehow have no offer selected (caller should treat this as "no timer").
+    const outboundExp = selectedOutbound?.offer?.expires_at;
+    const inboundExp = selectedInbound?.offer?.expires_at;
+    const candidates = [outboundExp, inboundExp].filter(Boolean).map(s => new Date(s).getTime());
+    if (!candidates.length) return 0;
+    return Math.min(...candidates);
+  }
+
+  function startFareTimer(viewName) {
+    const expMs = getEffectiveExpiresAtMs();
+    if (!expMs) {
+      // No offer selected — nothing to time. Hide both bars defensively.
+      stopFareTimer();
+      return;
+    }
+    fareTimerExpiresAtMs = expMs;
+    fareTimerExpired = Date.now() >= expMs;
+    if (fareTimerHandle) clearInterval(fareTimerHandle);
+    // Tick once immediately so the bar appears at correct state on view entry
+    tickFareTimer();
+    fareTimerHandle = setInterval(tickFareTimer, 1000);
+  }
+
+  function stopFareTimer() {
+    if (fareTimerHandle) {
+      clearInterval(fareTimerHandle);
+      fareTimerHandle = null;
+    }
+    // Hide both bars so they don't briefly flash on re-entry
+    document.getElementById('booking-fare-timer')?.classList.add('hidden');
+    document.getElementById('payment-fare-timer')?.classList.add('hidden');
+  }
+
+  function tickFareTimer() {
+    if (!fareTimerExpiresAtMs) return;
+    const remainingMs = fareTimerExpiresAtMs - Date.now();
+    const expired = remainingMs <= 0;
+    // Only render to whichever bar is in the active view — hide the other
+    const activeId = !document.getElementById('view-booking').classList.contains('hidden')
+      ? 'booking-fare-timer'
+      : !document.getElementById('view-payment').classList.contains('hidden')
+        ? 'payment-fare-timer'
+        : null;
+    if (!activeId) {
+      // Defensive: shouldn't happen since stopFareTimer is called on view exit,
+      // but if it does, kill the interval.
+      stopFareTimer();
+      return;
+    }
+    document.getElementById('booking-fare-timer')?.classList.add('hidden');
+    document.getElementById('payment-fare-timer')?.classList.add('hidden');
+    const bar = document.getElementById(activeId);
+    if (!bar) return;
+    bar.classList.remove('hidden', 'warning', 'expired');
+
+    if (expired) {
+      fareTimerExpired = true;
+      bar.classList.add('expired');
+      bar.innerHTML = `
+        <div class="ft-label">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+            <circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="1.8"/>
+            <path d="M12 7v6M12 16.5v.5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
+          </svg>
+          <span><strong>Your selected fare expired.</strong> Run the search again to see current options.</span>
+        </div>
+        <button type="button" class="ft-search-again" onclick="rerunSearchFromExpiry()">Search again</button>
+      `;
+      disablePaymentActions();
+      // Stop the interval — nothing more to tick.
+      if (fareTimerHandle) {
+        clearInterval(fareTimerHandle);
+        fareTimerHandle = null;
+      }
+      return;
+    }
+
+    const totalSec = Math.floor(remainingMs / 1000);
+    const mm = String(Math.floor(totalSec / 60)).padStart(2, '0');
+    const ss = String(totalSec % 60).padStart(2, '0');
+    const warn = remainingMs <= 2 * 60 * 1000;
+    if (warn) bar.classList.add('warning');
+    bar.innerHTML = `
+      <div class="ft-label">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+          <circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="1.7"/>
+          <path d="M12 7v5l3 2" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/>
+        </svg>
+        <span>${warn ? 'Fare expires soon — complete payment in' : 'Fare expires in'} <span class="ft-time">${mm}:${ss}</span></span>
+      </div>
+    `;
+  }
+
+  // Disables the obvious "Continue / Pay" buttons after expiry so the user can't
+  // submit a doomed payment. We don't aggressively yank them off the page — that's
+  // jarring if they're mid-card-entry. The Search-again CTA is right there.
+  function disablePaymentActions() {
+    const cardBtn = document.getElementById('card-start-btn');
+    if (cardBtn) { cardBtn.disabled = true; cardBtn.classList.remove('btn-primary'); }
+    // Continue-to-payment buttons (the booking page CTA) — match by data attr if any,
+    // or just disable any [onclick*="goToPayment"] button.
+    document.querySelectorAll('button[onclick*="goToPayment"]').forEach(b => b.disabled = true);
+  }
+
+  function rerunSearchFromExpiry() {
+    if (!lastSearchParams) {
+      // Fallback: send them home so they can start a fresh search
+      showView('home');
+      return;
+    }
+    // Clear current selection so nothing's stale when results re-render
+    selectedOutbound = null;
+    selectedInbound = null;
+    selectedOffer = null;
+    stopFareTimer();
+    showView('results');
+    runSearch({
+      origin: lastSearchParams.origin,
+      destination: lastSearchParams.destination,
+      date: lastSearchParams.date,
+      returnDate: lastSearchParams.returnDate,
+      fromButton: null,
+      alertContainer: 'results-alert',
+    });
   }
 
   // Handle the browser back/forward buttons
@@ -3817,7 +4028,13 @@
 
   // Shared search engine — used by home form, results "Update" button, and live edits in results summary bar
   async function runSearch({ origin, destination, date, returnDate, fromButton, alertContainer }) {
+    // Stash the params so the fare-timer's "Search again" button can re-run the
+    // same search after an offer expires mid-checkout.
+    lastSearchParams = { origin, destination, date, returnDate };
     if (fromButton) { fromButton.classList.add('btn-loading'); fromButton.disabled = true; }
+    // Bot-protection: get a Turnstile token (no-op if widget isn't loaded yet —
+    // backend fails open when TURNSTILE_SECRET isn't configured).
+    const turnstileToken = await ensureTurnstileToken('search');
     try {
       const res = await fetch(`${SUPABASE_URL}/functions/v1/search-flights`, {
         method: 'POST',
@@ -3826,6 +4043,7 @@
           origin, destination, date,
           return_date: tripType === 'round' ? returnDate : null,
           passengers: passengerCount,
+          turnstile_token: turnstileToken,
         }),
       });
       const data = await res.json();
@@ -3833,6 +4051,8 @@
         const msg = data.error?.errors?.[0]?.message || data.error?.message || 'Search failed. Try different airports or dates.';
         return showAlert(alertContainer, msg);
       }
+      // Token is single-use — get a fresh one for the next search
+      resetTurnstile('search');
       allOffers = data.offers || [];
       cabinDiagnostics = data.cabin_diagnostics || null;
       if (!allOffers.length) {
@@ -5489,6 +5709,9 @@
     if (btn) { btn.classList.add('btn-loading'); btn.disabled = true; }
 
     try {
+      // Bot-protection: get a Turnstile token (fails open if widget not loaded
+      // or if backend has no TURNSTILE_SECRET configured).
+      const turnstileToken = await ensureTurnstileToken('payment');
       const res = await fetch(`${SUPABASE_URL}/functions/v1/create-payment`, {
         method: 'POST',
         headers: { 'Authorization': `Bearer ${SUPABASE_ANON_KEY}`, 'Content-Type': 'application/json' },
@@ -5496,10 +5719,13 @@
           offer_id: selectedOutbound.cabinPricing.offer_id,
           passengers: passengerData,
           contact: contactData,
+          turnstile_token: turnstileToken,
         }),
       });
       const data = await res.json();
       if (!res.ok || data.error || !data.redirect_url) {
+        // Reset so the next attempt gets a fresh token
+        resetTurnstile('payment');
         return showAlert('payment-alert', data.error || 'Could not start payment. Please try again.');
       }
       activeMerchantRef = data.merchant_ref;
@@ -5509,6 +5735,10 @@
       document.getElementById('card-iframe-wrap').innerHTML = `
         <iframe src="${escapeHtml(data.redirect_url)}" title="Pesapal payment" allow="payment"></iframe>
       `;
+
+      // Payment is now in flight — stop showing the countdown. Backend's
+      // paid_offer_expired flow handles any race-with-expiry from here.
+      stopFareTimer();
 
       // Begin polling
       startPolling();
@@ -5600,7 +5830,84 @@
     clearAlert('payment-alert');
   }
 
+  // ============================================================
+  // TURNSTILE (Cloudflare bot protection)
+  // ============================================================
+  // Two widget instances — one bound to "search", one to "payment" — render
+  // invisibly into the containers in the footer. Tokens auto-generate on load
+  // and are stored in module-level vars; after each successful submit we call
+  // turnstile.reset() to issue a fresh token for the next call.
+  //
+  // ⚠️ Replace TURNSTILE_SITEKEY with your real sitekey from
+  //   https://dash.cloudflare.com → Turnstile → Add site
+  // The default below is Cloudflare's "always passes" test sitekey, useful for
+  // local development. With this default, real bots will not actually be blocked.
+  const TURNSTILE_SITEKEY = '1x00000000000000000000AA';
+
+  let turnstileSearchToken = '';
+  let turnstilePaymentToken = '';
+  let turnstileSearchWidgetId = null;
+  let turnstilePaymentWidgetId = null;
+
+  // Called by Cloudflare's script after it loads (see onload=onTurnstileLoad in <head>).
+  window.onTurnstileLoad = function () {
+    if (typeof turnstile === 'undefined') return;
+    try {
+      turnstileSearchWidgetId = turnstile.render('#turnstile-host-search', {
+        sitekey: TURNSTILE_SITEKEY,
+        size: 'invisible',
+        action: 'search',
+        callback: (token) => { turnstileSearchToken = token; },
+        'error-callback': () => { turnstileSearchToken = ''; },
+        'expired-callback': () => { turnstileSearchToken = ''; },
+      });
+      turnstilePaymentWidgetId = turnstile.render('#turnstile-host-payment', {
+        sitekey: TURNSTILE_SITEKEY,
+        size: 'invisible',
+        action: 'payment',
+        callback: (token) => { turnstilePaymentToken = token; },
+        'error-callback': () => { turnstilePaymentToken = ''; },
+        'expired-callback': () => { turnstilePaymentToken = ''; },
+      });
+    } catch (e) {
+      console.warn('Turnstile render failed:', e);
+    }
+  };
+
+  // Wait up to timeoutMs for a Turnstile token to be available for the given
+  // widget. If turnstile.execute is supported (invisible widgets), trigger it.
+  // Returns the token, or empty string if we time out — the backend will then
+  // decide whether to fail-open (no secret configured) or fail-closed.
+  async function ensureTurnstileToken(which) {
+    const get = () => which === 'search' ? turnstileSearchToken : turnstilePaymentToken;
+    if (get()) return get();
+    if (typeof turnstile === 'undefined') return '';
+    const widgetId = which === 'search' ? turnstileSearchWidgetId : turnstilePaymentWidgetId;
+    if (widgetId == null) return '';
+    try { turnstile.execute(widgetId); } catch {}
+    // Poll for token (token arrives via callback)
+    const deadline = Date.now() + 4000;
+    while (Date.now() < deadline) {
+      await new Promise(r => setTimeout(r, 100));
+      if (get()) return get();
+    }
+    return '';
+  }
+
+  function resetTurnstile(which) {
+    if (typeof turnstile === 'undefined') return;
+    const widgetId = which === 'search' ? turnstileSearchWidgetId : turnstilePaymentWidgetId;
+    if (widgetId == null) return;
+    try { turnstile.reset(widgetId); } catch {}
+    if (which === 'search') turnstileSearchToken = '';
+    else turnstilePaymentToken = '';
+  }
+
 </script>
+
+<!-- Turnstile widget hosts — kept off-screen. Cloudflare's widget mounts here. -->
+<div id="turnstile-host-search" style="position:fixed;left:-9999px;top:-9999px;width:1px;height:1px;overflow:hidden;" aria-hidden="true"></div>
+<div id="turnstile-host-payment" style="position:fixed;left:-9999px;top:-9999px;width:1px;height:1px;overflow:hidden;" aria-hidden="true"></div>
 
 </body>
 </html>

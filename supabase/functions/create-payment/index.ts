@@ -10,6 +10,8 @@ const PESAPAL_CONSUMER_KEY = Deno.env.get("PESAPAL_CONSUMER_KEY")!;
 const PESAPAL_CONSUMER_SECRET = Deno.env.get("PESAPAL_CONSUMER_SECRET")!;
 const PESAPAL_IPN_ID = Deno.env.get("PESAPAL_IPN_ID")!;
 const FRONTEND_URL = Deno.env.get("FRONTEND_URL")!;
+const TURNSTILE_SECRET = Deno.env.get("TURNSTILE_SECRET") || "";
+const TURNSTILE_SITEVERIFY_URL = "https://challenges.cloudflare.com/turnstile/v0/siteverify";
 
 // TumaFly's flat service fee, in KES (your margin)
 const TUMAFLY_SERVICE_FEE_KES = 1500;
@@ -29,6 +31,38 @@ const CORS_HEADERS = {
 const FALLBACK_RATES: Record<string, number> = {
   GBP: 170, USD: 130, EUR: 140, AED: 35, QAR: 36,
 };
+
+// Verify a Cloudflare Turnstile token by calling their siteverify endpoint.
+// Returns true (allow) when no secret is configured — this is intentional: lets
+// the function ship before the Turnstile site is registered at Cloudflare and
+// the secret is set. Once TURNSTILE_SECRET is set in Supabase secrets,
+// verification becomes enforced (returns true only if Cloudflare confirms).
+async function verifyTurnstileToken(token: string, remoteIp?: string): Promise<boolean> {
+  if (!TURNSTILE_SECRET) {
+    // Fail-open: not configured yet
+    return true;
+  }
+  if (!token) {
+    return false;
+  }
+  const body = new URLSearchParams({ secret: TURNSTILE_SECRET, response: token });
+  if (remoteIp) body.set("remoteip", remoteIp);
+  try {
+    const res = await fetch(TURNSTILE_SITEVERIFY_URL, {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body,
+    });
+    const data = await res.json();
+    if (!data.success) {
+      console.warn("Turnstile verification failed:", data["error-codes"]);
+    }
+    return !!data.success;
+  } catch (e) {
+    console.error("Turnstile siteverify network error:", e);
+    return false; // fail-closed on network error when secret IS configured
+  }
+}
 
 async function toKES(amount: number, fromCurrency: string): Promise<number> {
   if (fromCurrency === "KES") return Math.round(amount);
@@ -63,12 +97,27 @@ serve(async (req) => {
   const supabase = createClient(SUPABASE_URL, SERVICE_ROLE_KEY);
 
   try {
-    const { offer_id, passengers, contact } = await req.json();
+    const { offer_id, passengers, contact, turnstile_token } = await req.json();
 
     // 1. Validate
     if (!offer_id || !passengers?.length || !contact?.email) {
       return new Response(JSON.stringify({ error: "Missing required fields" }), {
         status: 400,
+        headers: { ...CORS_HEADERS, "Content-Type": "application/json" },
+      });
+    }
+
+    // 1a. Bot protection (Cloudflare Turnstile). No-op when TURNSTILE_SECRET
+    // isn't set, so this is safe to deploy before the Turnstile site is registered.
+    const clientIp = req.headers.get("x-forwarded-for")?.split(",")[0]?.trim()
+      || req.headers.get("cf-connecting-ip")
+      || undefined;
+    const passesTurnstile = await verifyTurnstileToken(turnstile_token || "", clientIp);
+    if (!passesTurnstile) {
+      return new Response(JSON.stringify({
+        error: "Verification failed. Please refresh the page and try again.",
+      }), {
+        status: 403,
         headers: { ...CORS_HEADERS, "Content-Type": "application/json" },
       });
     }
