@@ -235,6 +235,15 @@ serve(async (req) => {
         price: Math.min(...Object.values(b.cabins).filter(Boolean).map((c: any) => c.price_kes)),
         price_usd: Math.min(...Object.values(b.cabins).filter(Boolean).map((c: any) => c.price_usd)),
 
+        // Flexibility conditions — change & refund rules, expiry. Used by the flight
+        // details modal to tell the user up-front whether the fare is changeable or
+        // refundable, and how much it would cost. Only normalised non-null fields here.
+        conditions: o.conditions ? {
+          change_before_departure: o.conditions.change_before_departure || null,
+          refund_before_departure: o.conditions.refund_before_departure || null,
+        } : null,
+        expires_at: o.expires_at || null,
+
         slices: o.slices.map((slice: any) => {
           const segments = slice.segments.map((seg: any, idx: number) => {
             const pax = seg.passengers?.[0];
