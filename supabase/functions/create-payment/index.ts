@@ -16,6 +16,9 @@ const TUMAFLY_SERVICE_FEE_KES = 1500;
 
 // Pesapal's flat merchant fee — 3.5% on M-Pesa and cards.
 // Passed through to customer as a separate line item.
+// Fee is charged on the GROSS amount Pesapal receives, so we must gross-up:
+//   processingFee = subtotal * rate / (1 - rate)
+// This ensures subtotal + processingFee - (gross * rate) == subtotal (we net our full subtotal).
 const PESAPAL_FEE_RATE = 0.035;
 
 const CORS_HEADERS = {
@@ -107,7 +110,9 @@ serve(async (req) => {
       offer.total_currency
     );
     const subtotal = baseAmountKES + TUMAFLY_SERVICE_FEE_KES;
-    const processingFeeKES = Math.ceil(subtotal * PESAPAL_FEE_RATE);
+    // Gross-up: Pesapal charges rate on the total they receive, not on our subtotal.
+    // So processingFee = subtotal * rate / (1 - rate) to ensure we net the full subtotal.
+    const processingFeeKES = Math.ceil(subtotal * PESAPAL_FEE_RATE / (1 - PESAPAL_FEE_RATE));
     const totalKES = subtotal + processingFeeKES;
 
     // 4. Insert pending_booking BEFORE Pesapal call (so webhook can always find it)

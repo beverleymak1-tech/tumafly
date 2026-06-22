@@ -143,6 +143,11 @@ serve(async (req) => {
 
     const emailData = await emailRes.json();
 
+    // Log Resend failures so we know exactly what went wrong (previously silent)
+    if (!emailRes.ok) {
+      console.error("Resend email failed:", JSON.stringify(emailData));
+    }
+
     // Also log the alert to a table for audit/dashboard later
     const supabase = createClient(SUPABASE_URL, SERVICE_ROLE_KEY);
     await supabase.from("alerts").insert({
@@ -152,6 +157,7 @@ serve(async (req) => {
       sent_to: FOUNDER_EMAIL,
       email_id: emailData.id || null,
       email_status: emailRes.ok ? "sent" : "failed",
+      ...(emailRes.ok ? {} : { context: { ...context, resend_error: emailData } }),
     });
 
     return new Response(JSON.stringify({

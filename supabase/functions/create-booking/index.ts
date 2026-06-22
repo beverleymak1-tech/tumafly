@@ -16,6 +16,28 @@ serve(async (req) => {
     return new Response("ok", { headers: CORS_HEADERS });
   }
 
+  // ── DEPRECATION GUARD ──────────────────────────────────────────────────────
+  // This function (create-booking) is the legacy direct-booking path and is no
+  // longer used by the TumaFly frontend. All bookings now go through:
+  //   create-payment → pesapal-webhook (cards)
+  //   create-mpesa-stk → mpesa-callback (M-Pesa)
+  //
+  // We keep the function deployed so existing Duffel order lookups still work,
+  // but we restrict it to service_role only so anon/authenticated keys (i.e.
+  // any browser caller) cannot trigger it.
+  // ────────────────────────────────────────────────────────────────────────────
+  const authHeader = req.headers.get("Authorization") || "";
+  if (!authHeader.includes(SERVICE_ROLE_KEY!)) {
+    console.warn("create-booking called without service_role key — blocked");
+    return new Response(
+      JSON.stringify({ error: "This endpoint is deprecated and restricted to internal use only." }),
+      {
+        status: 403,
+        headers: { ...CORS_HEADERS, "Content-Type": "application/json" },
+      }
+    );
+  }
+
   const supabase = createClient(SUPABASE_URL!, SERVICE_ROLE_KEY!);
 
   try {
@@ -150,7 +172,6 @@ serve(async (req) => {
     });
 
     if (dbError) {
-      // Log but don't fail — booking exists in Duffel, that's the source of truth
       console.error("CRITICAL: Booking confirmed in Duffel but failed to save to DB:", {
         order_id: order.id,
         booking_reference: order.booking_reference,
@@ -178,7 +199,7 @@ serve(async (req) => {
     );
 
   } catch (err) {
-    return new Response(JSON.stringify({ error: err.message }), {
+    return new Response(JSON.stringify({ error: (err as Error).message }), {
       status: 500,
       headers: { ...CORS_HEADERS, "Content-Type": "application/json" },
     });
