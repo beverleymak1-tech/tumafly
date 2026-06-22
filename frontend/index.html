@@ -7040,11 +7040,10 @@
   // and are stored in module-level vars; after each successful submit we call
   // turnstile.reset() to issue a fresh token for the next call.
   //
-  // ⚠️ Replace TURNSTILE_SITEKEY with your real sitekey from
-  //   https://dash.cloudflare.com → Turnstile → Add site
-  // The default below is Cloudflare's "always passes" test sitekey, useful for
-  // local development. With this default, real bots will not actually be blocked.
-  const TURNSTILE_SITEKEY = '1x00000000000000000000AA';
+  // ⚠️ DO NOT OVERWRITE THIS LINE WHEN APPLYING UPDATES FROM CLAUDE ⚠️
+  // Real sitekey from Cloudflare Turnstile dashboard. Production value below.
+  // If you see "1x000..." here after a paste, restore from this commit's git history.
+  const TURNSTILE_SITEKEY = '0x4AAAAAADpPM2PIaZcEwdQX';
 
   let turnstileSearchToken = '';
   let turnstilePaymentToken = '';
