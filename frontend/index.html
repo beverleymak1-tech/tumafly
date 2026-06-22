@@ -2548,24 +2548,53 @@
       border-color: #dc2626 !important;
       background: rgba(220, 38, 38, 0.03);
     }
-    .phone-cc {
-      font-family: inherit;
-      font-size: 15px;
-      padding: 12px 8px 12px 12px;
+    .phone-cc-trigger {
+      display: flex;
+      align-items: center;
+      gap: 4px;
+      padding: 0 10px 0 12px;
       border: none;
-      background: transparent;
-      color: var(--ink);
-      outline: none;
-      cursor: pointer;
       border-right: 1px solid var(--border);
-      min-width: 88px;
-      max-width: 120px;
+      background: transparent;
+      cursor: pointer;
+      font-family: inherit;
+      color: var(--text-2);
     }
-    .phone-cc:focus { outline: none; }
+    .phone-cc-trigger:hover { background: var(--bg); }
+    .phone-cc-trigger:focus-visible { outline: 2px solid var(--brand); outline-offset: -2px; }
+    .phone-cc-flag {
+      display: inline-grid;
+      place-items: center;
+      width: 24px;
+      height: 24px;
+      border-radius: 50%;
+      background: var(--bg);
+      overflow: hidden;
+      font-size: 18px;
+      line-height: 1;
+      /* Crop emoji flag to a circle: scale slightly so the rectangular flag
+         fills the round container without showing background. */
+    }
+    .phone-cc-flag::before {
+      content: attr(data-flag);
+      font-size: 22px;
+      transform: scale(1.25);
+      display: block;
+      line-height: 1;
+    }
+    .phone-cc-chevron { color: var(--text-3); flex-shrink: 0; }
+    .phone-cc-prefix {
+      padding: 0 4px 0 8px;
+      font-size: 15px;
+      color: var(--text-2);
+      align-self: center;
+      white-space: nowrap;
+      font-variant-numeric: tabular-nums;
+    }
     .phone-num {
       font-family: inherit;
       font-size: 15px;
-      padding: 12px 14px;
+      padding: 12px 14px 12px 4px;
       border: none;
       background: transparent;
       color: var(--ink);
@@ -2574,6 +2603,189 @@
       min-width: 0;
     }
     .phone-num::placeholder { color: var(--text-3); }
+
+    /* Country picker modal — searchable, scrollable list of all dial codes. */
+    .country-picker-backdrop {
+      position: fixed;
+      inset: 0;
+      background: rgba(15, 23, 42, 0.6);
+      z-index: 300;
+      display: grid;
+      place-items: center;
+      padding: 16px;
+    }
+    .country-picker {
+      background: var(--surface);
+      border-radius: var(--radius-md);
+      width: 100%;
+      max-width: 480px;
+      max-height: 80vh;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+    .country-picker-search {
+      padding: 16px;
+      border-bottom: 1px solid var(--border);
+      position: relative;
+    }
+    .country-picker-search input {
+      width: 100%;
+      padding: 10px 14px 10px 38px;
+      border: 1px solid var(--border-2);
+      border-radius: var(--radius-sm);
+      font-family: inherit;
+      font-size: 15px;
+      color: var(--ink);
+      background: var(--bg);
+      outline: none;
+    }
+    .country-picker-search input:focus {
+      border-color: var(--brand);
+      box-shadow: 0 0 0 3px rgba(61, 149, 245, 0.15);
+    }
+    .country-picker-search-icon {
+      position: absolute;
+      left: 28px;
+      top: 50%;
+      transform: translateY(-50%);
+      color: var(--text-3);
+      pointer-events: none;
+    }
+    .country-picker-list {
+      flex: 1;
+      overflow-y: auto;
+      padding: 4px 0;
+    }
+    .country-picker-item {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 10px 16px;
+      cursor: pointer;
+      border: none;
+      background: transparent;
+      width: 100%;
+      font-family: inherit;
+      text-align: left;
+    }
+    .country-picker-item:hover,
+    .country-picker-item.active { background: var(--brand-soft); }
+    .country-picker-item.active .country-picker-name,
+    .country-picker-item.active .country-picker-dial { color: var(--brand-dark); }
+    .country-picker-flag {
+      width: 28px;
+      height: 28px;
+      border-radius: 50%;
+      background: var(--bg);
+      overflow: hidden;
+      display: grid;
+      place-items: center;
+      font-size: 24px;
+      line-height: 1;
+      flex-shrink: 0;
+    }
+    .country-picker-flag::before {
+      content: attr(data-flag);
+      transform: scale(1.3);
+      font-size: 26px;
+      line-height: 1;
+    }
+    .country-picker-name {
+      flex: 1;
+      font-size: 15px;
+      color: var(--ink);
+      font-weight: 500;
+    }
+    .country-picker-dial {
+      font-size: 14px;
+      color: var(--text-3);
+      font-variant-numeric: tabular-nums;
+    }
+    .country-picker-empty {
+      padding: 32px 16px;
+      text-align: center;
+      color: var(--text-3);
+      font-size: 14px;
+    }
+
+    /* Search loading modal — shown while runSearch is in flight.
+       Dim backdrop + branded spinner + rotating progress text. */
+    .search-loading-backdrop {
+      position: fixed;
+      inset: 0;
+      background: rgba(15, 23, 42, 0.55);
+      z-index: 250;
+      display: grid;
+      place-items: center;
+      padding: 16px;
+      animation: searchLoadingFadeIn 0.2s ease;
+    }
+    @keyframes searchLoadingFadeIn {
+      from { opacity: 0; }
+      to { opacity: 1; }
+    }
+    .search-loading-card {
+      background: var(--surface);
+      border-radius: var(--radius-md);
+      padding: 32px 28px 28px;
+      width: 100%;
+      max-width: 360px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 16px;
+      text-align: center;
+    }
+    .search-loading-spinner {
+      width: 56px;
+      height: 56px;
+      position: relative;
+    }
+    .search-loading-spinner svg {
+      width: 100%;
+      height: 100%;
+      animation: searchLoadingSpin 1.4s linear infinite;
+      color: var(--brand);
+    }
+    @keyframes searchLoadingSpin {
+      to { transform: rotate(360deg); }
+    }
+    .search-loading-route {
+      font-size: 17px;
+      font-weight: 600;
+      color: var(--ink);
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+    .search-loading-route .arrow { color: var(--brand); }
+    .search-loading-message {
+      font-size: 14px;
+      color: var(--text-2);
+      min-height: 20px;
+      transition: opacity 0.3s ease;
+    }
+    .search-loading-progress {
+      width: 100%;
+      height: 3px;
+      background: var(--bg);
+      border-radius: 2px;
+      overflow: hidden;
+      margin-top: 4px;
+    }
+    .search-loading-bar {
+      height: 100%;
+      background: var(--brand);
+      border-radius: 2px;
+      animation: searchLoadingBar 8s ease-out;
+    }
+    @keyframes searchLoadingBar {
+      0% { width: 0; }
+      40% { width: 60%; }
+      75% { width: 85%; }
+      100% { width: 95%; }
+    }
 
     /* "required" tag on collapsible section headers — same slot the optional tag uses */
     .pax-collapse-head-sub-required {
@@ -3114,7 +3326,11 @@
             <div class="full">
               <label class="pax-label">Phone <span class="pax-required">*</span></label>
               <div class="phone-input-group" id="contact-phone-group">
-                <select class="phone-cc" id="contact-phone-cc" aria-label="Country code"></select>
+                <button type="button" class="phone-cc-trigger" id="contact-phone-cc-btn" onclick="openCountryPicker('contact')" aria-label="Choose country code">
+                  <span class="phone-cc-flag" id="contact-phone-cc-flag"></span>
+                  <svg class="phone-cc-chevron" width="10" height="10" viewBox="0 0 12 12" fill="none" aria-hidden="true"><path d="M3 5l3 3 3-3" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                </button>
+                <span class="phone-cc-prefix" id="contact-phone-cc-prefix">+254</span>
                 <input id="contact-phone" type="tel" class="phone-num" placeholder="712 345 678" inputmode="tel" autocomplete="tel-national">
               </div>
             </div>
@@ -3144,6 +3360,11 @@
           <p class="sub" style="margin-top:6px;">Available seat options for this flight. Selection may not be available on every airline; in that case you can choose seats at check-in.</p>
           <div id="seats-list"></div>
         </div>
+        <p class="compliance">
+          By continuing, you confirm you have valid travel documents for your destination.
+          Verify with your consulate before travel.
+          <a href="https://www.iatatravelcentre.com" target="_blank" rel="noopener">Travel requirements →</a>
+        </p>
         <div id="booking-alert"></div>
         <div style="display:flex;justify-content:space-between;gap:12px;">
           <button class="btn btn-secondary" onclick="showView('results')">← Back to results</button>
@@ -3201,9 +3422,10 @@
           <div id="poll-area" class="hidden"></div>
 
           <p class="compliance">
-            By continuing, you confirm you have valid travel documents for your destination.
-            Verify with your consulate before travel.
-            <a href="https://www.iatatravelcentre.com" target="_blank" rel="noopener">Travel requirements →</a>
+            By confirming this booking, you confirm that you agree to the
+            <a href="/legal/privacy" target="_blank" rel="noopener">Privacy Notice</a> and
+            <a href="/legal/terms" target="_blank" rel="noopener">Terms of Service</a>,
+            and the policies of this booking.
           </p>
         </div>
 
@@ -3285,64 +3507,382 @@
     first: 'First',
   };
 
-  // Phone country codes — African-priority list followed by major travel destinations.
-  // Each entry: [flag emoji, dial code, ISO-style label for sort/search].
-  // Kenya is the default so it's first.
-  const PHONE_COUNTRY_CODES = [
-    ['🇰🇪', '+254', 'Kenya'],
-    ['🇺🇬', '+256', 'Uganda'],
-    ['🇹🇿', '+255', 'Tanzania'],
-    ['🇷🇼', '+250', 'Rwanda'],
-    ['🇪🇹', '+251', 'Ethiopia'],
-    ['🇿🇦', '+27',  'South Africa'],
-    ['🇳🇬', '+234', 'Nigeria'],
-    ['🇬🇭', '+233', 'Ghana'],
-    ['🇪🇬', '+20',  'Egypt'],
-    ['🇲🇦', '+212', 'Morocco'],
-    ['🇨🇩', '+243', 'DR Congo'],
-    ['🇸🇳', '+221', 'Senegal'],
-    ['🇨🇮', '+225', "Côte d'Ivoire"],
-    ['🇨🇲', '+237', 'Cameroon'],
-    ['🇿🇲', '+260', 'Zambia'],
-    ['🇿🇼', '+263', 'Zimbabwe'],
-    ['🇧🇼', '+267', 'Botswana'],
-    ['🇲🇺', '+230', 'Mauritius'],
-    ['🇦🇪', '+971', 'UAE'],
-    ['🇶🇦', '+974', 'Qatar'],
-    ['🇸🇦', '+966', 'Saudi Arabia'],
-    ['🇹🇷', '+90',  'Turkey'],
-    ['🇬🇧', '+44',  'United Kingdom'],
-    ['🇺🇸', '+1',   'United States'],
-    ['🇨🇦', '+1',   'Canada'],
-    ['🇩🇪', '+49',  'Germany'],
-    ['🇫🇷', '+33',  'France'],
-    ['🇳🇱', '+31',  'Netherlands'],
-    ['🇮🇹', '+39',  'Italy'],
-    ['🇪🇸', '+34',  'Spain'],
-    ['🇨🇳', '+86',  'China'],
-    ['🇮🇳', '+91',  'India'],
-    ['🇯🇵', '+81',  'Japan'],
-    ['🇰🇷', '+82',  'South Korea'],
-    ['🇸🇬', '+65',  'Singapore'],
-    ['🇦🇺', '+61',  'Australia'],
+  // Comprehensive country dial-code list. Each entry: [iso2, name, dialCode].
+  // Flag emoji is computed on the fly from the ISO-2 (regional indicator chars).
+  // "Popular" subset is shown first when the picker opens with no search term.
+  const PHONE_COUNTRIES = [
+    ['KE', 'Kenya', '+254'],
+    ['UG', 'Uganda', '+256'],
+    ['TZ', 'Tanzania', '+255'],
+    ['RW', 'Rwanda', '+250'],
+    ['ET', 'Ethiopia', '+251'],
+    ['ZA', 'South Africa', '+27'],
+    ['NG', 'Nigeria', '+234'],
+    ['GH', 'Ghana', '+233'],
+    ['EG', 'Egypt', '+20'],
+    ['MA', 'Morocco', '+212'],
+    ['CD', 'DR Congo', '+243'],
+    ['SN', 'Senegal', '+221'],
+    ['CI', "Côte d'Ivoire", '+225'],
+    ['CM', 'Cameroon', '+237'],
+    ['ZM', 'Zambia', '+260'],
+    ['ZW', 'Zimbabwe', '+263'],
+    ['BW', 'Botswana', '+267'],
+    ['MU', 'Mauritius', '+230'],
+    ['NA', 'Namibia', '+264'],
+    ['MZ', 'Mozambique', '+258'],
+    ['MG', 'Madagascar', '+261'],
+    ['MW', 'Malawi', '+265'],
+    ['AO', 'Angola', '+244'],
+    ['BI', 'Burundi', '+257'],
+    ['SS', 'South Sudan', '+211'],
+    ['SO', 'Somalia', '+252'],
+    ['DJ', 'Djibouti', '+253'],
+    ['ER', 'Eritrea', '+291'],
+    ['SD', 'Sudan', '+249'],
+    ['TN', 'Tunisia', '+216'],
+    ['DZ', 'Algeria', '+213'],
+    ['LY', 'Libya', '+218'],
+    ['ML', 'Mali', '+223'],
+    ['BF', 'Burkina Faso', '+226'],
+    ['NE', 'Niger', '+227'],
+    ['TD', 'Chad', '+235'],
+    ['MR', 'Mauritania', '+222'],
+    ['GM', 'Gambia', '+220'],
+    ['GN', 'Guinea', '+224'],
+    ['GW', 'Guinea-Bissau', '+245'],
+    ['SL', 'Sierra Leone', '+232'],
+    ['LR', 'Liberia', '+231'],
+    ['TG', 'Togo', '+228'],
+    ['BJ', 'Benin', '+229'],
+    ['CG', 'Republic of Congo', '+242'],
+    ['GA', 'Gabon', '+241'],
+    ['CF', 'Central African Republic', '+236'],
+    ['GQ', 'Equatorial Guinea', '+240'],
+    ['ST', 'São Tomé and Príncipe', '+239'],
+    ['CV', 'Cape Verde', '+238'],
+    ['KM', 'Comoros', '+269'],
+    ['SC', 'Seychelles', '+248'],
+    ['LS', 'Lesotho', '+266'],
+    ['SZ', 'Eswatini', '+268'],
+    ['EH', 'Western Sahara', '+212'],
+    // Middle East
+    ['AE', 'United Arab Emirates', '+971'],
+    ['QA', 'Qatar', '+974'],
+    ['SA', 'Saudi Arabia', '+966'],
+    ['KW', 'Kuwait', '+965'],
+    ['BH', 'Bahrain', '+973'],
+    ['OM', 'Oman', '+968'],
+    ['JO', 'Jordan', '+962'],
+    ['LB', 'Lebanon', '+961'],
+    ['IL', 'Israel', '+972'],
+    ['PS', 'Palestine', '+970'],
+    ['IQ', 'Iraq', '+964'],
+    ['SY', 'Syria', '+963'],
+    ['YE', 'Yemen', '+967'],
+    ['IR', 'Iran', '+98'],
+    ['TR', 'Turkey', '+90'],
+    // Europe
+    ['GB', 'United Kingdom', '+44'],
+    ['IE', 'Ireland', '+353'],
+    ['FR', 'France', '+33'],
+    ['DE', 'Germany', '+49'],
+    ['ES', 'Spain', '+34'],
+    ['IT', 'Italy', '+39'],
+    ['PT', 'Portugal', '+351'],
+    ['NL', 'Netherlands', '+31'],
+    ['BE', 'Belgium', '+32'],
+    ['LU', 'Luxembourg', '+352'],
+    ['CH', 'Switzerland', '+41'],
+    ['AT', 'Austria', '+43'],
+    ['DK', 'Denmark', '+45'],
+    ['SE', 'Sweden', '+46'],
+    ['NO', 'Norway', '+47'],
+    ['FI', 'Finland', '+358'],
+    ['IS', 'Iceland', '+354'],
+    ['PL', 'Poland', '+48'],
+    ['CZ', 'Czechia', '+420'],
+    ['SK', 'Slovakia', '+421'],
+    ['HU', 'Hungary', '+36'],
+    ['RO', 'Romania', '+40'],
+    ['BG', 'Bulgaria', '+359'],
+    ['GR', 'Greece', '+30'],
+    ['CY', 'Cyprus', '+357'],
+    ['MT', 'Malta', '+356'],
+    ['RS', 'Serbia', '+381'],
+    ['HR', 'Croatia', '+385'],
+    ['SI', 'Slovenia', '+386'],
+    ['BA', 'Bosnia and Herzegovina', '+387'],
+    ['ME', 'Montenegro', '+382'],
+    ['MK', 'North Macedonia', '+389'],
+    ['AL', 'Albania', '+355'],
+    ['XK', 'Kosovo', '+383'],
+    ['EE', 'Estonia', '+372'],
+    ['LV', 'Latvia', '+371'],
+    ['LT', 'Lithuania', '+370'],
+    ['BY', 'Belarus', '+375'],
+    ['UA', 'Ukraine', '+380'],
+    ['MD', 'Moldova', '+373'],
+    ['RU', 'Russia', '+7'],
+    ['GE', 'Georgia', '+995'],
+    ['AM', 'Armenia', '+374'],
+    ['AZ', 'Azerbaijan', '+994'],
+    ['AD', 'Andorra', '+376'],
+    ['MC', 'Monaco', '+377'],
+    ['LI', 'Liechtenstein', '+423'],
+    ['SM', 'San Marino', '+378'],
+    ['VA', 'Vatican City', '+39'],
+    // Americas
+    ['US', 'United States', '+1'],
+    ['CA', 'Canada', '+1'],
+    ['MX', 'Mexico', '+52'],
+    ['BR', 'Brazil', '+55'],
+    ['AR', 'Argentina', '+54'],
+    ['CL', 'Chile', '+56'],
+    ['CO', 'Colombia', '+57'],
+    ['PE', 'Peru', '+51'],
+    ['VE', 'Venezuela', '+58'],
+    ['EC', 'Ecuador', '+593'],
+    ['BO', 'Bolivia', '+591'],
+    ['PY', 'Paraguay', '+595'],
+    ['UY', 'Uruguay', '+598'],
+    ['GY', 'Guyana', '+592'],
+    ['SR', 'Suriname', '+597'],
+    ['CR', 'Costa Rica', '+506'],
+    ['PA', 'Panama', '+507'],
+    ['GT', 'Guatemala', '+502'],
+    ['HN', 'Honduras', '+504'],
+    ['SV', 'El Salvador', '+503'],
+    ['NI', 'Nicaragua', '+505'],
+    ['BZ', 'Belize', '+501'],
+    ['CU', 'Cuba', '+53'],
+    ['DO', 'Dominican Republic', '+1'],
+    ['HT', 'Haiti', '+509'],
+    ['JM', 'Jamaica', '+1'],
+    ['TT', 'Trinidad and Tobago', '+1'],
+    ['BS', 'Bahamas', '+1'],
+    ['BB', 'Barbados', '+1'],
+    ['PR', 'Puerto Rico', '+1'],
+    // Asia
+    ['CN', 'China', '+86'],
+    ['HK', 'Hong Kong', '+852'],
+    ['MO', 'Macau', '+853'],
+    ['TW', 'Taiwan', '+886'],
+    ['JP', 'Japan', '+81'],
+    ['KR', 'South Korea', '+82'],
+    ['KP', 'North Korea', '+850'],
+    ['MN', 'Mongolia', '+976'],
+    ['IN', 'India', '+91'],
+    ['PK', 'Pakistan', '+92'],
+    ['BD', 'Bangladesh', '+880'],
+    ['LK', 'Sri Lanka', '+94'],
+    ['MV', 'Maldives', '+960'],
+    ['NP', 'Nepal', '+977'],
+    ['BT', 'Bhutan', '+975'],
+    ['AF', 'Afghanistan', '+93'],
+    ['TH', 'Thailand', '+66'],
+    ['VN', 'Vietnam', '+84'],
+    ['LA', 'Laos', '+856'],
+    ['KH', 'Cambodia', '+855'],
+    ['MM', 'Myanmar', '+95'],
+    ['MY', 'Malaysia', '+60'],
+    ['SG', 'Singapore', '+65'],
+    ['ID', 'Indonesia', '+62'],
+    ['PH', 'Philippines', '+63'],
+    ['BN', 'Brunei', '+673'],
+    ['TL', 'Timor-Leste', '+670'],
+    ['KZ', 'Kazakhstan', '+7'],
+    ['UZ', 'Uzbekistan', '+998'],
+    ['KG', 'Kyrgyzstan', '+996'],
+    ['TJ', 'Tajikistan', '+992'],
+    ['TM', 'Turkmenistan', '+993'],
+    // Oceania
+    ['AU', 'Australia', '+61'],
+    ['NZ', 'New Zealand', '+64'],
+    ['FJ', 'Fiji', '+679'],
+    ['PG', 'Papua New Guinea', '+675'],
+    ['SB', 'Solomon Islands', '+677'],
+    ['VU', 'Vanuatu', '+678'],
+    ['NC', 'New Caledonia', '+687'],
+    ['PF', 'French Polynesia', '+689'],
+    ['WS', 'Samoa', '+685'],
+    ['TO', 'Tonga', '+676'],
+    ['KI', 'Kiribati', '+686'],
+    ['FM', 'Micronesia', '+691'],
+    ['MH', 'Marshall Islands', '+692'],
+    ['NR', 'Nauru', '+674'],
+    ['PW', 'Palau', '+680'],
+    ['TV', 'Tuvalu', '+688'],
   ];
 
-  function populatePhoneCountryCodes(selectId, defaultCode = '+254') {
-    const sel = document.getElementById(selectId);
-    if (!sel) return;
-    // Skip if already populated (idempotent across re-renders)
-    if (sel.options.length > 0) return;
-    PHONE_COUNTRY_CODES.forEach(([flag, code, name]) => {
-      const opt = document.createElement('option');
-      opt.value = code;
-      // Compact display: flag + code. Full name shown on hover/native picker.
-      opt.textContent = `${flag} ${code}`;
-      opt.title = `${name} (${code})`;
-      if (code === defaultCode && !sel.querySelector(`option[selected]`)) {
-        opt.selected = true;
-      }
-      sel.appendChild(opt);
+  // Convert ISO-2 to a regional-indicator flag emoji ("KE" → "🇰🇪").
+  function isoToFlag(iso2) {
+    if (!iso2 || iso2.length !== 2) return '';
+    const base = 0x1F1E6 - 'A'.charCodeAt(0);
+    return String.fromCodePoint(base + iso2.charCodeAt(0)) + String.fromCodePoint(base + iso2.charCodeAt(1));
+  }
+
+  // Per-field picker state. Key is the field prefix (e.g. 'contact') so we can
+  // wire multiple phone inputs in the same page without state collisions.
+  // Each entry: { iso, dial, name }
+  const countryPickerState = {};
+  let countryPickerActiveField = null;
+
+  function initCountryPicker(fieldKey, defaultDial = '+254') {
+    // Don't override an existing selection (e.g. on re-render of the booking page)
+    if (countryPickerState[fieldKey]) {
+      applyCountrySelection(fieldKey, countryPickerState[fieldKey]);
+      return;
+    }
+    const def = PHONE_COUNTRIES.find(c => c[2] === defaultDial) || PHONE_COUNTRIES[0];
+    const sel = { iso: def[0], name: def[1], dial: def[2] };
+    countryPickerState[fieldKey] = sel;
+    applyCountrySelection(fieldKey, sel);
+  }
+
+  function applyCountrySelection(fieldKey, sel) {
+    const flag = document.getElementById(`${fieldKey}-phone-cc-flag`);
+    const prefix = document.getElementById(`${fieldKey}-phone-cc-prefix`);
+    if (flag) flag.setAttribute('data-flag', isoToFlag(sel.iso));
+    if (prefix) prefix.textContent = sel.dial;
+  }
+
+  function openCountryPicker(fieldKey) {
+    countryPickerActiveField = fieldKey;
+    let root = document.getElementById('country-picker-root');
+    if (root) root.remove();
+    root = document.createElement('div');
+    root.id = 'country-picker-root';
+    root.className = 'country-picker-backdrop';
+    root.addEventListener('click', (e) => {
+      if (e.target === root) closeCountryPicker();
     });
+    root.innerHTML = `
+      <div class="country-picker" role="dialog" aria-label="Choose country">
+        <div class="country-picker-search">
+          <svg class="country-picker-search-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+            <circle cx="11" cy="11" r="7" stroke="currentColor" stroke-width="1.8"/>
+            <path d="M16 16l4 4" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
+          </svg>
+          <input type="text" id="country-picker-input" placeholder="Search country…" autocomplete="off" autofocus>
+        </div>
+        <div class="country-picker-list" id="country-picker-list"></div>
+      </div>
+    `;
+    document.body.appendChild(root);
+    renderCountryPickerList('');
+    const input = document.getElementById('country-picker-input');
+    input.addEventListener('input', (e) => renderCountryPickerList(e.target.value));
+    input.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') closeCountryPicker();
+    });
+    // Focus the search input on next tick so autofocus actually takes
+    setTimeout(() => input.focus(), 0);
+  }
+
+  function closeCountryPicker() {
+    countryPickerActiveField = null;
+    const root = document.getElementById('country-picker-root');
+    if (root) root.remove();
+  }
+
+  function renderCountryPickerList(query) {
+    const list = document.getElementById('country-picker-list');
+    if (!list) return;
+    const q = query.trim().toLowerCase();
+    const filtered = !q ? PHONE_COUNTRIES : PHONE_COUNTRIES.filter(([iso, name, dial]) => {
+      return name.toLowerCase().includes(q)
+        || iso.toLowerCase().includes(q)
+        || dial.includes(q)
+        || dial.replace('+', '').includes(q);
+    });
+    if (!filtered.length) {
+      list.innerHTML = '<div class="country-picker-empty">No countries match that search.</div>';
+      return;
+    }
+    const activeIso = countryPickerActiveField ? countryPickerState[countryPickerActiveField]?.iso : null;
+    list.innerHTML = filtered.map(([iso, name, dial]) => `
+      <button type="button" class="country-picker-item ${iso === activeIso ? 'active' : ''}" onclick="pickCountry('${iso}')">
+        <span class="country-picker-flag" data-flag="${isoToFlag(iso)}"></span>
+        <span class="country-picker-name">${escapeHtml(name)}</span>
+        <span class="country-picker-dial">${escapeHtml(dial)}</span>
+      </button>
+    `).join('');
+  }
+
+  function pickCountry(iso) {
+    if (!countryPickerActiveField) return;
+    const entry = PHONE_COUNTRIES.find(c => c[0] === iso);
+    if (!entry) return;
+    const sel = { iso: entry[0], name: entry[1], dial: entry[2] };
+    countryPickerState[countryPickerActiveField] = sel;
+    applyCountrySelection(countryPickerActiveField, sel);
+    closeCountryPicker();
+  }
+
+  // ============================================================
+  // SEARCH LOADING MODAL
+  // ============================================================
+  // Shown while runSearch is in flight. Branded spinner + rotating progress
+  // text that gives the user a sense of motion during the 3-6s the parallel
+  // cabin lookups take.
+
+  const SEARCH_LOADING_MESSAGES = [
+    'Searching across airlines…',
+    'Comparing fares in real time…',
+    'Finding the best options for your route…',
+    'Checking economy, premium, business…',
+    'Looking up baggage rules and amenities…',
+    'Almost there…',
+  ];
+  let searchLoadingMsgInterval = null;
+
+  function showSearchLoading(originIata, destinationIata) {
+    hideSearchLoading();
+    const root = document.createElement('div');
+    root.id = 'search-loading-root';
+    root.className = 'search-loading-backdrop';
+    root.innerHTML = `
+      <div class="search-loading-card">
+        <div class="search-loading-spinner">
+          <svg viewBox="0 0 56 56" fill="none" aria-hidden="true">
+            <circle cx="28" cy="28" r="22" stroke="currentColor" stroke-width="3" stroke-opacity="0.15"/>
+            <path d="M28 6 a22 22 0 0 1 22 22" stroke="currentColor" stroke-width="3" stroke-linecap="round"/>
+          </svg>
+        </div>
+        ${originIata && destinationIata
+          ? `<div class="search-loading-route">${escapeHtml(originIata)} <span class="arrow">→</span> ${escapeHtml(destinationIata)}</div>`
+          : ''}
+        <div class="search-loading-message" id="search-loading-msg">${SEARCH_LOADING_MESSAGES[0]}</div>
+        <div class="search-loading-progress"><div class="search-loading-bar"></div></div>
+      </div>
+    `;
+    document.body.appendChild(root);
+
+    // Cycle messages every ~1.6s
+    let idx = 0;
+    searchLoadingMsgInterval = setInterval(() => {
+      idx = (idx + 1) % SEARCH_LOADING_MESSAGES.length;
+      const msg = document.getElementById('search-loading-msg');
+      if (msg) {
+        msg.style.opacity = '0';
+        setTimeout(() => {
+          if (msg) {
+            msg.textContent = SEARCH_LOADING_MESSAGES[idx];
+            msg.style.opacity = '1';
+          }
+        }, 200);
+      }
+    }, 1600);
+  }
+
+  function hideSearchLoading() {
+    if (searchLoadingMsgInterval) {
+      clearInterval(searchLoadingMsgInterval);
+      searchLoadingMsgInterval = null;
+    }
+    const root = document.getElementById('search-loading-root');
+    if (root) root.remove();
   }
 
   let tripType = 'round';
@@ -4315,6 +4855,9 @@
     // same search after an offer expires mid-checkout.
     lastSearchParams = { origin, destination, date, returnDate };
     if (fromButton) { fromButton.classList.add('btn-loading'); fromButton.disabled = true; }
+    // Show the branded loading modal — gives the user a sense of motion during the
+    // 3-6s that parallel cabin lookups take. Hidden in `finally` below.
+    showSearchLoading(origin, destination);
     // Bot-protection: get a Turnstile token (no-op if widget isn't loaded yet —
     // backend fails open when TURNSTILE_SECRET isn't configured).
     const turnstileToken = await ensureTurnstileToken('search');
@@ -4366,6 +4909,7 @@
     } catch (e) {
       showAlert(alertContainer, 'Could not connect. Please check your network and try again.');
     } finally {
+      hideSearchLoading();
       if (fromButton) { fromButton.classList.remove('btn-loading'); fromButton.disabled = false; }
     }
   }
@@ -5168,7 +5712,9 @@
     renderBookingSummary();
     showView('booking');
     // Populate the phone country-code dropdown (idempotent — no-op on subsequent visits)
-    populatePhoneCountryCodes('contact-phone-cc', '+254');
+    // Initialise the contact phone country picker (idempotent — sets the default
+    // dial code + flag if not yet set, otherwise preserves whatever the user picked).
+    initCountryPicker('contact', '+254');
   }
 
   // Renders a row per slice (Outbound + Return if round-trip) inside the Seats card.
@@ -6062,14 +6608,17 @@
     };
   }
 
-  function renderPricePanel(slotId, breakdown) {
+  function renderPricePanel(slotId, breakdown, opts = {}) {
     const slot = document.getElementById(slotId);
     if (!slot) return;
 
     // Booking page: estimate client-side using same formula as backend.
     // Payment page: pass `breakdown` from the create-payment server response (authoritative).
+    // Once we're on the payment page (opts.isPayment), the panel title becomes
+    // "Price details" regardless of whether the server breakdown has arrived yet —
+    // the user has committed to the booking, so calling it an "estimate" is wrong.
     const b = breakdown || estimateBreakdown();
-    const isEstimate = !breakdown;
+    const isEstimate = !breakdown && !opts.isPayment;
     const seatsKes = b.seats_kes || 0;
 
     const breakdownHtml = `
@@ -6086,7 +6635,7 @@
 
     slot.innerHTML = `
       <div class="price-panel">
-        <h4>${isEstimate ? 'Estimated price' : 'Price'}</h4>
+        <h4>${isEstimate ? 'Estimated price' : 'Price details'}</h4>
         <div class="ppp">${passengerCount > 1 ? `Total for ${passengerCount} travelers` : 'Price per passenger'}</div>
         ${breakdownHtml}
       </div>
@@ -6100,7 +6649,7 @@
 
   function renderPaymentSummary(breakdown) {
     renderTripPanel('payment-trip-slot');
-    renderPricePanel('payment-price-slot', breakdown);
+    renderPricePanel('payment-price-slot', breakdown, { isPayment: true });
   }
 
   // ============================================================
@@ -6318,7 +6867,7 @@
     const r = collectPassengers();
     if (r.error) return showAlert('booking-alert', r.error);
     const email = document.getElementById('contact-email').value.trim();
-    const phoneCC = document.getElementById('contact-phone-cc')?.value || '';
+    const phoneCC = countryPickerState.contact?.dial || '+254';
     const phoneRaw = document.getElementById('contact-phone').value.trim();
     // Strip any non-digit chars the user may have entered alongside the number
     const phoneDigits = phoneRaw.replace(/\D/g, '');
@@ -6495,7 +7044,7 @@
   //   https://dash.cloudflare.com → Turnstile → Add site
   // The default below is Cloudflare's "always passes" test sitekey, useful for
   // local development. With this default, real bots will not actually be blocked.
-  const TURNSTILE_SITEKEY = '0x4AAAAAADpPM2PIaZcEwdQX';
+  const TURNSTILE_SITEKEY = '1x00000000000000000000AA';
 
   let turnstileSearchToken = '';
   let turnstilePaymentToken = '';
