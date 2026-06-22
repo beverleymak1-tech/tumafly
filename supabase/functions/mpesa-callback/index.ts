@@ -3,6 +3,10 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
 const DUFFEL_API_KEY = Deno.env.get("DUFFEL_API_KEY")!;
 const DUFFEL_BASE_URL = "https://api.duffel.com";
+// In sandbox we skip sending seat services to /air/orders since Duffel test mode
+// doesn't reliably accept them. The customer-facing seat selection still shows in
+// the booking summary; we just can't reserve specific seats on a fake offer.
+const DUFFEL_MODE = (Deno.env.get("DUFFEL_MODE") || "production").toLowerCase();
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SERVICE_ROLE_KEY = Deno.env.get("SERVICE_ROLE_KEY")!;
 const SEND_CONFIRMATION_URL = `${SUPABASE_URL}/functions/v1/send-confirmation`;
@@ -207,22 +211,29 @@ serve(async (req) => {
     // the index against offer.passengers to get the Duffel passenger.id Duffel needs.
     // The total order amount has to include seat costs, otherwise the balance payment
     // won't cover them and Duffel will reject the order.
+    //
+    // SANDBOX BEHAVIOUR: Duffel test mode often issues seat services that aren't
+    // valid at /air/orders. We pass an empty services array AND keep offer total
+    // unchanged, so the order books cleanly without seats. The customer "selected"
+    // them in the UI but no actual reservation happens — fine for dev testing.
     const storedSeats: any[] = Array.isArray(pending.contact?.seats) ? pending.contact.seats : [];
     const services: Array<{ id: string; quantity: number; passenger_id: string }> = [];
     let seatsAmountInOfferCurrency = 0;
-    for (const seat of storedSeats) {
-      const dpax = offerPassengers[seat.passenger_index];
-      if (!dpax || !seat.service_id) continue;
-      services.push({
-        id: seat.service_id,
-        quantity: 1,
-        passenger_id: dpax.id,
-      });
-      // Sum the seat amounts in the offer's currency. We stored original_amount /
-      // original_currency at create-payment time. Duffel always quotes seat services
-      // in the same currency as the parent offer, so we treat them as additive.
-      if (seat.original_amount) {
-        seatsAmountInOfferCurrency += parseFloat(seat.original_amount);
+    if (DUFFEL_MODE !== "sandbox") {
+      for (const seat of storedSeats) {
+        const dpax = offerPassengers[seat.passenger_index];
+        if (!dpax || !seat.service_id) continue;
+        services.push({
+          id: seat.service_id,
+          quantity: 1,
+          passenger_id: dpax.id,
+        });
+        // Sum the seat amounts in the offer's currency. We stored original_amount /
+        // original_currency at create-payment time. Duffel always quotes seat services
+        // in the same currency as the parent offer, so we treat them as additive.
+        if (seat.original_amount) {
+          seatsAmountInOfferCurrency += parseFloat(seat.original_amount);
+        }
       }
     }
     const orderTotalAmount = (parseFloat(offer.total_amount) + seatsAmountInOfferCurrency).toFixed(2);

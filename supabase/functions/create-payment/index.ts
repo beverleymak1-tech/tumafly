@@ -3,6 +3,11 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
 const DUFFEL_API_KEY = Deno.env.get("DUFFEL_API_KEY")!;
 const DUFFEL_BASE_URL = "https://api.duffel.com";
+// "sandbox" or "production". Defaults to production for fail-closed safety —
+// must be explicitly set to "sandbox" to enable the seat-service soft-skip path
+// (Duffel's sandbox doesn't always re-issue seat services consistently between
+// the seat-map and order endpoints, which would otherwise block test bookings).
+const DUFFEL_MODE = (Deno.env.get("DUFFEL_MODE") || "production").toLowerCase();
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SERVICE_ROLE_KEY = Deno.env.get("SERVICE_ROLE_KEY")!;
 const PESAPAL_BASE_URL = Deno.env.get("PESAPAL_BASE_URL")!;
@@ -217,6 +222,14 @@ serve(async (req) => {
         if (!s.service_id) continue;
         const svc = serviceLookup[s.service_id];
         if (!svc) {
+          // In production we fail-closed: Duffel would reject the order at booking
+          // time anyway, and rejecting now means the customer hasn't paid yet.
+          // In sandbox we soft-skip because Duffel's test mode often returns seat
+          // services on the seat-map endpoint that aren't valid at /air/orders.
+          if (DUFFEL_MODE === "sandbox") {
+            console.warn("Seat service not re-found in re-validation (sandbox soft-skip):", s.service_id, s.designator);
+            continue;
+          }
           return new Response(JSON.stringify({
             error: `Seat ${s.designator || "?"} is no longer available. Please reselect.`,
           }), {
