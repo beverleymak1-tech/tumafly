@@ -9,8 +9,18 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
   <!-- Cloudflare Turnstile — bot-protection for /search-flights and /create-payment.
-       Widgets render invisibly into hidden containers at the bottom of the body. -->
-  <script src="https://challenges.cloudflare.com/turnstile/v0/api.js?onload=onTurnstileLoad" async defer></script>
+       Widgets render invisibly into hidden containers at the bottom of the body.
+       NB: use just `defer` (not `async defer`) so this script runs AFTER the body
+       script defines window.onTurnstileLoad. The stub immediately below catches
+       the rare case where Turnstile races ahead and calls the callback before the
+       real implementation is installed. -->
+  <script>
+    // Stub callback — if Turnstile fires before the body script overrides this,
+    // we just record that it's ready. The body script checks this flag.
+    window.__turnstileFiredEarly = false;
+    window.onTurnstileLoad = function () { window.__turnstileFiredEarly = true; };
+  </script>
+  <script src="https://challenges.cloudflare.com/turnstile/v0/api.js?onload=onTurnstileLoad" defer></script>
   <style>
     :root {
       --brand: #3D95F5;
@@ -5842,7 +5852,7 @@
   //   https://dash.cloudflare.com → Turnstile → Add site
   // The default below is Cloudflare's "always passes" test sitekey, useful for
   // local development. With this default, real bots will not actually be blocked.
-  const TURNSTILE_SITEKEY = '1x00000000000000000000AA';
+  const TURNSTILE_SITEKEY = '0x4AAAAAADpPM_ZZX3Rb2Vn5ZtJZAllfc04';
 
   let turnstileSearchToken = '';
   let turnstilePaymentToken = '';
@@ -5850,7 +5860,7 @@
   let turnstilePaymentWidgetId = null;
 
   // Called by Cloudflare's script after it loads (see onload=onTurnstileLoad in <head>).
-  window.onTurnstileLoad = function () {
+  function realOnTurnstileLoad() {
     if (typeof turnstile === 'undefined') return;
     try {
       turnstileSearchWidgetId = turnstile.render('#turnstile-host-search', {
@@ -5872,7 +5882,14 @@
     } catch (e) {
       console.warn('Turnstile render failed:', e);
     }
-  };
+  }
+
+  // Install the real callback. If Turnstile already fired the stub (race condition
+  // where the script loaded before this body block ran), run the real one now.
+  window.onTurnstileLoad = realOnTurnstileLoad;
+  if (window.__turnstileFiredEarly) {
+    realOnTurnstileLoad();
+  }
 
   // Wait up to timeoutMs for a Turnstile token to be available for the given
   // widget. If turnstile.execute is supported (invisible widgets), trigger it.
