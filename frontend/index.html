@@ -4954,8 +4954,8 @@
   // fee breakdown returned by create-payment; otherwise we show an estimate.
   // Fee constants — kept in sync with create-payment.ts so the booking-page
   // estimate matches the amount the customer is charged on the payment page.
-  // NOTE: there's a known follow-up to switch the backend to S / (1 - 0.035)
-  // proper gross-up math; when that ships, update the formula here too.
+  // Pesapal's 3.5% applies to the GROSS amount they receive, so we gross-up
+  // with rate / (1 - rate) to make sure we net the full subtotal.
   const TUMAFLY_SERVICE_FEE_KES = 1500;
   const PESAPAL_FEE_RATE = 0.035;
 
@@ -4965,7 +4965,7 @@
     const baseKes = (selectedOutbound?.cabinPricing?.price_kes || 0)
                   + (selectedInbound?.cabinPricing?.price_kes || 0);
     const subtotal = baseKes + TUMAFLY_SERVICE_FEE_KES;
-    const processingFeeKes = Math.ceil(subtotal * PESAPAL_FEE_RATE);
+    const processingFeeKes = Math.ceil(subtotal * PESAPAL_FEE_RATE / (1 - PESAPAL_FEE_RATE));
     const totalKes = subtotal + processingFeeKes;
     return {
       base_kes: baseKes,
