@@ -1100,6 +1100,19 @@
     }
 
     .results-list { display: flex; flex-direction: column; gap: 10px; }
+    .empty-state {
+      padding: 28px 20px;
+      text-align: center;
+      background: #fff;
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      color: var(--text-2);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 14px;
+    }
+    .empty-state p { margin: 0; font-size: 14px; }
 
     /* Flight card */
     .flight-card {
@@ -6310,11 +6323,41 @@
     if (tripType === 'round' && selectedOutbound) {
       setRouteHeader('return');
       if (sideSlot) sideSlot.innerHTML = renderOutboundSideCard(selectedOutbound);
+
+      // CRITICAL: filter step-2 offers to those whose OUTBOUND slice matches
+      // the one the user picked in step 1. Each Duffel offer is a full
+      // (outbound, return) pair; if we show every offer's slice[1] regardless
+      // of slice[0], the user can pick a "return" that's actually attached
+      // to a different outbound — and that's the offer we'd then book. They
+      // think they picked AirT outbound + AirT return; we'd book Duffel
+      // outbound + AirT return.
+      //
+      // Match by signature: same flight numbers + same departure timestamps
+      // across all outbound segments. (Same physical itinerary, possibly
+      // different fare classes/prices.)
+      const chosenOutboundSig = sliceSignature(selectedOutbound.offer.slices[0]);
+      const compatibleOffers = sorted.filter(o =>
+        o.slices?.[0] && sliceSignature(o.slices[0]) === chosenOutboundSig
+      );
+
       list.innerHTML = `
         ${renderStepRow('Step 2 of 2 — Choose your return flight')}
         <div id="inbound-list" class="results-list"></div>
       `;
-      renderFlightList(sorted, 'inbound-list', 'inbound', { lowestPriceId, bestId });
+
+      if (compatibleOffers.length === 0) {
+        // Defensive: shouldn't happen because selectedOutbound itself is an offer,
+        // so at minimum that one offer is compatible with itself. But if Duffel
+        // somehow returned zero matching pairs after re-search, give a clear out.
+        document.getElementById('inbound-list').innerHTML = `
+          <div class="empty-state">
+            <p>No return options found for this outbound. Try a different outbound flight.</p>
+            <button class="btn btn-secondary" onclick="changeOutbound()">Change outbound</button>
+          </div>
+        `;
+      } else {
+        renderFlightList(compatibleOffers, 'inbound-list', 'inbound', { lowestPriceId, bestId });
+      }
       return;
     }
 
@@ -6325,6 +6368,18 @@
       <div id="oneway-list" class="results-list"></div>
     `;
     renderFlightList(sorted, 'oneway-list', 'oneway', { lowestPriceId, bestId });
+  }
+
+  // Itinerary signature for a slice: flight numbers + departure timestamps of
+  // every segment, joined. Two slices with the same signature represent the
+  // exact same physical itinerary (same carrier, flight numbers, departures).
+  // Used to find offers whose outbound matches a chosen outbound, so step-2
+  // return options stay consistent with the user's step-1 outbound pick.
+  function sliceSignature(slice) {
+    if (!slice?.segments) return '';
+    return slice.segments
+      .map(s => `${s.flight_number}@${s.departure}`)
+      .join('|');
   }
 
   // Sidebar card showing the chosen outbound flight while user picks return.
