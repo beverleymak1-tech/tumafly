@@ -316,6 +316,25 @@
       align-items: stretch;
     }
 
+    /* Inside the results summary bar, shrink the date input and align all
+       field text to the same baseline as From/To inputs. The global
+       input[type="date"] min-height:48px makes the date cell taller than
+       its siblings, causing the date text to sit lower than other inputs. */
+    .summary-bar .sf input[type="date"] {
+      min-height: 0;
+      line-height: 1.3;
+    }
+    .summary-bar .sf input,
+    .summary-bar .sf .tp-trigger {
+      line-height: 1.3;
+    }
+    /* Shrink the Update button in summary-bar so its height matches the .sf cells
+       (~44px natural height) instead of using the global .btn-lg padding. */
+    .summary-bar .update-btn {
+      padding: 10px 22px;
+      align-self: stretch;
+    }
+
     /* Skyscanner-style unified pill — used on the home search card only.
        From + To share a single rounded container with a vertical divider, and the
        swap button is a circle positioned absolutely over the divider, visually
@@ -2304,6 +2323,29 @@
       cursor: pointer;
     }
     .seat-cell.seat.extra-legroom { box-shadow: inset 0 0 0 1px var(--brand-dark); }
+    /* Stack letter + tier vertically inside priced seat cells */
+    .seat-cell.seat {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 0;
+    }
+    .seat-cell.seat .seat-letter {
+      font-size: 10px;
+      font-weight: 600;
+      line-height: 1;
+    }
+    .seat-cell.seat .seat-tier {
+      font-size: 8px;
+      font-weight: 700;
+      line-height: 1;
+      margin-top: 2px;
+      color: var(--brand-dark);
+      letter-spacing: -0.5px;
+    }
+    .seat-cell.seat.selected .seat-tier { color: rgba(255,255,255,0.85); }
+    .seat-cell.seat.unavailable .seat-tier { display: none; }
 
     .seat-modal-legend {
       display: flex;
@@ -7361,7 +7403,7 @@
         <div class="seat-row">
           <div class="seat-row-icon">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-              <path d="M21 10h-4l-3-7H4a1 1 0 0 0-1 1v11h2a2 2 0 1 0 4 0h6a2 2 0 1 0 4 0h2v-4a1 1 0 0 0-1-1z" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/>
+              <path d="M21 14L13 9.5V4a1.5 1.5 0 0 0-3 0v5.5L2 14v2l8-2.5V19l-2 1.5V22l3.5-1L15 22v-1.5L13 19v-5.5l8 2.5v-2z" fill="currentColor"/>
             </svg>
           </div>
           <div class="seat-row-info">
@@ -7639,6 +7681,7 @@
             <div class="seat-legend-item"><div class="seat-legend-swatch selected"></div>Selected</div>
             <div class="seat-legend-item"><div class="seat-legend-swatch other-pax"></div>Other traveler</div>
             <div class="seat-legend-item"><div class="seat-legend-swatch unavailable"></div>Taken</div>
+            <div class="seat-legend-item" style="font-weight:500;"><span style="color:var(--brand-dark);font-weight:700;">$</span>&nbsp;cheapest · <span style="color:var(--brand-dark);font-weight:700;">$$$</span>&nbsp;premium</div>
           </div>
         ` : ''}
         <div class="seat-modal-foot">
@@ -7652,6 +7695,26 @@
 
   function renderSeatGridRows(cabin, leg, activePaxIdx) {
     if (!cabin || !cabin.rows?.length) return '<div class="seat-modal-fallback">No seats to display.</div>';
+
+    // Compute price tiers from all available, priced seats in this cabin.
+    // Bucket into three tiers ($, $$, $$$) by tertiles of the unique non-zero
+    // costs. Seats with cost_kes === 0 show no badge (free seat selection).
+    const priced = [];
+    cabin.rows.forEach(row => {
+      row.elements.forEach(el => {
+        if (el.type === 'seat' && el.available && el.cost_kes > 0) priced.push(el.cost_kes);
+      });
+    });
+    const sorted = [...new Set(priced)].sort((a, b) => a - b);
+    const t1 = sorted[Math.floor(sorted.length / 3)] ?? Infinity;
+    const t2 = sorted[Math.floor((sorted.length * 2) / 3)] ?? Infinity;
+    const priceTier = (cost) => {
+      if (!cost || cost <= 0) return '';
+      if (cost <= t1) return '$';
+      if (cost <= t2) return '$$';
+      return '$$$';
+    };
+
     return cabin.rows.map(row => {
       const cellsHtml = row.elements.map(el => {
         if (el.type !== 'seat') {
@@ -7676,7 +7739,10 @@
         const col = el.designator.slice(-1);
         const cost = el.cost_kes > 0 ? `\nKES ${el.cost_kes}` : '';
         const title = `${el.designator}${cost}`;
-        return `<div class="${cls}" ${onclick} title="${escapeHtml(title)}">${escapeHtml(col)}</div>`;
+        // Price tier badge — only on available, priced seats not yet selected
+        const tier = el.available && pickedBy < 0 ? priceTier(el.cost_kes) : '';
+        const tierHtml = tier ? `<span class="seat-tier">${tier}</span>` : '';
+        return `<div class="${cls}" ${onclick} title="${escapeHtml(title)}"><span class="seat-letter">${escapeHtml(col)}</span>${tierHtml}</div>`;
       }).join('');
       return `<div class="seat-grid-row"><div class="seat-grid-row-num">${escapeHtml(row.row_number || '')}</div>${cellsHtml}</div>`;
     }).join('');
