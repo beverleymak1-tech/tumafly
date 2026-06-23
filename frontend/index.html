@@ -3208,6 +3208,139 @@
       min-width: 0;
     }
 
+    /* ── Phase B — Mobile Filter + Sort pill row ────────────────── */
+    /* Twin outlined pills that sit above the flight list on mobile,
+       triggering the Filter and Sort bottom-sheets. Hidden on desktop. */
+    .mobile-fs-row {
+      display: none; /* hidden on desktop */
+      gap: 10px;
+      margin-bottom: 12px;
+    }
+    .mobile-fs-pill {
+      flex: 1;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      background: var(--surface);
+      border: 1.5px solid var(--brand);
+      color: var(--brand-dark);
+      border-radius: 10px;
+      padding: 12px;
+      font-family: inherit;
+      font-size: 14px;
+      font-weight: 600;
+      cursor: pointer;
+      min-height: 44px;
+      transition: background 0.12s, transform 0.05s;
+    }
+    .mobile-fs-pill:hover { background: var(--brand-soft); }
+    .mobile-fs-pill:active { transform: scale(0.985); }
+    .mobile-fs-pill svg { flex-shrink: 0; }
+
+    /* ── Phase B — Sort sheet body (rendered inline by openSortSheet) ── */
+    .sort-sheet-list {
+      padding: 8px 4px 16px;
+    }
+    .sort-sheet-item {
+      display: flex;
+      align-items: center;
+      gap: 14px;
+      width: 100%;
+      padding: 14px 16px;
+      background: none;
+      border: none;
+      font-family: inherit;
+      font-size: 15px;
+      font-weight: 500;
+      color: var(--ink);
+      cursor: pointer;
+      text-align: left;
+      border-radius: 8px;
+      min-height: 44px;
+    }
+    .sort-sheet-item:hover { background: var(--bg); }
+    .sort-sheet-item .sort-radio {
+      width: 22px;
+      height: 22px;
+      border-radius: 50%;
+      border: 2px solid var(--border-2);
+      flex-shrink: 0;
+      display: grid;
+      place-items: center;
+      transition: border-color 0.12s;
+    }
+    .sort-sheet-item.active .sort-radio {
+      border-color: var(--brand);
+    }
+    .sort-sheet-item.active .sort-radio::after {
+      content: '';
+      width: 12px;
+      height: 12px;
+      border-radius: 50%;
+      background: var(--brand);
+    }
+    .sort-sheet-item.active {
+      color: var(--brand-dark);
+      font-weight: 600;
+    }
+
+    /* ── Phase B — Filter sheet styling adjustments ───────────────
+       When the .filters aside is moved into the sheet, drop its surface
+       chrome (radius, shadow, padding) so it blends into the sheet body. */
+    .tf-sheet-body .filters {
+      background: transparent;
+      border-radius: 0;
+      box-shadow: none;
+      position: static;
+      padding: 8px 4px 16px;
+    }
+    .tf-sheet-body .filters h4 {
+      font-size: 13px;
+      color: var(--ink);
+      text-transform: none;
+      letter-spacing: 0;
+      font-weight: 700;
+      margin-bottom: 8px;
+      padding-bottom: 0;
+      border-bottom: none;
+    }
+    .tf-sheet-body .filters .filter-row {
+      padding: 10px 0;
+      font-size: 15px;
+      min-height: 44px;
+    }
+    .tf-sheet-body .filters .filter-row input[type="checkbox"],
+    .tf-sheet-body .filters .filter-row input[type="radio"] {
+      width: 20px;
+      height: 20px;
+      flex-shrink: 0;
+    }
+
+    /* Filter sheet "Reset" button in the footer */
+    .filter-sheet-footer {
+      display: flex;
+      gap: 10px;
+    }
+    .filter-sheet-footer .btn-reset {
+      flex: 0 0 auto;
+      background: var(--surface);
+      border: 1.5px solid var(--border-2);
+      color: var(--text);
+      font-family: inherit;
+      font-size: 14px;
+      font-weight: 600;
+      padding: 0 18px;
+      border-radius: 10px;
+      cursor: pointer;
+      min-height: 44px;
+    }
+    .filter-sheet-footer .btn-reset:hover { background: var(--bg); }
+    .filter-sheet-footer .btn-apply {
+      flex: 1;
+      min-height: 44px;
+    }
+
     /* ── Mobile overrides (≤768px) ───────────────────────────────── */
     @media (max-width: 768px) {
 
@@ -3271,6 +3404,36 @@
 
       /* Flight card — 2-column cabin row (4-wide is too cramped at 320px) */
       .fc-cabins { grid-template-columns: repeat(2, 1fr); }
+
+      /* ── Phase B — hide desktop chrome on mobile ──
+         The big editable summary-bar is replaced by the Phase A strip
+         in the nav region. The filter sidebar is replaced by the
+         Filter bottom-sheet — but the aside element itself stays in
+         the DOM (it's relocated into the sheet on demand). The
+         outbound recap card (#outbound-side-slot) stays visible above
+         the results list when a return is being chosen. */
+      .summary-bar { display: none; }
+      .results-side > .filters { display: none; }
+      .results-layout { grid-template-columns: 1fr; gap: 0; }
+
+      /* Show Phase B mobile filter/sort row */
+      .mobile-fs-row { display: flex; }
+
+      /* Hide the desktop sort pill on mobile — replaced by the Sort sheet.
+         The <select id="sort-by"> inside stays in the DOM as the source of
+         truth for the sort mode; applySortChoice() sets its value. */
+      .step-row .sort-pill { display: none; }
+
+      /* Route header — slim down on mobile, drop the meta line */
+      .route-header {
+        padding: 12px 14px;
+        margin-bottom: 12px;
+      }
+      .route-header h2 { font-size: 15px; }
+      .route-header .route-meta { display: none; }
+
+      /* When the filter aside is inside the sheet, allow it to expand naturally */
+      .tf-sheet-body .filters .group:last-child { margin-bottom: 8px; }
 
       /* Flight details modal — slide up as a sheet on mobile */
       .modal-backdrop {
@@ -3547,6 +3710,24 @@
       </div>
 
       <div>
+        <!-- Phase B — Mobile-only Filter + Sort row, above the route header.
+             Hidden on desktop; opens bottom-sheets on mobile. -->
+        <div class="mobile-fs-row">
+          <button class="mobile-fs-pill" onclick="openFilterSheet()" type="button">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+              <path d="M3 6h18M6 12h12M10 18h4" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+            </svg>
+            Filter
+          </button>
+          <button class="mobile-fs-pill" onclick="openSortSheet()" type="button">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+              <path d="M7 4v16M7 4l-3 3M7 4l3 3" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+              <path d="M17 20V4M17 20l-3-3M17 20l3-3" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+            </svg>
+            Sort
+          </button>
+        </div>
+
         <div class="route-header">
           <h2 id="route-h2">Outbound</h2>
           <div class="route-meta" id="route-meta">Price per traveler, includes taxes and fees</div>
@@ -7334,9 +7515,138 @@
     const onEnd = () => {
       sheet.classList.add('tf-hidden');
       document.body.style.overflow = '';
+      restoreRelocatedFilters(); // Phase B — put the filter aside back if it was moved
+      // Wipe sheet content so the next open is clean (Phase B's relocate puts it back first)
+      const body = document.getElementById('tf-sheet-body');
+      if (body) body.innerHTML = '';
+      const footer = document.querySelector('.tf-sheet-footer-slot');
+      if (footer) footer.remove();
       sheet.removeEventListener('transitionend', onEnd);
     };
     sheet.addEventListener('transitionend', onEnd);
+  }
+
+  // ============================================================
+  // PHASE B — FILTER + SORT BOTTOM-SHEETS
+  // ============================================================
+  // Filter sheet: physically relocates the existing <aside class="filters">
+  // element into the sheet body. All existing IDs, onclick handlers, and
+  // bindings keep working because we're moving the same node — not cloning.
+  // On close, the aside is moved back to its original parent.
+  //
+  // Sort sheet: renders 4 radio-style buttons that set the existing
+  // #sort-by <select> value (single source of truth) and re-render.
+
+  // Track where the filter aside was relocated from, so we can put it back.
+  let filterAsideOriginalParent = null;
+  let filterAsideOriginalNextSibling = null;
+
+  function openFilterSheet() {
+    const aside = document.querySelector('#view-results .filters');
+    const body  = document.getElementById('tf-sheet-body');
+    const sheet = document.getElementById('tf-sheet');
+    if (!aside || !body || !sheet) return;
+
+    // Remember its home
+    filterAsideOriginalParent = aside.parentElement;
+    filterAsideOriginalNextSibling = aside.nextElementSibling;
+
+    // Set up the sheet shell first (this also clears any leftover content)
+    openSheet('Filters', '');
+
+    // Move the aside into the sheet body
+    body.appendChild(aside);
+    // The aside has display:none on mobile via the media query; override here
+    // since now it's inside the sheet (which is itself only visible on mobile).
+    aside.style.display = 'block';
+
+    // Add a sticky footer with Reset + Apply
+    const footer = document.createElement('div');
+    footer.className = 'tf-sheet-footer tf-sheet-footer-slot';
+    footer.innerHTML = `
+      <div class="filter-sheet-footer">
+        <button type="button" class="btn-reset" onclick="resetMobileFilters()">Reset</button>
+        <button type="button" class="btn btn-primary btn-apply" onclick="closeSheet()">Apply filters</button>
+      </div>
+    `;
+    sheet.appendChild(footer);
+  }
+
+  function restoreRelocatedFilters() {
+    // If a filter aside is currently inside the sheet body, move it back.
+    const aside = document.querySelector('#tf-sheet-body .filters');
+    if (!aside || !filterAsideOriginalParent) return;
+    aside.style.display = ''; // clear the inline override
+    if (filterAsideOriginalNextSibling && filterAsideOriginalNextSibling.parentElement === filterAsideOriginalParent) {
+      filterAsideOriginalParent.insertBefore(aside, filterAsideOriginalNextSibling);
+    } else {
+      filterAsideOriginalParent.appendChild(aside);
+    }
+    filterAsideOriginalParent = null;
+    filterAsideOriginalNextSibling = null;
+  }
+
+  // Reset every filter back to its default. Calls existing handlers so
+  // renderResults() runs and the UI re-syncs.
+  function resetMobileFilters() {
+    // Stops: back to "all"
+    const stopsAny = document.querySelector('input[name="stops"][value="all"]');
+    if (stopsAny) { stopsAny.checked = true; setStopsFilter('all'); }
+
+    // African-only checkbox off
+    const african = document.getElementById('filter-african');
+    if (african) african.checked = false;
+
+    // Re-enable every airline (clear exclusions, then re-render the list)
+    excludedAirlines.clear();
+    rebuildAirlinesList();
+
+    // Range sliders back to defaults
+    const setRange = (id, val) => {
+      const el = document.getElementById(id);
+      if (el) el.value = val;
+    };
+    setRange('dur-max', 100);
+    setRange('dep-min', 0);
+    setRange('dep-max', 1440);
+    setRange('arr-min', 0);
+    setRange('arr-max', 1440);
+    setRange('price-max', 100);
+    onRangeChange();
+
+    renderResults();
+  }
+
+  // Sort sheet — small radio-style list. Tapping an option sets the
+  // hidden #sort-by select value and re-renders, then closes the sheet.
+  function openSortSheet() {
+    const current = document.getElementById('sort-by')?.value || 'recommended';
+    const options = [
+      ['recommended', 'Recommended'],
+      ['cheapest',    'Price (lowest to highest)'],
+      ['fastest',     'Duration (shortest first)'],
+      ['earliest',    'Departure (earliest first)'],
+    ];
+    const html = `
+      <div class="sort-sheet-list">
+        ${options.map(([val, label]) => `
+          <button type="button"
+                  class="sort-sheet-item ${val === current ? 'active' : ''}"
+                  onclick="applySortChoice('${val}')">
+            <span class="sort-radio"></span>
+            <span>${label}</span>
+          </button>
+        `).join('')}
+      </div>
+    `;
+    openSheet('Sort by', html);
+  }
+
+  function applySortChoice(value) {
+    const sel = document.getElementById('sort-by');
+    if (sel) sel.value = value;
+    renderResults();
+    closeSheet();
   }
 
   // ============================================================
