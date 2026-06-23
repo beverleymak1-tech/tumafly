@@ -6445,14 +6445,13 @@
         // One-way: render one-way total (per pax).
         if (kind === 'inbound' && inboundBaselineTotal != null && c === lockedCabin) {
           const diffPerPax = (price - inboundBaselineTotal) / passengerCount;
-          const isCheapest = Math.abs(diffPerPax) < 1;
+          // Always show "+KES X" (including +0 for the baseline) — keeps the
+          // comparison consistent with the other return options instead of
+          // calling out one row with a special "Cheapest" label.
           return `<button class="fc-cabin" onclick="selectFlightCabin('${escapeHtml(offer.flight_key)}','${kind}','${c}')">
                     <span class="fc-cabin-name">${CABIN_LABELS[c]}</span>
-                    ${isCheapest
-                      ? `<span class="fc-cabin-price" style="color:var(--success);">Cheapest</span>`
-                      : `<span class="fc-cabin-from">from</span>
-                         <span class="fc-cabin-price">+${formatPrice(diffPerPax)}</span>`
-                    }
+                    <span class="fc-cabin-from">from</span>
+                    <span class="fc-cabin-price">+${formatPrice(diffPerPax)}</span>
                     <span class="fc-cabin-trip">vs cheapest pair</span>
                   </button>`;
         }
@@ -6485,13 +6484,10 @@
           let metaLine;
           if (kind === 'inbound' && inboundBaselineTotal != null) {
             const diffPerPax = (chipPrice - inboundBaselineTotal) / passengerCount;
-            if (Math.abs(diffPerPax) < 1) {
-              priceLine = `<span style="color:var(--success);">Cheapest</span>`;
-              metaLine = `${CABIN_LABELS[chipCabin]} · vs cheapest pair`;
-            } else {
-              priceLine = `+${formatPrice(diffPerPax)}`;
-              metaLine = `${CABIN_LABELS[chipCabin]} · vs cheapest pair`;
-            }
+            // Always render the diff (including +KES 0 baseline) for consistency
+            // with sibling cards — no special "Cheapest" call-out.
+            priceLine = `+${formatPrice(diffPerPax)}`;
+            metaLine = `${CABIN_LABELS[chipCabin]} · vs cheapest pair`;
           } else {
             priceLine = formatPrice(perPax);
             metaLine = `${CABIN_LABELS[chipCabin]} · ${isRoundTrip ? 'Round-trip per traveler' : 'One-way per traveler'}`;
@@ -6746,13 +6742,24 @@
   // one seat map. A round-trip with a connection is multiple legs.
   function collectLegs() {
     const legs = [];
+    // ROUND-TRIP: all legs (outbound + inbound) should share the SAME offer_id
+    // for seat-map lookup, because Duffel's /air/seat_maps returns the map for
+    // ONE offer covering ALL its slices. We use selectedInbound's offer_id when
+    // it exists because that's the offer we actually book (see estimateBreakdown
+    // comment for the round-trip pairing model). When selectedInbound's offer
+    // differs from selectedOutbound's offer (user picked a non-default return),
+    // picking seats off the wrong offer's seat map would give service_ids that
+    // get rejected by backend re-validation at booking time.
+    //
+    // ONE-WAY: only selectedOutbound exists, single offer either way.
+    const bookingOfferId = (selectedInbound || selectedOutbound)?.cabinPricing?.offer_id;
     if (selectedOutbound) {
       const offer = selectedOutbound.offer;
       const slice = offer.slices[0];
       slice.segments.forEach(seg => {
         legs.push({
           which: 'outbound',
-          offer_id: selectedOutbound.cabinPricing.offer_id,
+          offer_id: bookingOfferId,
           segment_id: seg.flight_number + '@' + seg.departure, // synthetic until we have seat-map data
           flight_number: seg.flight_number,
           airline: seg.airline,
@@ -6769,7 +6776,7 @@
       slice.segments.forEach(seg => {
         legs.push({
           which: 'inbound',
-          offer_id: selectedInbound.cabinPricing.offer_id,
+          offer_id: bookingOfferId,
           segment_id: seg.flight_number + '@' + seg.departure,
           flight_number: seg.flight_number,
           airline: seg.airline,
@@ -7568,10 +7575,23 @@
   const PESAPAL_FEE_RATE = 0.035;
 
   function estimateBreakdown() {
-    // Whole-booking total in KES (sum of outbound + inbound for round-trip, all passengers)
-    const cab = currentCurrency === 'USD' ? 'price_usd' : 'price_kes';
-    const baseKes = (selectedOutbound?.cabinPricing?.price_kes || 0)
-                  + (selectedInbound?.cabinPricing?.price_kes || 0);
+    // ROUND-TRIP PRICING MODEL — IMPORTANT
+    // Duffel returns a SINGLE offer per round-trip search, containing both slices
+    // (outbound = slices[0], return = slices[1]) with one `total_amount` covering
+    // the entire pair. The frontend stores selectedOutbound and selectedInbound
+    // separately, but each .cabinPricing.price_kes is the FULL ROUND-TRIP TOTAL of
+    // that offer — NOT a single-leg price. Summing them double-counts.
+    //
+    // When the user picks return, selectedInbound points to the FINAL offer chosen
+    // for the pair (whose offer_id is what gets sent to create-payment). If they
+    // picked the default/cheapest return, selectedInbound.offer === selectedOutbound.offer.
+    // If they picked a non-default return, selectedInbound.offer is a different
+    // offer (same outbound segment, different return) and is the one we book.
+    //
+    // Either way the booking price is JUST selectedInbound's price (or
+    // selectedOutbound's price for one-way / before-the-user-has-picked-return).
+    const finalSelection = selectedInbound || selectedOutbound;
+    const baseKes = finalSelection?.cabinPricing?.price_kes || 0;
     // Seat selection fees roll into the base (treated as part of the flight price
     // for fee/tax purposes — Pesapal gross-up applies on the full subtotal).
     const seatsKes = seatTotalCostKes();
@@ -7943,11 +7963,19 @@
       // Bot-protection: get a Turnstile token (fails open if widget not loaded
       // or if backend has no TURNSTILE_SECRET configured).
       const turnstileToken = await ensureTurnstileToken('payment');
+      // Round-trip: book the offer that pairs the chosen outbound with the chosen
+      // return (selectedInbound.offer). If the user picked the default/cheapest
+      // return, selectedInbound.offer === selectedOutbound.offer. If they picked
+      // a non-default return, selectedInbound.offer is the different offer that
+      // includes BOTH the chosen outbound AND the chosen return — that's what we
+      // need to book.
+      // One-way: only selectedOutbound exists.
+      const bookingOfferId = (selectedInbound || selectedOutbound).cabinPricing.offer_id;
       const res = await fetch(`${SUPABASE_URL}/functions/v1/create-payment`, {
         method: 'POST',
         headers: { 'Authorization': `Bearer ${SUPABASE_ANON_KEY}`, 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          offer_id: selectedOutbound.cabinPricing.offer_id,
+          offer_id: bookingOfferId,
           passengers: passengerData,
           contact: contactData,
           seats: collectSeatSelections(),
