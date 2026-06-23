@@ -1692,7 +1692,9 @@
       position: fixed;
       inset: 0;
       background: rgba(15, 25, 35, 0.5);
-      z-index: 100;
+      /* Above the bottom-sheet (z: 401) so it stacks in front when opened
+         from inside the fare sheet via "View flight details". */
+      z-index: 500;
       display: grid;
       place-items: center;
       padding: 24px;
@@ -3536,14 +3538,21 @@
       font-variant-numeric: tabular-nums;
       letter-spacing: -0.3px;
       line-height: 1.2;
+      display: block;
     }
     .fc-chip-meta {
-      font-size: 12px;
+      font-size: 13px;
       color: var(--text-2);
-      margin-top: 1px;
+      margin-top: 3px;
       line-height: 1.2;
+      display: block;
     }
-    .fc-chip-body { flex: 1; min-width: 0; }
+    .fc-chip-body {
+      flex: 1;
+      min-width: 0;
+      display: flex;
+      flex-direction: column;
+    }
     .fc-chip-chev {
       color: var(--text-3);
       flex-shrink: 0;
@@ -3633,6 +3642,50 @@
       display: block;
       margin-bottom: 4px;
     }
+    /* Phase C+ — structured per-cabin sections (Flexibility / Bags / Seats).
+       Each section has a label, then rows with icon + descriptor. Icons use
+       the same yes/no scheme as the flight-details modal for consistency. */
+    .fare-card-section-label {
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      font-weight: 700;
+      color: var(--text-3);
+      margin-bottom: 6px;
+    }
+    .fare-card-rows {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+    .fare-card-row {
+      display: flex;
+      align-items: flex-start;
+      gap: 8px;
+      font-size: 13px;
+      color: var(--ink);
+      line-height: 1.35;
+    }
+    .fare-card-row .fc-row-icon {
+      width: 16px;
+      height: 16px;
+      flex-shrink: 0;
+      margin-top: 2px;
+      display: grid;
+      place-items: center;
+      border-radius: 50%;
+      font-size: 9px;
+      font-weight: 700;
+      color: white;
+    }
+    .fare-card-row.yes .fc-row-icon { background: var(--success); }
+    .fare-card-row.no  .fc-row-icon { background: #dc2626; }
+    .fare-card-row.info .fc-row-icon {
+      background: transparent;
+      color: var(--text-3);
+      border: 1.5px solid var(--text-3);
+    }
+    .fare-card-row.no, .fare-card-row.no span { color: var(--text-2); }
     .fare-card-cta {
       margin-top: auto; /* push CTA to the bottom regardless of card content height */
       padding-top: 4px;
@@ -3742,14 +3795,24 @@
       /* Price panel — bump total font slightly */
       .price-panel .total { font-size: 20px; }
 
-      /* Flight card — mobile: hide the 4-cabin grid and the bottom "Details"
-         link. Both are replaced by the single mobile price chip + fare sheet
-         (Phase C). The fare sheet itself contains a "View flight details" link. */
+      /* Flight card — mobile: hide the 4-cabin grid. The bottom "Details" link
+         stays visible (re-enabled per Hopper reference) and the new mobile
+         price chip is shown. */
       .fc-cabins { display: none; }
-      .fc-expand { display: none; }
       .fc-mobile-price-chip { display: flex; }
-      /* The card layout collapses to a single column already, so the route
-         info now spans full width on mobile cleanly. */
+      /* Restyle the Details link for mobile — Hopper-style: small, underlined,
+         right-aligned, sits between the route bar and the price chip. */
+      .fc-expand {
+        margin-top: 4px;
+        margin-bottom: 4px;
+      }
+      .fc-expand-btn {
+        font-size: 14px;
+        font-weight: 500;
+        text-decoration: underline;
+        text-underline-offset: 3px;
+        color: var(--ink);
+      }
 
       /* ── Phase B — hide desktop chrome on mobile ──
          The big editable summary-bar is replaced by the Phase A strip
@@ -8193,6 +8256,126 @@
 
   let fareSheetObserver = null; // IntersectionObserver for the dot indicator
 
+  // Build the Flexibility / Bags / Seats sections for one cabin card.
+  //
+  // Data lookup order, per field:
+  //   1. offer.cabins[cabin].conditions / .included_baggages — true per-cabin
+  //      data from Duffel, threaded through search-flights. Preferred.
+  //   2. offer.conditions — offer-level fallback. Same across cabins.
+  //   3. Honest "Confirmed at booking" placeholder when nothing is known.
+  //
+  // The backend doesn't yet return per-cabin conditions; once search-flights
+  // threads through { conditions, included_baggages } on each cabin entry,
+  // this renderer will pick them up automatically with no further changes.
+  function renderFareCardSections(offer, cabin) {
+    const cabinData = offer.cabins?.[cabin] || {};
+    const c = cabinData.conditions || offer.conditions || null;
+
+    // ── Flexibility ─────────────────────────────────────────────
+    const flexRows = [];
+    if (c?.change_before_departure) {
+      const cbd = c.change_before_departure;
+      const fee = cbd.penalty_amount;
+      const cur = cbd.penalty_currency || '';
+      if (cbd.allowed === false) {
+        flexRows.push({ kind: 'no', text: 'Non-changeable' });
+      } else if (cbd.allowed === true) {
+        if (fee && parseFloat(fee) > 0) flexRows.push({ kind: 'yes', text: `Change allowed for ${escapeHtml(cur)} ${escapeHtml(String(fee))}` });
+        else if (fee === '0' || fee === 0) flexRows.push({ kind: 'yes', text: 'Changes allowed · no fee' });
+        else flexRows.push({ kind: 'yes', text: 'Changes allowed' });
+      }
+    }
+    if (c?.refund_before_departure) {
+      const rbd = c.refund_before_departure;
+      const fee = rbd.penalty_amount;
+      const cur = rbd.penalty_currency || '';
+      if (rbd.allowed === false) {
+        flexRows.push({ kind: 'no', text: 'Non-refundable' });
+      } else if (rbd.allowed === true) {
+        if (fee && parseFloat(fee) > 0) flexRows.push({ kind: 'yes', text: `Refund allowed for ${escapeHtml(cur)} ${escapeHtml(String(fee))}` });
+        else if (fee === '0' || fee === 0) flexRows.push({ kind: 'yes', text: 'Fully refundable' });
+        else flexRows.push({ kind: 'yes', text: 'Refund allowed' });
+      }
+    }
+
+    // ── Bags ────────────────────────────────────────────────────
+    // included_baggages is expected as either:
+    //   [{ type: 'carry_on', quantity: 1 }, { type: 'checked', quantity: 1 }, ...]
+    //   or an object { carry_on: 1, checked: 1, personal_item: 1 }
+    // We accept both shapes for forward compatibility.
+    const bagsData = cabinData.included_baggages || cabinData.baggages || null;
+    const bagRows = [];
+    const bagCounts = { carry_on: 0, checked: 0, personal_item: 0 };
+    if (Array.isArray(bagsData)) {
+      for (const b of bagsData) {
+        const t = b.type;
+        const q = b.quantity ?? 1;
+        if (t in bagCounts) bagCounts[t] = Math.max(bagCounts[t], q);
+      }
+    } else if (bagsData && typeof bagsData === 'object') {
+      for (const k of Object.keys(bagCounts)) {
+        if (typeof bagsData[k] === 'number') bagCounts[k] = bagsData[k];
+      }
+    }
+    if (bagCounts.personal_item > 0) {
+      bagRows.push({ kind: 'yes', text: bagCounts.personal_item === 1 ? 'Personal item included' : `${bagCounts.personal_item} personal items` });
+    }
+    if (bagCounts.carry_on > 0) {
+      bagRows.push({ kind: 'yes', text: bagCounts.carry_on === 1 ? 'Carry-on bag included' : `${bagCounts.carry_on} carry-on bags` });
+    }
+    if (bagCounts.checked > 0) {
+      bagRows.push({ kind: 'yes', text: bagCounts.checked === 1 ? '1 checked bag included' : `${bagCounts.checked} checked bags included` });
+    }
+
+    // ── Seats ───────────────────────────────────────────────────
+    // No structured field today — render an honest line. When per-cabin
+    // seat-availability info exists we can swap the message based on it.
+    const seatsLine = 'Seats may be available to purchase';
+
+    // Assemble. If a section has zero rows we still show the section in the
+    // "Confirmed at booking" form so the card has consistent shape.
+    const section = (label, rows, fallback) => {
+      if (!rows.length) {
+        return `
+          <div>
+            <div class="fare-card-section-label">${label}</div>
+            <div class="fare-card-rows">
+              <div class="fare-card-row info">
+                <span class="fc-row-icon">i</span>
+                <span>${fallback}</span>
+              </div>
+            </div>
+          </div>`;
+      }
+      return `
+        <div>
+          <div class="fare-card-section-label">${label}</div>
+          <div class="fare-card-rows">
+            ${rows.map(r => `
+              <div class="fare-card-row ${r.kind}">
+                <span class="fc-row-icon">${r.kind === 'yes' ? '✓' : (r.kind === 'no' ? '✕' : 'i')}</span>
+                <span>${r.text}</span>
+              </div>
+            `).join('')}
+          </div>
+        </div>`;
+    };
+
+    return `
+      ${section('Flexibility', flexRows, 'Fare rules confirmed at booking')}
+      ${section('Bags',        bagRows,  'Bag allowance varies — see flight details')}
+      <div>
+        <div class="fare-card-section-label">Seats</div>
+        <div class="fare-card-rows">
+          <div class="fare-card-row info">
+            <span class="fc-row-icon">i</span>
+            <span>${seatsLine}</span>
+          </div>
+        </div>
+      </div>
+    `;
+  }
+
   function openFareSheet(flightKey, kind) {
     const offer = allOffers.find(o => o.flight_key === flightKey);
     if (!offer) return;
@@ -8232,12 +8415,11 @@
     const cards = cabinsToShow.map(c => {
       const total = cabinPriceOf(offer, c);
       const perPax = total / passengerCount;
+      const sections = renderFareCardSections(offer, c);
       return `
         <div class="fare-card">
           <div class="fare-card-name">${CABIN_LABELS[c]} Cabin</div>
-          <div class="fare-card-section">
-            Final price and fare rules are confirmed at booking. Tap "View details" below for the full flight breakdown.
-          </div>
+          ${sections}
           <div class="fare-card-cta">
             <button class="btn btn-primary"
                     onclick="chooseFareFromSheet('${escapeHtml(offer.flight_key)}','${kind}','${c}')">
