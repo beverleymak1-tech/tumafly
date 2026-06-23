@@ -3065,15 +3065,31 @@
        On iOS, <input type="date"> ignores width:100% unless min-width is explicitly
        zeroed (UA stylesheet sets a large intrinsic minimum that overflows the
        container). The ::-webkit-date-and-time-value pseudo-element also centres
-       its text regardless of text-align on the input itself — the second rule
-       corrects that. Neither rule affects Android or desktop. */
+       its text regardless of text-align on the input itself. We also need to zero
+       out the inner padding WebKit adds to the datetime-edit and picker-indicator
+       pseudo-elements, which together cause residual overflow on smaller screens. */
     input[type="date"] {
       min-width: 0;
       max-width: 100%;
+      width: 100%;
       text-align: left;
+      -webkit-min-logical-width: 0;
     }
     input[type="date"]::-webkit-date-and-time-value {
       text-align: left;
+      margin: 0;
+    }
+    input[type="date"]::-webkit-datetime-edit {
+      padding: 0;
+      text-align: left;
+    }
+    input[type="date"]::-webkit-datetime-edit-fields-wrapper {
+      padding: 0;
+    }
+    input[type="date"]::-webkit-calendar-picker-indicator {
+      margin-right: 0;
+      margin-left: auto;
+      padding: 0;
     }
 
     /* ── Bottom-sheet primitive ───────────────────────────────────── */
@@ -3158,7 +3174,7 @@
       flex: 1;
       -webkit-overflow-scrolling: touch;
       overscroll-behavior: contain;
-      padding-bottom: env(safe-area-inset-bottom, 0px);
+      padding: 0 20px env(safe-area-inset-bottom, 0px);
     }
 
     /* Sticky CTA footer inside a sheet (e.g. "Continue for KES X") */
@@ -3180,15 +3196,13 @@
     .mobile-summary-pill {
       display: flex;
       align-items: center;
-      gap: 8px;
+      gap: 12px;
       width: 100%;
-      background: var(--bg);
-      border: 1px solid var(--border-2);
-      border-radius: 999px;
-      padding: 10px 16px 10px 14px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      padding: 12px 16px;
       font-family: inherit;
-      font-size: 14px;
-      font-weight: 500;
       color: var(--ink);
       cursor: pointer;
       min-width: 0;
@@ -3196,16 +3210,37 @@
       transition: background 0.12s, border-color 0.12s;
     }
     .mobile-summary-pill:hover {
-      background: var(--brand-soft);
-      border-color: var(--brand);
+      background: var(--bg);
+      border-color: var(--border-2);
     }
-    .mobile-summary-pill svg { flex-shrink: 0; color: var(--text-3); }
-    .mobile-summary-pill-text {
+    .mobile-summary-pill svg {
+      flex-shrink: 0;
+      color: var(--text-2);
+    }
+    .mobile-summary-pill-content {
+      flex: 1;
+      min-width: 0;
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+    }
+    .mobile-summary-pill-route {
+      font-size: 15px;
+      font-weight: 700;
+      color: var(--ink);
       overflow: hidden;
       text-overflow: ellipsis;
       white-space: nowrap;
-      flex: 1;
-      min-width: 0;
+      letter-spacing: -0.2px;
+      line-height: 1.25;
+    }
+    .mobile-summary-pill-meta {
+      font-size: 13px;
+      color: var(--text-2);
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      line-height: 1.25;
     }
 
     /* ── Phase B — Mobile Filter + Sort pill row ────────────────── */
@@ -3240,14 +3275,14 @@
 
     /* ── Phase B — Sort sheet body (rendered inline by openSortSheet) ── */
     .sort-sheet-list {
-      padding: 8px 4px 16px;
+      padding: 8px 0 16px;
     }
     .sort-sheet-item {
       display: flex;
       align-items: center;
       gap: 14px;
       width: 100%;
-      padding: 14px 16px;
+      padding: 14px 4px;
       background: none;
       border: none;
       font-family: inherit;
@@ -3293,7 +3328,7 @@
       border-radius: 0;
       box-shadow: none;
       position: static;
-      padding: 8px 4px 16px;
+      padding: 8px 0 16px;
     }
     .tf-sheet-body .filters h4 {
       font-size: 13px;
@@ -3483,11 +3518,14 @@
      JS toggles .hidden; CSS makes it sticky below the nav. -->
 <div class="mobile-search-strip hidden" id="mobile-search-strip">
   <button class="mobile-summary-pill" id="mobile-summary-pill" onclick="openMobileSearch()" aria-label="Edit search">
-    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true">
       <circle cx="11" cy="11" r="7" stroke="currentColor" stroke-width="1.8"/>
       <path d="M16 16l4 4" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
     </svg>
-    <span class="mobile-summary-pill-text" id="mobile-summary-text">Search</span>
+    <span class="mobile-summary-pill-content">
+      <span class="mobile-summary-pill-route" id="mobile-summary-route">Search</span>
+      <span class="mobile-summary-pill-meta" id="mobile-summary-meta"></span>
+    </span>
   </button>
 </div>
 
@@ -5598,6 +5636,7 @@
     const durMax = +document.getElementById('dur-max')?.max || 0;
     document.getElementById('dur-label').textContent =
       (dur >= durMax) ? 'Any duration' : `Under ${fmtDurationMinutes(dur)}`;
+    updateSingleRangeFill('dur-max');
 
     const depMin = +document.getElementById('dep-min')?.value || 0;
     const depMax = +document.getElementById('dep-max')?.value || 1440;
@@ -5618,6 +5657,7 @@
     const pMax = +pSlider?.max || 0;
     document.getElementById('price-label').textContent =
       (p >= pMax) ? 'Any price' : `Up to ${formatPrice(p)}`;
+    updateSingleRangeFill('price-max');
   }
 
   function updateRangeFill(prefix) {
@@ -5630,6 +5670,19 @@
     const rightPct = 100 - (((+maxEl.value - +maxEl.min) / range) * 100);
     fill.style.left = leftPct + '%';
     fill.style.right = rightPct + '%';
+  }
+
+  // Paint a coloured fill from 0 → thumb position on a single-handle slider,
+  // mirroring the dual-handle behaviour. Uses an inline linear-gradient because
+  // browsers don't expose ::-moz-range-progress equivalent on WebKit. Called
+  // for dur-max and price-max from updateRangeLabels.
+  function updateSingleRangeFill(id) {
+    const el = document.getElementById(id);
+    if (!el) return;
+    const range = +el.max - +el.min;
+    if (range <= 0) return;
+    const pct = Math.max(0, Math.min(100, ((+el.value - +el.min) / range) * 100));
+    el.style.background = `linear-gradient(to right, var(--brand) 0%, var(--brand) ${pct}%, var(--border-2) ${pct}%, var(--border-2) 100%)`;
   }
 
   function onRangeChange() {
@@ -7657,27 +7710,41 @@
   // visual reminder of the current search context.
 
   function updateMobileSummaryPill(viewName) {
-    const strip  = document.getElementById('mobile-search-strip');
-    const textEl = document.getElementById('mobile-summary-text');
-    if (!strip || !textEl) return;
+    const strip   = document.getElementById('mobile-search-strip');
+    const routeEl = document.getElementById('mobile-summary-route');
+    const metaEl  = document.getElementById('mobile-summary-meta');
+    if (!strip || !routeEl || !metaEl) return;
 
     const showStrip = ['results', 'booking', 'payment'].includes(viewName);
+    if (!showStrip) { strip.classList.add('hidden'); return; }
 
-    if (showStrip) {
-      const from = rOriginSelectedIata || originSelectedIata || '';
-      const to   = rDestinationSelectedIata || destinationSelectedIata || '';
-      const pax  = passengerCount || 1;
-      const paxLabel = pax === 1 ? '1 traveler' : `${pax} travelers`;
-      const tripLabel = tripType === 'round' ? 'Round-trip' : 'One-way';
+    // Build the route line. Prefer city names from airportsData; fall back to IATA.
+    const fromIata = rOriginSelectedIata      || originSelectedIata      || '';
+    const toIata   = rDestinationSelectedIata || destinationSelectedIata || '';
+    const fromName = (fromIata && findAirportByIata(fromIata)?.city) || fromIata;
+    const toName   = (toIata   && findAirportByIata(toIata)?.city)   || toIata;
+    routeEl.textContent = (fromName && toName) ? `${fromName} to ${toName}` : 'Search';
 
-      textEl.textContent = (from && to)
-        ? `${from} → ${to}  ·  ${paxLabel}  ·  ${tripLabel}`
-        : `${paxLabel}  ·  ${tripLabel}`;
+    // Build the meta line: dates + traveler count.
+    // Dates come from lastSearchParams (set by runSearch). Format as "Fri, Jun 26".
+    const fmtDate = (iso) => {
+      if (!iso) return '';
+      const d = new Date(iso + 'T00:00:00');
+      if (isNaN(d)) return '';
+      return d.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
+    };
 
-      strip.classList.remove('hidden');
-    } else {
-      strip.classList.add('hidden');
-    }
+    const depart = fmtDate(lastSearchParams?.date);
+    const ret    = fmtDate(lastSearchParams?.returnDate);
+    const pax    = passengerCount || 1;
+    const paxLabel = pax === 1 ? '1 traveler' : `${pax} travelers`;
+
+    let dateStr = '';
+    if (depart && ret && tripType === 'round') dateStr = `${depart} – ${ret}`;
+    else if (depart) dateStr = depart;
+
+    metaEl.textContent = dateStr ? `${dateStr}  ·  ${paxLabel}` : paxLabel;
+    strip.classList.remove('hidden');
   }
 
   // Tapping the pill navigates back to results or (Phase B) opens a
