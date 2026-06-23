@@ -3170,25 +3170,28 @@
       background: var(--surface);
     }
 
-    /* ── Mobile search summary pill ──────────────────────────────── */
-    /* Sits in the nav, between logo and right edge. Hidden by default;
-       enabled on mobile via media query, further toggled by JS .hidden class. */
-    .mobile-summary-pill {
+    /* ── Mobile search summary strip + pill ─────────────────────── */
+    /* Strip: block element between nav and page content. Hidden on desktop;
+       shown on mobile via media query, further toggled by JS .hidden class.
+       Pill: full-width button inside the strip. */
+    .mobile-search-strip {
       display: none; /* hidden on desktop */
+    }
+    .mobile-summary-pill {
+      display: flex;
       align-items: center;
       gap: 8px;
+      width: 100%;
       background: var(--bg);
       border: 1px solid var(--border-2);
       border-radius: 999px;
-      padding: 8px 14px 8px 12px;
+      padding: 10px 16px 10px 14px;
       font-family: inherit;
-      font-size: 13px;
+      font-size: 14px;
       font-weight: 500;
       color: var(--ink);
       cursor: pointer;
-      flex: 1;
       min-width: 0;
-      max-width: 320px;
       text-align: left;
       transition: background 0.12s, border-color 0.12s;
     }
@@ -3211,8 +3214,17 @@
       /* Nav */
       .nav { height: 56px; }
       .nav-inner { padding: 0 16px; gap: 10px; }
-      /* Summary pill visible on mobile (JS also removes .hidden on non-home views) */
-      .mobile-summary-pill { display: flex; }
+      /* Search strip: visible on mobile, sticky just below the 56px nav.
+         JS toggles .hidden to show/hide per view. */
+      .mobile-search-strip {
+        display: block;
+        background: var(--surface);
+        border-bottom: 1px solid var(--border);
+        padding: 8px 16px;
+        position: sticky;
+        top: 56px; /* nav height on mobile */
+        z-index: 49; /* just under the nav's z-index: 50 */
+      }
 
       /* Hero */
       .hero { padding: 28px 16px 36px; }
@@ -3296,20 +3308,25 @@
       <span class="brand-mark">T</span>
       <span>TumaFly</span>
     </button>
-    <!-- Mobile: compact search summary pill — shown on results/booking/payment (Phase A) -->
-    <button class="mobile-summary-pill hidden" id="mobile-summary-pill" onclick="openMobileSearch()" aria-label="Edit search">
-      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-        <circle cx="11" cy="11" r="7" stroke="currentColor" stroke-width="1.8"/>
-        <path d="M16 16l4 4" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
-      </svg>
-      <span class="mobile-summary-pill-text" id="mobile-summary-text">Search</span>
-    </button>
     <div class="nav-links">
       <button class="nav-link" onclick="showView('home')">Search</button>
       <a class="nav-link" href="mailto:hello@tumafly.com">Support</a>
     </div>
   </div>
 </nav>
+
+<!-- Mobile search summary strip — sits between nav and page content.
+     Hidden on desktop; shown on mobile on results/booking/payment views.
+     JS toggles .hidden; CSS makes it sticky below the nav. -->
+<div class="mobile-search-strip hidden" id="mobile-search-strip">
+  <button class="mobile-summary-pill" id="mobile-summary-pill" onclick="openMobileSearch()" aria-label="Edit search">
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+      <circle cx="11" cy="11" r="7" stroke="currentColor" stroke-width="1.8"/>
+      <path d="M16 16l4 4" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
+    </svg>
+    <span class="mobile-summary-pill-text" id="mobile-summary-text">Search</span>
+  </button>
+</div>
 
 <!-- ============================================================
      HOME VIEW
@@ -7330,15 +7347,13 @@
   // visual reminder of the current search context.
 
   function updateMobileSummaryPill(viewName) {
-    const pill   = document.getElementById('mobile-summary-pill');
+    const strip  = document.getElementById('mobile-search-strip');
     const textEl = document.getElementById('mobile-summary-text');
-    if (!pill || !textEl) return;
+    if (!strip || !textEl) return;
 
-    const showPill = ['results', 'booking', 'payment'].includes(viewName);
+    const showStrip = ['results', 'booking', 'payment'].includes(viewName);
 
-    if (showPill) {
-      // Build summary from state. Use the results-page IATAs when available
-      // (user may have edited the route on the summary bar).
+    if (showStrip) {
       const from = rOriginSelectedIata || originSelectedIata || '';
       const to   = rDestinationSelectedIata || destinationSelectedIata || '';
       const pax  = passengerCount || 1;
@@ -7349,9 +7364,9 @@
         ? `${from} → ${to}  ·  ${paxLabel}  ·  ${tripLabel}`
         : `${paxLabel}  ·  ${tripLabel}`;
 
-      pill.classList.remove('hidden');
+      strip.classList.remove('hidden');
     } else {
-      pill.classList.add('hidden');
+      strip.classList.add('hidden');
     }
   }
 
