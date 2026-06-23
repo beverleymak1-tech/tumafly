@@ -219,7 +219,22 @@ serve(async (req) => {
       // We pick the economy offer as the "canonical" one for itinerary display when present;
       // else fall back to whichever cabin we got.
       canonical: any;
-      cabins: Record<CabinClass, { offer_id: string; price_kes: number; price_usd: number } | null>;
+      cabins: Record<CabinClass, {
+        offer_id: string;
+        price_kes: number;
+        price_usd: number;
+        // Per-cabin fare rules from Duffel. Each cabin is a separate Duffel
+        // offer with its own conditions, so the fare-selection UI can show
+        // different change/refund rules per cabin.
+        conditions: {
+          change_before_departure: any | null;
+          refund_before_departure: any | null;
+        } | null;
+        // Per-cabin bag allowance. Duffel sets bags per fare class on each
+        // passenger; allowances are consistent across all segments of one
+        // offer, so we sample the first passenger's first segment.
+        included_baggages: { type: string; quantity: number }[] | null;
+      } | null>;
     };
     const buckets = new Map<string, Bucket>();
 
@@ -229,6 +244,25 @@ serve(async (req) => {
         const original = parseFloat(o.total_amount);
         const priceKES = fx.toKES(original, o.total_currency);
         const priceUSD = fx.toUSD(original, o.total_currency);
+
+        // Per-cabin Duffel conditions. Each Duffel offer carries its own
+        // fare rules, so a Business offer can be refundable while Economy
+        // on the same flight is not. Frontend reads these on the fare card.
+        const conditions = o.conditions ? {
+          change_before_departure: o.conditions.change_before_departure || null,
+          refund_before_departure: o.conditions.refund_before_departure || null,
+        } : null;
+
+        // Per-cabin bag allowance. Duffel returns baggages on each segment's
+        // passenger; for any single offer the allowance is the same across
+        // segments because it's defined by the fare class. We sample slice 0
+        // / segment 0 / passenger 0 and pass the normalised array through.
+        const firstPax = o.slices?.[0]?.segments?.[0]?.passengers?.[0];
+        const included_baggages = Array.isArray(firstPax?.baggages)
+          ? firstPax.baggages
+              .filter((b: any) => b && b.type)
+              .map((b: any) => ({ type: b.type, quantity: b.quantity ?? 1 }))
+          : null;
 
         let bucket = buckets.get(key);
         if (!bucket) {
@@ -243,7 +277,13 @@ serve(async (req) => {
         // offers for the same physical flight at different fare classes).
         const existing = bucket.cabins[cabin];
         if (!existing || priceKES < existing.price_kes) {
-          bucket.cabins[cabin] = { offer_id: o.id, price_kes: priceKES, price_usd: priceUSD };
+          bucket.cabins[cabin] = {
+            offer_id: o.id,
+            price_kes: priceKES,
+            price_usd: priceUSD,
+            conditions,
+            included_baggages,
+          };
         }
         // Promote canonical to the lowest-cabin offer we have, for stable schedule display
         // (economy schedules are usually the most representative)
