@@ -3061,6 +3061,21 @@
        completely untouched.
        ═══════════════════════════════════════════════════════════════ */
 
+    /* ── iOS Safari date-input fixes (not media-gated — harmless on all platforms) ──
+       On iOS, <input type="date"> ignores width:100% unless min-width is explicitly
+       zeroed (UA stylesheet sets a large intrinsic minimum that overflows the
+       container). The ::-webkit-date-and-time-value pseudo-element also centres
+       its text regardless of text-align on the input itself — the second rule
+       corrects that. Neither rule affects Android or desktop. */
+    input[type="date"] {
+      min-width: 0;
+      max-width: 100%;
+      text-align: left;
+    }
+    input[type="date"]::-webkit-date-and-time-value {
+      text-align: left;
+    }
+
     /* ── Bottom-sheet primitive ───────────────────────────────────── */
     .tf-scrim {
       position: fixed;
