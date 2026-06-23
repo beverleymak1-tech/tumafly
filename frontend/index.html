@@ -144,8 +144,33 @@
       font-family: inherit;
     }
     .nav-link:hover { color: var(--ink); }
+    /* Global currency toggle — visible on every page including mobile. */
+    .nav-currency {
+      display: inline-flex;
+      border: 1px solid var(--border-2);
+      border-radius: 20px;
+      overflow: hidden;
+      font-size: 12px;
+    }
+    .nav-currency button {
+      padding: 6px 12px;
+      font-family: inherit;
+      font-size: 12px;
+      font-weight: 600;
+      border: none;
+      background: var(--surface);
+      color: var(--text-2);
+      cursor: pointer;
+      touch-action: manipulation;
+    }
+    .nav-currency button.active {
+      background: var(--brand);
+      color: white;
+    }
     @media (max-width: 640px) {
-      .nav-links { display: none; }
+      /* Hide nav text links on mobile but KEEP the currency toggle visible */
+      .nav-links { gap: 8px; }
+      .nav-links .nav-link { display: none; }
     }
 
     /* ─────────────────────────────────────────────────────────────
@@ -4338,6 +4363,10 @@
       <span>TumaFly</span>
     </button>
     <div class="nav-links">
+      <div class="nav-currency" id="nav-currency-toggle">
+        <button id="nav-curr-kes" class="active" onclick="setCurrency('KES')" type="button">KES</button>
+        <button id="nav-curr-usd" onclick="setCurrency('USD')" type="button">USD</button>
+      </div>
       <button class="nav-link" onclick="showView('home')">Search</button>
       <a class="nav-link" href="mailto:hello@tumafly.com">Support</a>
     </div>
@@ -5616,6 +5645,7 @@
     passengerData = [];
     contactData = {};
     activeMerchantRef = null;
+    lastPaymentBreakdown = null;
     showView('home');
   }
 
@@ -5768,6 +5798,17 @@
   function formatPrice(amount) {
     if (currentCurrency === 'USD') return 'USD ' + Number(amount).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
     return 'KES ' + Math.round(amount).toLocaleString();
+  }
+  // formatKes(kesAmount) — format a KES-denominated amount in the current
+  // display currency. If USD is toggled and we have a rate, convert; otherwise
+  // fall back to KES. Used for seat costs, fees, and other KES-only fields.
+  function formatKes(kesAmount) {
+    const n = Number(kesAmount) || 0;
+    if (currentCurrency === 'USD' && rateInfo?.kesToUsd) {
+      const usd = n * rateInfo.kesToUsd;
+      return 'USD ' + usd.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    }
+    return 'KES ' + Math.round(n).toLocaleString();
   }
   function escapeHtml(s) {
     if (s == null) return '';
@@ -6403,7 +6444,18 @@
         return;
       }
       selectedOutbound = selectedInbound = selectedOffer = null;
-      if (allOffers[0]) rateInfo = { date: allOffers[0].rate_date, isLive: allOffers[0].rate_is_live };
+      if (allOffers[0]) {
+        // Derive the KES→USD rate from the first offer so downstream KES-only
+        // amounts (seat costs, fees) can be converted when USD is toggled.
+        const o0 = allOffers[0];
+        const kes = o0.lowest_price_kes || o0.price;
+        const usd = o0.lowest_price_usd || o0.price_usd;
+        rateInfo = {
+          date: o0.rate_date,
+          isLive: o0.rate_is_live,
+          kesToUsd: (kes && usd) ? (usd / kes) : null,
+        };
+      }
 
       rememberAirport(origin);
       rememberAirport(destination);
@@ -6522,10 +6574,31 @@
   // ============================================================
   function setCurrency(c) {
     currentCurrency = c;
-    document.getElementById('curr-kes').classList.toggle('active', c === 'KES');
-    document.getElementById('curr-usd').classList.toggle('active', c === 'USD');
+    // Sync the sidebar toggle (results page)
+    document.getElementById('curr-kes')?.classList.toggle('active', c === 'KES');
+    document.getElementById('curr-usd')?.classList.toggle('active', c === 'USD');
+    // Sync the global nav toggle
+    document.getElementById('nav-curr-kes')?.classList.toggle('active', c === 'KES');
+    document.getElementById('nav-curr-usd')?.classList.toggle('active', c === 'USD');
+    // Re-render any visible view that displays prices
     renderResults();
     updatePriceGauge();
+    // Booking/payment views re-render their summaries
+    if (typeof renderBookingSummary === 'function' &&
+        !document.getElementById('view-booking')?.classList.contains('hidden')) {
+      renderBookingSummary();
+    }
+    if (typeof renderPaymentSummary === 'function' &&
+        !document.getElementById('view-payment')?.classList.contains('hidden')) {
+      // We don't have the server breakdown cached at this point in all cases;
+      // re-render with whatever the current state has. The estimate path uses
+      // estimateBreakdown() which already respects currentCurrency via formatKes.
+      renderPaymentSummary(lastPaymentBreakdown || null);
+    }
+    // If seat modal is open, re-render to update prices in tooltips and total
+    if (seatModalState && typeof renderSeatModal === 'function') {
+      renderSeatModal();
+    }
   }
   function setStopsFilter(value) {
     activeStopsFilter = value;
@@ -7685,7 +7758,7 @@
           </div>
         ` : ''}
         <div class="seat-modal-foot">
-          <div class="seat-modal-total">${total > 0 ? `Seat charges: <strong>KES ${total.toLocaleString()}</strong>` : 'Optional — skip to keep airline assignment'}</div>
+          <div class="seat-modal-total">${total > 0 ? `Seat charges: <strong>${formatKes(total)}</strong>` : 'Optional — skip to keep airline assignment'}</div>
           <button type="button" class="btn btn-primary" onclick="closeSeatModal()">Done</button>
         </div>
       </div>
@@ -7737,7 +7810,7 @@
           ? `onclick="pickSeat('${escapeJs(leg.segment_id)}', '${escapeJs(el.service_id)}', '${escapeJs(el.designator)}', ${el.cost_kes})"`
           : '';
         const col = el.designator.slice(-1);
-        const cost = el.cost_kes > 0 ? `\nKES ${el.cost_kes}` : '';
+        const cost = el.cost_kes > 0 ? `\n${formatKes(el.cost_kes)}` : '';
         const title = `${el.designator}${cost}`;
         // Price tier badge — only on available, priced seats not yet selected
         const tier = el.available && pickedBy < 0 ? priceTier(el.cost_kes) : '';
@@ -8350,12 +8423,12 @@
     const seatsKes = b.seats_kes || 0;
 
     const breakdownHtml = `
-      <div class="line"><span class="label">Flight <span style="color:var(--text-3);font-size:12px;">(taxes included)</span></span><span class="value">KES ${b.base_kes.toLocaleString()}</span></div>
-      ${seatsKes > 0 ? `<div class="line"><span class="label">Seat selection</span><span class="value">KES ${seatsKes.toLocaleString()}</span></div>` : ''}
-      <div class="line"><span class="label">TumaFly service fee</span><span class="value">KES ${b.service_fee_kes.toLocaleString()}</span></div>
-      <div class="line"><span class="label">Payment processing</span><span class="value">KES ${b.processing_fee_kes.toLocaleString()}</span></div>
+      <div class="line"><span class="label">Flight <span style="color:var(--text-3);font-size:12px;">(taxes included)</span></span><span class="value">${formatKes(b.base_kes)}</span></div>
+      ${seatsKes > 0 ? `<div class="line"><span class="label">Seat selection</span><span class="value">${formatKes(seatsKes)}</span></div>` : ''}
+      <div class="line"><span class="label">TumaFly service fee</span><span class="value">${formatKes(b.service_fee_kes)}</span></div>
+      <div class="line"><span class="label">Payment processing</span><span class="value">${formatKes(b.processing_fee_kes)}</span></div>
       <div class="divider"></div>
-      <div class="total"><span>${isEstimate ? 'Total estimate' : 'Total'}</span><span class="value">KES ${b.total_kes.toLocaleString()}</span></div>
+      <div class="total"><span>${isEstimate ? 'Total estimate' : 'Total'}</span><span class="value">${formatKes(b.total_kes)}</span></div>
       <div class="foot">${isEstimate
         ? "Estimate based on the airline's current fare. Final price confirmed at checkout — airline fares can move between selection and payment."
         : 'Final price confirmed at checkout based on passenger details and availability.'}</div>
@@ -8375,7 +8448,10 @@
     renderPricePanel('booking-price-slot');
   }
 
+  let lastPaymentBreakdown = null;
+
   function renderPaymentSummary(breakdown) {
+    if (breakdown) lastPaymentBreakdown = breakdown;
     renderTripPanel('payment-trip-slot');
     renderPricePanel('payment-price-slot', breakdown, { isPayment: true });
     // Phase F: also populate the mobile-only inline price slot
