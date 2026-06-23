@@ -762,7 +762,7 @@
       display: grid;
       grid-template-columns: auto 2fr 1fr 1fr 1fr auto;
       gap: 10px;
-      align-items: stretch;
+      align-items: center;
     }
     @media (max-width: 1100px) {
       .summary-bar { grid-template-columns: auto 2fr 1fr 1fr 1fr; }
@@ -2094,13 +2094,13 @@
       line-height: 1.4;
     }
     .seat-upsell svg { flex-shrink: 0; margin-top: 1px; color: var(--brand); }
+    /* Hopper-style seat CTA buttons. Desktop: inline-sized, sit side-by-side
+       in normal button width. Mobile: full-width stacked (overridden in @media). */
     .seat-cta-btn {
-      display: block;
-      width: 100%;
-      margin-bottom: 10px;
-      min-height: 48px;
+      margin-right: 10px;
+      margin-top: 4px;
     }
-    .seat-cta-btn:last-child { margin-bottom: 0; }
+    .seat-cta-btn:last-child { margin-right: 0; }
 
 
     .seat-modal-backdrop {
@@ -2129,6 +2129,7 @@
       align-items: center;
       justify-content: space-between;
       gap: 12px;
+      flex-shrink: 0;
     }
     .seat-modal-title {
       font-size: 17px;
@@ -2156,10 +2157,11 @@
     .seat-modal-tabs {
       display: flex;
       gap: 4px;
-      padding: 12px 22px 0;
+      padding: 12px 22px 4px;
       border-bottom: 1px solid var(--border);
       overflow-x: auto;
       flex-wrap: nowrap;
+      flex-shrink: 0;
     }
     .seat-modal-tab {
       font-family: inherit;
@@ -2351,6 +2353,18 @@
       font-size: 14px;
     }
     .seat-modal-fallback strong { color: var(--ink); font-size: 15px; display: block; margin-bottom: 8px; }
+
+    /* Pax list sits above seat grid — horizontal scrollable row of pills */
+    .seat-modal-pax-list {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin-bottom: 14px;
+    }
+    .seat-modal-pax-list .seat-modal-pax-row {
+      flex: 0 0 auto;
+      margin: 0;
+    }
 
     .form-grid {
       display: grid;
@@ -3470,6 +3484,7 @@
       text-align: left;
       border-radius: 8px;
       min-height: 44px;
+      touch-action: manipulation;
     }
     .sort-sheet-item:hover { background: var(--bg); }
     .sort-sheet-item .sort-radio {
@@ -3936,6 +3951,12 @@
         border-radius: 24px 24px 0 0;
         max-height: 92dvh;
       }
+      /* Seat grid takes full modal width on mobile with horizontal scroll */
+      .seat-grid-wrap {
+        margin-top: 8px;
+        overflow-x: auto;
+        -webkit-overflow-scrolling: touch;
+      }
 
       /* Footer */
       .footer-inner { flex-direction: column; gap: 8px; }
@@ -4160,10 +4181,19 @@
         width: 100%;
         min-height: 48px;
       }
+      .seat-cta-btn {
+        display: block;
+        width: 100%;
+        margin-right: 0;
+        margin-bottom: 10px;
+        min-height: 48px;
+      }
+      .seat-cta-btn:last-child { margin-bottom: 0; }
 
-      /* Sticky bottom CTA bar */
+      /* Bottom CTA bar — fixed to viewport bottom, not sticky (sticky misbehaves
+         inside grid/overflow containers on mobile browsers) */
       .booking-cta-bar {
-        position: sticky;
+        position: fixed;
         bottom: 0;
         left: 0;
         right: 0;
@@ -4173,7 +4203,7 @@
         display: flex;
         gap: 10px;
         z-index: 30;
-        margin: 0 -12px -80px;
+        /* No negative margin needed with fixed positioning */
       }
       .booking-cta-bar .btn-secondary {
         flex: 0 0 auto;
@@ -6259,7 +6289,18 @@
       }
       // Token is single-use — get a fresh one for the next search
       resetTurnstile('search');
-      allOffers = data.offers || [];
+      const rawOffers = data.offers || [];
+      // Filter out interline ghost offers where the first segment departs from
+      // a different airport than the user searched (e.g. Hahn Air HLA vs JNB).
+      // These are ticketing artifacts — the passenger can't actually board there.
+      allOffers = rawOffers.filter(o => {
+        const seg0 = o.slices?.[0]?.segments?.[0];
+        if (!seg0) return true; // keep if no segment data
+        const offerOrigin = seg0.origin?.toUpperCase();
+        const searchOrigin = origin?.toUpperCase();
+        if (!offerOrigin || !searchOrigin) return true;
+        return offerOrigin === searchOrigin;
+      });
       cabinDiagnostics = data.cabin_diagnostics || null;
       if (!allOffers.length) {
         showAlert(alertContainer, 'No flights found for these dates. Try different dates or airports.', 'info');
@@ -7513,15 +7554,11 @@
       `;
     } else {
       bodyHtml = `
-        <div style="display:grid;grid-template-columns:200px 1fr;gap:18px;">
-          <div>${paxRowsHtml}</div>
-          <div>
-            <div class="seat-grid-wrap">
-              <div class="seat-grid">
-                <div class="seat-grid-nose"></div>
-                ${renderSeatGridRows(cabin, leg, activePaxIdx)}
-              </div>
-            </div>
+        <div class="seat-modal-pax-list">${paxRowsHtml}</div>
+        <div class="seat-grid-wrap">
+          <div class="seat-grid">
+            <div class="seat-grid-nose"></div>
+            ${renderSeatGridRows(cabin, leg, activePaxIdx)}
           </div>
         </div>
       `;
