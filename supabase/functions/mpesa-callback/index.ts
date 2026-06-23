@@ -52,6 +52,10 @@ serve(async (req) => {
     return new Response("ok", { headers: CORS_HEADERS });
   }
 
+  // GUARD: refuse if DUFFEL_MODE and DUFFEL_API_KEY disagree.
+  const guardBlock = await checkDuffelModeKeyMismatch(alertFounder, "mpesa-callback");
+  if (guardBlock) return guardBlock;
+
   const supabase = createClient(SUPABASE_URL, SERVICE_ROLE_KEY);
 
   try {
