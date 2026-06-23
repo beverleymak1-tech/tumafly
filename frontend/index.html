@@ -3051,6 +3051,226 @@
     @media (prefers-reduced-motion: reduce) {
       *, *::before, *::after { animation-duration: 0.001s !important; transition-duration: 0.001s !important; }
     }
+
+    /* ═══════════════════════════════════════════════════════════════
+       PHASE A — MOBILE FOUNDATION
+       Bottom-sheet primitive + mobile-first base overrides.
+       Bottom-sheet CSS is NOT media-gated (also used at wider
+       viewports for fare-selection + flight-details). All layout
+       overrides are scoped to max-width: 768px so desktop is
+       completely untouched.
+       ═══════════════════════════════════════════════════════════════ */
+
+    /* ── Bottom-sheet primitive ───────────────────────────────────── */
+    .tf-scrim {
+      position: fixed;
+      inset: 0;
+      background: rgba(15, 25, 35, 0.48);
+      z-index: 400;
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 0.25s ease;
+    }
+    .tf-scrim.tf-open {
+      opacity: 1;
+      pointer-events: auto;
+    }
+
+    .tf-sheet {
+      position: fixed;
+      bottom: 0;
+      left: 0;
+      right: 0;
+      background: var(--surface);
+      border-top-left-radius: 24px;
+      border-top-right-radius: 24px;
+      z-index: 401;
+      max-height: 92dvh;  /* dvh avoids iOS address-bar collapse */
+      display: flex;
+      flex-direction: column;
+      transform: translateY(100%);
+      transition: transform 0.32s cubic-bezier(0.32, 0.72, 0, 1);
+      box-shadow: 0 -8px 40px rgba(15, 25, 35, 0.12);
+      will-change: transform;
+    }
+    .tf-sheet.tf-open {
+      transform: translateY(0);
+    }
+    .tf-sheet.tf-hidden {
+      display: none; /* between uses — no transition flash */
+    }
+
+    .tf-sheet-handle {
+      width: 36px;
+      height: 4px;
+      background: var(--border-2);
+      border-radius: 2px;
+      margin: 12px auto 4px;
+      flex-shrink: 0;
+    }
+    .tf-sheet-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 10px 20px 14px;
+      flex-shrink: 0;
+    }
+    .tf-sheet-title {
+      font-size: 18px;
+      font-weight: 700;
+      color: var(--ink);
+      letter-spacing: -0.3px;
+    }
+    .tf-sheet-close {
+      width: 32px;
+      height: 32px;
+      border-radius: 50%;
+      background: var(--bg);
+      border: none;
+      color: var(--text-2);
+      cursor: pointer;
+      display: grid;
+      place-items: center;
+      font-family: inherit;
+      padding: 0;
+      flex-shrink: 0;
+      transition: background 0.12s;
+    }
+    .tf-sheet-close:hover { background: var(--border); color: var(--ink); }
+
+    .tf-sheet-body {
+      overflow-y: auto;
+      flex: 1;
+      -webkit-overflow-scrolling: touch;
+      overscroll-behavior: contain;
+      padding-bottom: env(safe-area-inset-bottom, 0px);
+    }
+
+    /* Sticky CTA footer inside a sheet (e.g. "Continue for KES X") */
+    .tf-sheet-footer {
+      padding: 14px 20px;
+      padding-bottom: max(14px, env(safe-area-inset-bottom, 14px));
+      border-top: 1px solid var(--border);
+      flex-shrink: 0;
+      background: var(--surface);
+    }
+
+    /* ── Mobile search summary pill ──────────────────────────────── */
+    /* Sits in the nav, between logo and right edge. Hidden by default;
+       enabled on mobile via media query, further toggled by JS .hidden class. */
+    .mobile-summary-pill {
+      display: none; /* hidden on desktop */
+      align-items: center;
+      gap: 8px;
+      background: var(--bg);
+      border: 1px solid var(--border-2);
+      border-radius: 999px;
+      padding: 8px 14px 8px 12px;
+      font-family: inherit;
+      font-size: 13px;
+      font-weight: 500;
+      color: var(--ink);
+      cursor: pointer;
+      flex: 1;
+      min-width: 0;
+      max-width: 320px;
+      text-align: left;
+      transition: background 0.12s, border-color 0.12s;
+    }
+    .mobile-summary-pill:hover {
+      background: var(--brand-soft);
+      border-color: var(--brand);
+    }
+    .mobile-summary-pill svg { flex-shrink: 0; color: var(--text-3); }
+    .mobile-summary-pill-text {
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      flex: 1;
+      min-width: 0;
+    }
+
+    /* ── Mobile overrides (≤768px) ───────────────────────────────── */
+    @media (max-width: 768px) {
+
+      /* Nav */
+      .nav { height: 56px; }
+      .nav-inner { padding: 0 16px; gap: 10px; }
+      /* Summary pill visible on mobile (JS also removes .hidden on non-home views) */
+      .mobile-summary-pill { display: flex; }
+
+      /* Hero */
+      .hero { padding: 28px 16px 36px; }
+      .hero-title {
+        font-size: clamp(26px, 7.5vw, 32px);
+        letter-spacing: -0.8px;
+        margin-bottom: 10px;
+        max-width: none;
+      }
+      .hero-sub { font-size: 14px; margin-bottom: 20px; }
+
+      /* Search card */
+      .search { padding: 16px; border-radius: var(--radius); }
+      .search-grid {
+        grid-template-columns: 1fr !important;
+        gap: 10px;
+      }
+      .search-grid .from-to-col { grid-column: 1 / -1; }
+
+      /* Page container */
+      .page { padding: 12px 12px 80px; }
+
+      /* Trust strip */
+      .trust { margin-top: 24px; gap: 14px; }
+
+      /* Booking/payment layout — right rail falls below form */
+      .booking-layout { gap: 14px; }
+      .booking-layout > aside { order: 10; }
+
+      /* Cards */
+      .card { padding: 18px 16px; }
+
+      /* Buttons — minimum 44px tap target */
+      .btn { min-height: 44px; }
+      .btn-lg { padding: 14px 20px; }
+      .save-traveler-btn { width: 100%; min-height: 44px; }
+
+      /* Form grids always single-column on mobile */
+      .form-grid { grid-template-columns: 1fr; }
+      .form-grid-3 { grid-template-columns: 1fr; }
+
+      /* Price panel — bump total font slightly */
+      .price-panel .total { font-size: 20px; }
+
+      /* Flight card — 2-column cabin row (4-wide is too cramped at 320px) */
+      .fc-cabins { grid-template-columns: repeat(2, 1fr); }
+
+      /* Flight details modal — slide up as a sheet on mobile */
+      .modal-backdrop {
+        padding: 0;
+        align-items: flex-end;
+      }
+      .modal-card {
+        max-width: 100%;
+        border-radius: 24px 24px 0 0;
+        max-height: 92dvh;
+      }
+
+      /* Seat-map modal — same treatment */
+      .seat-modal-backdrop {
+        padding: 0;
+        align-items: flex-end;
+      }
+      .seat-modal {
+        max-width: 100%;
+        border-radius: 24px 24px 0 0;
+        max-height: 92dvh;
+      }
+
+      /* Footer */
+      .footer-inner { flex-direction: column; gap: 8px; }
+
+    } /* end @media (max-width: 768px) */
   </style>
 </head>
 <body>
@@ -3060,6 +3280,14 @@
     <button class="brand" onclick="showView('home')">
       <span class="brand-mark">T</span>
       <span>TumaFly</span>
+    </button>
+    <!-- Mobile: compact search summary pill — shown on results/booking/payment (Phase A) -->
+    <button class="mobile-summary-pill hidden" id="mobile-summary-pill" onclick="openMobileSearch()" aria-label="Edit search">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+        <circle cx="11" cy="11" r="7" stroke="currentColor" stroke-width="1.8"/>
+        <path d="M16 16l4 4" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
+      </svg>
+      <span class="mobile-summary-pill-text" id="mobile-summary-text">Search</span>
     </button>
     <div class="nav-links">
       <button class="nav-link" onclick="showView('home')">Search</button>
@@ -3992,6 +4220,7 @@
       document.getElementById('view-' + n).classList.toggle('hidden', n !== name);
     });
     window.scrollTo({ top: 0, behavior: 'instant' });
+    updateMobileSummaryPill(name); // Phase A — keep nav pill in sync
     if (pollHandle && name !== 'payment') {
       clearTimeout(pollHandle);
       pollHandle = null;
@@ -7033,6 +7262,100 @@
   }
 
   // ============================================================
+  // PHASE A — BOTTOM-SHEET PRIMITIVE
+  // ============================================================
+  // openSheet(title, content) — populates and slides up the sheet.
+  // closeSheet()              — slides it back down.
+  // Body scroll is locked while the sheet is open.
+  // A double-rAF is used to ensure the hidden → visible state change
+  // is painted before the CSS transition starts.
+
+  function openSheet(title, htmlContent) {
+    const sheet  = document.getElementById('tf-sheet');
+    const scrim  = document.getElementById('tf-scrim');
+    const titleEl = document.getElementById('tf-sheet-title-text');
+    const body   = document.getElementById('tf-sheet-body');
+    if (!sheet || !scrim) return;
+
+    titleEl.textContent = title || '';
+    body.innerHTML = htmlContent || '';
+
+    sheet.classList.remove('tf-hidden');
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        sheet.classList.add('tf-open');
+        scrim.classList.add('tf-open');
+      });
+    });
+
+    document.body.style.overflow = 'hidden';
+    scrim.onclick = closeSheet;
+  }
+
+  function closeSheet() {
+    const sheet = document.getElementById('tf-sheet');
+    const scrim = document.getElementById('tf-scrim');
+    if (!sheet || !scrim) return;
+    sheet.classList.remove('tf-open');
+    scrim.classList.remove('tf-open');
+    // Wait for slide-down transition, then truly hide
+    const onEnd = () => {
+      sheet.classList.add('tf-hidden');
+      document.body.style.overflow = '';
+      sheet.removeEventListener('transitionend', onEnd);
+    };
+    sheet.addEventListener('transitionend', onEnd);
+  }
+
+  // ============================================================
+  // PHASE A — MOBILE SEARCH SUMMARY PILL
+  // ============================================================
+  // Called by showView() to keep the compact nav pill in sync.
+  // On mobile the pill replaces the hidden summary bar as the
+  // visual reminder of the current search context.
+
+  function updateMobileSummaryPill(viewName) {
+    const pill   = document.getElementById('mobile-summary-pill');
+    const textEl = document.getElementById('mobile-summary-text');
+    if (!pill || !textEl) return;
+
+    const showPill = ['results', 'booking', 'payment'].includes(viewName);
+
+    if (showPill) {
+      // Build summary from state. Use the results-page IATAs when available
+      // (user may have edited the route on the summary bar).
+      const from = rOriginSelectedIata || originSelectedIata || '';
+      const to   = rDestinationSelectedIata || destinationSelectedIata || '';
+      const pax  = passengerCount || 1;
+      const paxLabel = pax === 1 ? '1 traveler' : `${pax} travelers`;
+      const tripLabel = tripType === 'round' ? 'Round-trip' : 'One-way';
+
+      textEl.textContent = (from && to)
+        ? `${from} → ${to}  ·  ${paxLabel}  ·  ${tripLabel}`
+        : `${paxLabel}  ·  ${tripLabel}`;
+
+      pill.classList.remove('hidden');
+    } else {
+      pill.classList.add('hidden');
+    }
+  }
+
+  // Tapping the pill navigates back to results or (Phase B) opens a
+  // full-screen search sheet. For now it scrolls back to the summary bar.
+  function openMobileSearch() {
+    const onResults = !document.getElementById('view-results').classList.contains('hidden');
+    if (onResults) {
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+      setTimeout(() => {
+        const input = document.getElementById('r-origin');
+        if (input) input.focus();
+      }, 320);
+    } else {
+      showView('results');
+    }
+  }
+
+  // ============================================================
   // TURNSTILE (Cloudflare bot protection)
   // ============================================================
   // Two widget instances — one bound to "search", one to "payment" — render
@@ -7110,6 +7433,26 @@
   }
 
 </script>
+
+<!-- ============================================================
+     PHASE A — BOTTOM-SHEET PRIMITIVE
+     Used by fare picker (Phase C), Filters (Phase B), Sort (Phase B),
+     Flight details (Phase D), Error states (Phase F).
+     openSheet(title, content) / closeSheet() from JS.
+     ============================================================ -->
+<div class="tf-scrim" id="tf-scrim"></div>
+<div class="tf-sheet tf-hidden" id="tf-sheet" role="dialog" aria-modal="true" aria-labelledby="tf-sheet-title-text">
+  <div class="tf-sheet-handle"></div>
+  <div class="tf-sheet-header">
+    <span class="tf-sheet-title" id="tf-sheet-title-text"></span>
+    <button class="tf-sheet-close" onclick="closeSheet()" aria-label="Close">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+        <path d="M18 6 6 18M6 6l12 12" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+      </svg>
+    </button>
+  </div>
+  <div class="tf-sheet-body" id="tf-sheet-body"></div>
+</div>
 
 <!-- Turnstile widget hosts. Cloudflare requires invisible widgets to be in normal
      DOM flow (not display:none, not positioned off-screen). The widgets render no
