@@ -3156,6 +3156,12 @@
       text-align: left;
       -webkit-min-logical-width: 0;
       font: inherit;
+      /* With appearance: none the input's height comes from its content. When
+         empty, ::-webkit-datetime-edit renders no visible text and the input
+         collapses to padding-only height. min-height keeps the field at the
+         same visual size as populated state, matching adjacent .field inputs. */
+      min-height: 48px;
+      line-height: 1.55;
     }
     input[type="date"]::-webkit-date-and-time-value {
       text-align: left;
@@ -3754,7 +3760,16 @@
          the results list when a return is being chosen. */
       .summary-bar { display: none; }
       .results-side > .filters { display: none; }
-      .results-layout { grid-template-columns: 1fr; gap: 0; }
+      /* Use minmax(0, 1fr) — NOT 1fr — so the column ignores its content's
+         intrinsic min-width. Without this, the horizontally-scrolling
+         cabin-pill-row inside forces the column to grow wider than the
+         viewport, which pushes the route header and flight cards past the
+         right edge of the screen. minmax(0, 1fr) is the standard fix for
+         this grid quirk. */
+      .results-layout {
+        grid-template-columns: minmax(0, 1fr);
+        gap: 0;
+      }
 
       /* Show Phase B mobile filter/sort row */
       .mobile-fs-row { display: flex; }
