@@ -1989,6 +1989,9 @@
     @media (max-width: 900px) {
       .booking-layout { grid-template-columns: 1fr; }
     }
+    /* Desktop: inline back/continue row visible, sticky bar hidden */
+    .booking-cta-bar { display: none; }
+    .booking-inline-cta { display: flex; }
     .card {
       background: var(--surface);
       border: 1px solid var(--border);
@@ -3403,6 +3406,7 @@
       font-weight: 600;
       cursor: pointer;
       min-height: 40px;
+      touch-action: manipulation;
       transition: background 0.12s, color 0.12s, border-color 0.12s, transform 0.05s;
       white-space: nowrap;
     }
@@ -3413,6 +3417,12 @@
       color: white;
       border-color: var(--brand);
     }
+    /* results-main: the right column in results-layout. Needs min-width:0 so
+       the horizontally-scrolling cabin-pill-row doesn't expand the column
+       beyond the viewport (grid default is min-width:auto = content width).
+       Without this the pill row renders but its touch targets fall outside
+       the visible area on mobile, making taps appear to do nothing. */
+    .results-main { min-width: 0; }
 
     /* ── Phase B — Sort sheet body (rendered inline by openSortSheet) ── */
     .sort-sheet-list {
@@ -3904,6 +3914,229 @@
       /* Footer */
       .footer-inner { flex-direction: column; gap: 8px; }
 
+      /* ── Edit Search bottom-sheet ────────────────────────────── */
+      .edit-search-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 0 20px 20px;
+      }
+      .edit-search-title {
+        font-size: 20px;
+        font-weight: 700;
+        color: var(--ink);
+        letter-spacing: -0.3px;
+      }
+      .edit-search-close {
+        background: none;
+        border: none;
+        padding: 6px;
+        cursor: pointer;
+        color: var(--ink-2);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        border-radius: 50%;
+        min-width: 36px;
+        min-height: 36px;
+      }
+      .edit-search-close:active { background: var(--bg); }
+
+      .edit-search-tabs {
+        display: flex;
+        position: relative;
+        border-bottom: 1px solid var(--border);
+        margin: 0 20px 20px;
+        gap: 0;
+      }
+      .edit-search-tab {
+        flex: 1;
+        background: none;
+        border: none;
+        padding: 10px 0 12px;
+        font-family: inherit;
+        font-size: 15px;
+        font-weight: 500;
+        color: var(--ink-2);
+        cursor: pointer;
+        transition: color 0.15s;
+        touch-action: manipulation;
+      }
+      .edit-search-tab.active { color: var(--ink); font-weight: 700; }
+      .edit-search-tab-underline {
+        position: absolute;
+        bottom: -1px;
+        height: 2px;
+        background: var(--brand);
+        border-radius: 2px;
+        transition: left 0.2s, width 0.2s;
+        width: 50%;
+        left: 0;
+      }
+
+      /* Field rows */
+      .es-field {
+        display: flex;
+        align-items: flex-start;
+        gap: 14px;
+        margin: 0 20px 4px;
+        padding: 14px 16px;
+        background: var(--surface);
+        border: 1px solid var(--border);
+        border-radius: 14px;
+        min-height: 64px;
+        position: relative;
+      }
+      .es-field + .es-field { margin-top: 10px; }
+      .es-field-icon {
+        flex-shrink: 0;
+        color: var(--ink-2);
+        margin-top: 3px;
+      }
+      .es-field-content {
+        flex: 1;
+        min-width: 0;
+        display: flex;
+        flex-direction: column;
+        gap: 2px;
+      }
+      .es-field-label {
+        font-size: 12px;
+        color: var(--ink-2);
+        font-weight: 500;
+      }
+      .es-field-input {
+        background: none;
+        border: none;
+        outline: none;
+        font-family: inherit;
+        font-size: 15px;
+        font-weight: 500;
+        color: var(--ink);
+        padding: 0;
+        width: 100%;
+      }
+      .es-field-input::placeholder { color: var(--ink-3, #aaa); font-weight: 400; }
+      .es-swap-btn {
+        flex-shrink: 0;
+        background: var(--bg);
+        border: 1px solid var(--border);
+        border-radius: 10px;
+        padding: 8px;
+        cursor: pointer;
+        color: var(--ink-2);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        min-width: 36px;
+        min-height: 36px;
+        touch-action: manipulation;
+        align-self: center;
+      }
+      .es-dates-row {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+      }
+      .es-date-input {
+        background: none;
+        border: none;
+        outline: none;
+        font-family: inherit;
+        font-size: 15px;
+        font-weight: 500;
+        color: var(--ink);
+        padding: 0;
+        min-width: 0;
+        flex: 1;
+      }
+      .es-dates-sep { font-size: 15px; color: var(--ink-2); }
+      .es-cta-wrap {
+        padding: 20px 20px 8px;
+      }
+      .es-cta-wrap .btn { width: 100%; min-height: 52px; font-size: 16px; }
+
+      /* ── Phase E — Booking page mobile ──────────────────────── */
+
+      /* Traveler cards: full-width, less padding, cleaner separation */
+      .pax-block {
+        padding: 16px;
+        margin-bottom: 12px;
+        border-radius: 16px;
+      }
+      .pax-block-title {
+        font-size: 16px;
+        margin-bottom: 14px;
+      }
+
+      /* Form fields always single-column — form-grid already handled above.
+         Ensure date + gender side-by-side pair is stacked too. */
+      .form-grid > div,
+      .form-grid-3 > div {
+        grid-column: 1 / -1;
+      }
+
+      /* Save traveler button — full width, prominent */
+      .save-traveler-btn {
+        width: 100%;
+        min-height: 52px;
+        font-size: 16px;
+        margin-top: 4px;
+        border-radius: 14px;
+      }
+
+      /* Saved traveler row — cleaner on mobile */
+      .saved-traveler {
+        padding: 14px 16px;
+        border-radius: 14px;
+        margin-bottom: 10px;
+      }
+
+      /* Contact details card */
+      #view-booking .card h3 {
+        font-size: 16px;
+      }
+
+      /* Baggage + Seats cards — tighter on mobile */
+      .card .card-head-icon h3 {
+        font-size: 16px;
+      }
+
+      /* Back/Continue buttons row → stack on very small screens,
+         side-by-side on ≥375px. Sticky bar at bottom of viewport. */
+      .booking-cta-bar {
+        position: sticky;
+        bottom: 0;
+        left: 0;
+        right: 0;
+        background: var(--surface);
+        border-top: 1px solid var(--border);
+        padding: 12px 16px max(12px, env(safe-area-inset-bottom));
+        display: flex;
+        gap: 10px;
+        z-index: 30;
+        /* Cancel the .page bottom padding so bar docks to edge */
+        margin: 0 -12px -80px;
+      }
+      .booking-cta-bar .btn-secondary {
+        flex: 0 0 auto;
+        min-width: 44px;
+        padding: 0 14px;
+      }
+      .booking-cta-bar .btn-primary {
+        flex: 1;
+        min-height: 52px;
+        font-size: 16px;
+        border-radius: 14px;
+      }
+      /* Hide the inline back/continue row on mobile — replaced by sticky bar */
+      .booking-inline-cta { display: none !important; }
+      /* Show the sticky CTA bar on mobile */
+      .booking-cta-bar { display: flex; }
+
+      /* Compliance note — smaller on mobile */
+      .compliance { font-size: 12px; margin-bottom: 8px; }
+
     } /* end @media (max-width: 768px) */
   </style>
 </head>
@@ -3926,7 +4159,7 @@
      Hidden on desktop; shown on mobile on results/booking/payment views.
      JS toggles .hidden; CSS makes it sticky below the nav. -->
 <div class="mobile-search-strip hidden" id="mobile-search-strip">
-  <button class="mobile-summary-pill" id="mobile-summary-pill" onclick="openMobileSearch()" aria-label="Edit search">
+  <button class="mobile-summary-pill" id="mobile-summary-pill" onclick="openEditSearchSheet()" aria-label="Edit search">
     <svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true">
       <circle cx="11" cy="11" r="7" stroke="currentColor" stroke-width="1.8"/>
       <path d="M16 16l4 4" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
@@ -3936,6 +4169,101 @@
       <span class="mobile-summary-pill-meta" id="mobile-summary-meta"></span>
     </span>
   </button>
+</div>
+
+<!-- ============================================================
+     EDIT SEARCH BOTTOM-SHEET (mobile)
+     Opens when user taps the compact summary pill on results/booking/payment.
+     Mirrors the home search form fields but in a single-column bottom-sheet.
+     ============================================================ -->
+<div class="tf-sheet-overlay hidden" id="edit-search-overlay" onclick="closeEditSearchSheet()" aria-hidden="true"></div>
+<div class="tf-sheet hidden" id="edit-search-sheet" role="dialog" aria-modal="true" aria-label="Edit search">
+  <div class="tf-sheet-handle"></div>
+  <div class="edit-search-header">
+    <span class="edit-search-title">Edit Search</span>
+    <button class="edit-search-close" onclick="closeEditSearchSheet()" aria-label="Close">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+        <path d="M6 6l12 12M18 6L6 18" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+      </svg>
+    </button>
+  </div>
+
+  <!-- Trip type tabs -->
+  <div class="edit-search-tabs">
+    <button class="edit-search-tab active" id="es-tab-round" onclick="setEditSearchTrip('round')" type="button">Round-trip</button>
+    <button class="edit-search-tab" id="es-tab-one" onclick="setEditSearchTrip('one')" type="button">One-way</button>
+    <div class="edit-search-tab-underline" id="es-tab-underline"></div>
+  </div>
+
+  <!-- From -->
+  <div class="es-field" id="es-from-field">
+    <svg class="es-field-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+      <path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7zm0 9.5c-1.38 0-2.5-1.12-2.5-2.5s1.12-2.5 2.5-2.5 2.5 1.12 2.5 2.5-1.12 2.5-2.5 2.5z" fill="currentColor" opacity=".7"/>
+    </svg>
+    <div class="es-field-content">
+      <span class="es-field-label">Leaving from</span>
+      <div class="ap-wrap" id="es-origin-wrap">
+        <input id="es-origin" class="es-field-input" type="text" placeholder="City or airport" autocomplete="off" autocorrect="off" spellcheck="false">
+        <div class="ap-dropdown hidden" id="es-origin-dropdown" role="listbox"></div>
+      </div>
+    </div>
+    <button class="es-swap-btn" onclick="swapEditSearch()" aria-label="Swap origin and destination" type="button">
+      <svg width="18" height="18" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+        <path d="M2 5h10M12 5L9 2M12 5L9 8" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
+        <path d="M14 11H4M4 11l3-3M4 11l3 3" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
+      </svg>
+    </button>
+  </div>
+
+  <!-- To -->
+  <div class="es-field">
+    <svg class="es-field-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+      <path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7zm0 9.5c-1.38 0-2.5-1.12-2.5-2.5s1.12-2.5 2.5-2.5 2.5 1.12 2.5 2.5-1.12 2.5-2.5 2.5z" fill="currentColor" opacity=".7"/>
+    </svg>
+    <div class="es-field-content">
+      <span class="es-field-label">Going to</span>
+      <div class="ap-wrap" id="es-destination-wrap">
+        <input id="es-destination" class="es-field-input" type="text" placeholder="City or airport" autocomplete="off" autocorrect="off" spellcheck="false">
+        <div class="ap-dropdown hidden" id="es-destination-dropdown" role="listbox"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Dates -->
+  <div class="es-field">
+    <svg class="es-field-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+      <rect x="3" y="4" width="18" height="17" rx="2" stroke="currentColor" stroke-width="1.7"/>
+      <path d="M3 9h18M8 2v4M16 2v4" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/>
+    </svg>
+    <div class="es-field-content">
+      <span class="es-field-label">Dates</span>
+      <div class="es-dates-row">
+        <input id="es-date" class="es-date-input" type="date" onchange="onEsDateChange()">
+        <span class="es-dates-sep hidden" id="es-dates-sep">–</span>
+        <input id="es-return-date" class="es-date-input hidden" type="date">
+      </div>
+    </div>
+  </div>
+
+  <!-- Travelers -->
+  <div class="es-field" style="position:relative;">
+    <svg class="es-field-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+      <circle cx="12" cy="8" r="3.5" stroke="currentColor" stroke-width="1.7"/>
+      <path d="M5 20c0-3.5 3.1-6 7-6s7 2.5 7 6" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/>
+    </svg>
+    <div class="es-field-content">
+      <span class="es-field-label">Travelers</span>
+      <button class="tp-trigger" id="tp-es-trigger" onclick="toggleTravelerPicker('es')" type="button" style="padding:0;border:none;background:none;font-family:inherit;font-size:15px;color:var(--ink);text-align:left;cursor:pointer;">
+        <span id="tp-es-label">1 traveler</span>
+      </button>
+    </div>
+    <div class="tp-popup hidden" id="tp-es-popup"></div>
+  </div>
+
+  <!-- Update search CTA -->
+  <div class="es-cta-wrap">
+    <button class="btn btn-primary" onclick="runEditSearch()" type="button" id="es-update-btn">Update search</button>
+  </div>
 </div>
 
 <!-- ============================================================
@@ -4156,7 +4484,7 @@
         </aside>
       </div>
 
-      <div>
+      <div class="results-main">
         <!-- Phase B — Mobile-only Filter + Sort row, above the route header.
              Hidden on desktop; opens bottom-sheets on mobile. -->
         <div class="mobile-fs-row">
@@ -4262,9 +4590,14 @@
           <a href="https://www.iatatravelcentre.com" target="_blank" rel="noopener">Travel requirements →</a>
         </p>
         <div id="booking-alert"></div>
-        <div style="display:flex;justify-content:space-between;gap:12px;">
+        <div class="booking-inline-cta" style="justify-content:space-between;gap:12px;">
           <button class="btn btn-secondary" onclick="showView('results')">← Back to results</button>
           <button class="btn btn-primary btn-lg" onclick="goToPayment()">Continue to payment →</button>
+        </div>
+        <!-- Phase E: sticky bottom CTA bar (mobile only; hidden on desktop via .booking-inline-cta show) -->
+        <div class="booking-cta-bar" id="booking-cta-bar">
+          <button class="btn btn-secondary" onclick="showView('results')" aria-label="Back to results">←</button>
+          <button class="btn btn-primary" onclick="goToPayment()">Continue to payment</button>
         </div>
       </div>
 
@@ -5520,6 +5853,8 @@
     else if (which === 'destination') destinationSelectedIata = storedIata;
     else if (which === 'r-origin') rOriginSelectedIata = storedIata;
     else if (which === 'r-destination') rDestinationSelectedIata = storedIata;
+    else if (which === 'es-origin') esOriginIata = storedIata;
+    else if (which === 'es-destination') esDestinationIata = storedIata;
     document.getElementById(which + '-dropdown').classList.add('hidden');
 
     // On the results page, picking triggers a re-search (after both fields are set)
@@ -5587,6 +5922,8 @@
       else if (which === 'destination') destinationSelectedIata = null;
       else if (which === 'r-origin') rOriginSelectedIata = null;
       else if (which === 'r-destination') rDestinationSelectedIata = null;
+      else if (which === 'es-origin') esOriginIata = null;
+      else if (which === 'es-destination') esDestinationIata = null;
       await loadAirports();
       renderAirportDropdown(which, input.value);
     });
@@ -5614,6 +5951,8 @@
   attachAutocomplete('destination');
   attachAutocomplete('r-origin');
   attachAutocomplete('r-destination');
+  attachAutocomplete('es-origin');
+  attachAutocomplete('es-destination');
   // Eagerly start the fetch so it's ready by the time the user focuses
   loadAirports();
 
@@ -5637,8 +5976,10 @@
     const label = total === 1 ? '1 traveler' : `${total} travelers`;
     const homeLabel = document.getElementById('tp-home-label');
     const resultsLabel = document.getElementById('tp-results-label');
+    const esLabel = document.getElementById('tp-es-label');
     if (homeLabel) homeLabel.textContent = label;
     if (resultsLabel) resultsLabel.textContent = label;
+    if (esLabel) esLabel.textContent = label;
   }
 
   function renderTravelerPopup(which) {
@@ -5667,7 +6008,7 @@
 
   function toggleTravelerPicker(which) {
     // Close the other if open
-    const others = ['home', 'results'].filter(w => w !== which);
+    const others = ['home', 'results', 'es'].filter(w => w !== which);
     others.forEach(w => {
       const p = document.getElementById(`tp-${w}-popup`);
       const t = document.getElementById(`tp-${w}-trigger`);
@@ -5707,7 +6048,7 @@
 
   // Click-outside-to-close
   document.addEventListener('mousedown', (e) => {
-    ['home', 'results'].forEach(w => {
+    ['home', 'results', 'es'].forEach(w => {
       const popup = document.getElementById(`tp-${w}-popup`);
       const trigger = document.getElementById(`tp-${w}-trigger`);
       if (!popup || popup.classList.contains('hidden')) return;
@@ -8629,18 +8970,195 @@
 
   // Tapping the pill navigates back to results or (Phase B) opens a
   // full-screen search sheet. For now it scrolls back to the summary bar.
-  function openMobileSearch() {
-    const onResults = !document.getElementById('view-results').classList.contains('hidden');
-    if (onResults) {
-      window.scrollTo({ top: 0, behavior: 'smooth' });
-      setTimeout(() => {
-        const input = document.getElementById('r-origin');
-        if (input) input.focus();
-      }, 320);
+  // ============================================================
+  // EDIT SEARCH SHEET (mobile summary pill → bottom-sheet)
+  // ============================================================
+  // State for the edit-search sheet's own IATA selections
+  let esOriginIata = null;
+  let esDestinationIata = null;
+  let esTrip = 'round'; // mirrors tripType when opened
+
+  function openEditSearchSheet() {
+    // Populate fields from current search state
+    esTrip = tripType;
+    esOriginIata = rOriginSelectedIata || originSelectedIata;
+    esDestinationIata = rDestinationSelectedIata || destinationSelectedIata;
+
+    // Set tab state
+    _setEsTabUI(esTrip);
+
+    // Populate origin/destination text from the results bar inputs
+    const originEl = document.getElementById('es-origin');
+    const destEl   = document.getElementById('es-destination');
+    const rOriginEl = document.getElementById('r-origin');
+    const rDestEl   = document.getElementById('r-destination');
+    if (originEl) originEl.value = (rOriginEl?.value) || (document.getElementById('origin')?.value) || '';
+    if (destEl)   destEl.value   = (rDestEl?.value)   || (document.getElementById('destination')?.value) || '';
+
+    // Populate dates
+    const esDateEl    = document.getElementById('es-date');
+    const esReturnEl  = document.getElementById('es-return-date');
+    if (lastSearchParams) {
+      if (esDateEl)   esDateEl.value   = lastSearchParams.date       || '';
+      if (esReturnEl) esReturnEl.value = lastSearchParams.returnDate || '';
     } else {
-      showView('results');
+      const rDate = document.getElementById('r-date');
+      const rRet  = document.getElementById('r-return-date');
+      if (esDateEl && rDate)   esDateEl.value   = rDate.value   || '';
+      if (esReturnEl && rRet)  esReturnEl.value = rRet.value    || '';
+    }
+    _setEsReturnDateVisibility(esTrip);
+
+    // Sync traveler label
+    const esLabel = document.getElementById('tp-es-label');
+    const srcLabel = document.getElementById('tp-results-label') || document.getElementById('tp-home-label');
+    if (esLabel && srcLabel) esLabel.textContent = srcLabel.textContent;
+
+    // Register autocomplete for es-origin and es-destination (wired at page load via attachAutocomplete)
+
+    // Open sheet
+    const overlay = document.getElementById('edit-search-overlay');
+    const sheet   = document.getElementById('edit-search-sheet');
+    if (!overlay || !sheet) return;
+    overlay.classList.remove('hidden');
+    sheet.classList.remove('hidden');
+    document.body.style.overflow = 'hidden';
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        sheet.classList.add('open');
+        overlay.classList.add('open');
+      });
+    });
+  }
+
+  function closeEditSearchSheet() {
+    const overlay = document.getElementById('edit-search-overlay');
+    const sheet   = document.getElementById('edit-search-sheet');
+    if (!sheet) return;
+    sheet.classList.remove('open');
+    overlay?.classList.remove('open');
+    const onEnd = () => {
+      sheet.classList.add('hidden');
+      overlay?.classList.add('hidden');
+      document.body.style.overflow = '';
+      sheet.removeEventListener('transitionend', onEnd);
+    };
+    sheet.addEventListener('transitionend', onEnd);
+  }
+
+  function setEditSearchTrip(type) {
+    esTrip = type;
+    _setEsTabUI(type);
+    _setEsReturnDateVisibility(type);
+  }
+
+  function _setEsTabUI(type) {
+    document.getElementById('es-tab-round')?.classList.toggle('active', type === 'round');
+    document.getElementById('es-tab-one')?.classList.toggle('active', type === 'one');
+    const underline = document.getElementById('es-tab-underline');
+    if (underline) underline.style.left = type === 'one' ? '50%' : '0';
+  }
+
+  function _setEsReturnDateVisibility(type) {
+    const sep = document.getElementById('es-dates-sep');
+    const ret = document.getElementById('es-return-date');
+    if (!sep || !ret) return;
+    if (type === 'round') {
+      sep.classList.remove('hidden');
+      ret.classList.remove('hidden');
+    } else {
+      sep.classList.add('hidden');
+      ret.classList.add('hidden');
     }
   }
+
+  function onEsDateChange() {
+    const dateEl   = document.getElementById('es-date');
+    const returnEl = document.getElementById('es-return-date');
+    if (!dateEl?.value || !returnEl) return;
+    const next = new Date(dateEl.value);
+    next.setDate(next.getDate() + 1);
+    returnEl.min = next.toISOString().split('T')[0];
+    if (returnEl.value && returnEl.value <= dateEl.value) returnEl.value = '';
+  }
+
+  function swapEditSearch() {
+    const originEl = document.getElementById('es-origin');
+    const destEl   = document.getElementById('es-destination');
+    if (!originEl || !destEl) return;
+    const tmpVal  = originEl.value;
+    const tmpIata = esOriginIata;
+    originEl.value    = destEl.value;
+    esOriginIata      = esDestinationIata;
+    destEl.value      = tmpVal;
+    esDestinationIata = tmpIata;
+    apSelections['es-origin']      = esOriginIata;
+    apSelections['es-destination'] = esDestinationIata;
+  }
+
+  function runEditSearch() {
+    const originEl  = document.getElementById('es-origin');
+    const destEl    = document.getElementById('es-destination');
+    const dateEl    = document.getElementById('es-date');
+    const returnEl  = document.getElementById('es-return-date');
+
+    const origin      = esOriginIata      || apSelections['es-origin']      || originEl?.value?.trim();
+    const destination = esDestinationIata || apSelections['es-destination'] || destEl?.value?.trim();
+    const date        = dateEl?.value;
+    const returnDate  = esTrip === 'round' ? returnEl?.value : '';
+
+    if (!origin || !destination) {
+      alert('Please select an origin and destination.');
+      return;
+    }
+    if (!date) {
+      alert('Please select a departure date.');
+      return;
+    }
+    if (esTrip === 'round' && !returnDate) {
+      alert('Please select a return date.');
+      return;
+    }
+
+    // Sync trip type back to global state
+    tripType = esTrip;
+    setTripType(esTrip);
+
+    // Update results bar inputs to reflect new search
+    const rOriginEl = document.getElementById('r-origin');
+    const rDestEl   = document.getElementById('r-destination');
+    const rDateEl   = document.getElementById('r-date');
+    const rRetEl    = document.getElementById('r-return-date');
+    if (rOriginEl) rOriginEl.value = originEl?.value || '';
+    if (rDestEl)   rDestEl.value   = destEl?.value   || '';
+    if (rDateEl)   rDateEl.value   = date;
+    if (rRetEl)    rRetEl.value    = returnDate || '';
+    rOriginSelectedIata      = esOriginIata;
+    rDestinationSelectedIata = esDestinationIata;
+    apSelections['r-origin']      = esOriginIata;
+    apSelections['r-destination'] = esDestinationIata;
+
+    closeEditSearchSheet();
+
+    // Small delay to let sheet close animation start before search
+    setTimeout(() => {
+      selectedOutbound = null;
+      selectedInbound = null;
+      selectedOffer = null;
+      stopFareTimer();
+      runSearch({
+        origin,
+        destination,
+        date,
+        returnDate,
+        fromButton: document.getElementById('es-update-btn'),
+        alertContainer: 'results-alert',
+      });
+    }, 120);
+  }
+
+  // Compatibility: old openMobileSearch calls still work (e.g. from any cached event listeners)
+  function openMobileSearch() { openEditSearchSheet(); }
 
   // ============================================================
   // TURNSTILE (Cloudflare bot protection)
