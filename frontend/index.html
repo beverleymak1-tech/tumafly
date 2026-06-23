@@ -72,6 +72,9 @@
       line-height: 1.55;
       -webkit-font-smoothing: antialiased;
       -moz-osx-font-smoothing: grayscale;
+      /* Defence-in-depth: keep the page from ever scrolling horizontally.
+         `clip` doesn't break position:sticky the way `hidden` does. */
+      overflow-x: clip;
     }
     .tabular { font-variant-numeric: tabular-nums; }
     .hidden { display: none !important; }
@@ -742,6 +745,11 @@
     #view-results, #view-booking, #view-payment, #view-success {
       background: var(--sand);
       min-height: calc(100vh - 64px);
+      /* Prevent any descendant element from extending past the viewport edge.
+         `clip` (not `hidden`) is critical — it doesn't establish a scroll
+         container, so position:sticky on the nav and the mobile search strip
+         keeps working. Modern browsers (Safari 16+, Chrome 90+) supported. */
+      overflow-x: clip;
     }
 
     /* Editable summary bar — From / To / Date / Travelers always live-editable */
@@ -1701,6 +1709,44 @@
       position: relative;
       box-shadow: var(--shadow-lg);
     }
+    /* Phase D — sticky header inside the modal card. Holds the drag handle
+       (mobile only), title with the full route, and close button. Stays
+       pinned at top while segment cards scroll under it. */
+    .modal-mobile-header {
+      position: sticky;
+      top: 0;
+      background: var(--surface);
+      border-bottom: 1px solid var(--border);
+      z-index: 2;
+      padding: 18px 20px 14px;
+      display: flex;
+      align-items: flex-start;
+      gap: 12px;
+    }
+    .modal-mobile-header-handle {
+      display: none; /* shown on mobile via media query */
+      position: absolute;
+      left: 50%;
+      top: 8px;
+      transform: translateX(-50%);
+      width: 36px;
+      height: 4px;
+      background: var(--border-2);
+      border-radius: 2px;
+    }
+    .modal-mobile-header-title {
+      flex: 1;
+      min-width: 0;
+      font-size: 15px;
+      font-weight: 700;
+      color: var(--ink);
+      letter-spacing: -0.2px;
+      line-height: 1.35;
+    }
+    .modal-mobile-header .modal-close {
+      position: static;
+      flex-shrink: 0;
+    }
     .modal-close {
       position: absolute;
       top: 14px;
@@ -1823,10 +1869,39 @@
     .modal-amenities {
       display: grid;
       grid-template-columns: 1fr 1fr;
-      gap: 6px 16px;
+      gap: 8px 16px;
       font-size: 13px;
       color: var(--text-2);
       margin-top: 10px;
+    }
+    .modal-amenity {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      line-height: 1.3;
+    }
+    .modal-amenity svg {
+      flex-shrink: 0;
+      color: var(--text-2);
+    }
+    .modal-amenity.unavailable {
+      color: var(--text-3);
+    }
+    .modal-amenity.unavailable svg { color: var(--text-3); opacity: 0.6; }
+    .modal-amenity-aircraft {
+      grid-column: 1 / -1;
+      margin-top: 4px;
+      font-size: 12px;
+      color: var(--text-3);
+    }
+    .modal-amenities-label {
+      font-size: 12px;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      color: var(--text-3);
+      font-weight: 600;
+      margin-bottom: 6px;
+      margin-top: 14px;
     }
     .modal-layover {
       background: var(--warning-soft);
@@ -3062,18 +3137,25 @@
        ═══════════════════════════════════════════════════════════════ */
 
     /* ── iOS Safari date-input fixes (not media-gated — harmless on all platforms) ──
-       On iOS, <input type="date"> ignores width:100% unless min-width is explicitly
-       zeroed (UA stylesheet sets a large intrinsic minimum that overflows the
-       container). The ::-webkit-date-and-time-value pseudo-element also centres
-       its text regardless of text-align on the input itself. We also need to zero
-       out the inner padding WebKit adds to the datetime-edit and picker-indicator
-       pseudo-elements, which together cause residual overflow on smaller screens. */
+       iOS Safari has multiple compounding quirks with <input type="date">:
+       1) Native UA stylesheet imposes a large intrinsic min-width that overflows
+          containers narrower than ~170px. min-width:0 alone isn't enough on iOS;
+          we need -webkit-appearance:none to opt out of native control sizing.
+       2) Even with appearance:none, the inner ::-webkit-datetime-edit pseudo
+          centres its text and adds horizontal padding. We zero both.
+       3) Tapping the input STILL opens the native date picker because the picker
+          is tied to input[type=date], not the appearance — so we lose nothing.
+       4) !important is required to defeat UA stylesheet specificity on iOS.   */
     input[type="date"] {
-      min-width: 0;
-      max-width: 100%;
+      -webkit-appearance: none !important;
+      appearance: none !important;
+      min-width: 0 !important;
+      max-width: 100% !important;
       width: 100%;
+      box-sizing: border-box;
       text-align: left;
       -webkit-min-logical-width: 0;
+      font: inherit;
     }
     input[type="date"]::-webkit-date-and-time-value {
       text-align: left;
@@ -3283,8 +3365,8 @@
       scroll-snap-type: x proximity;
       -webkit-overflow-scrolling: touch;
       scrollbar-width: none;
-      margin: -2px -16px 14px;  /* negative inline margin = let pills run edge-to-edge */
-      padding: 2px 16px 4px;
+      margin: 0 0 14px;
+      padding: 2px 0 4px;
     }
     .cabin-pill-row::-webkit-scrollbar { display: none; }
     .cabin-pill {
@@ -3705,6 +3787,17 @@
         border-radius: 24px 24px 0 0;
         max-height: 92dvh;
       }
+      /* Phase D — show the drag handle and give the sticky header room for it
+         above the title. The header has its own in-flow .modal-close, so no
+         floating corner X exists anywhere on either viewport. */
+      .modal-mobile-header { padding-top: 22px; }
+      .modal-mobile-header-handle { display: block; }
+      .modal-body { padding: 18px 18px 24px; }
+      .modal-section { margin-bottom: 18px; }
+      .modal-section-route { font-size: 14px; }
+      /* Use full width on stacked path-line so it reads better on narrow screens */
+      .modal-flight-block { padding: 14px; }
+      .modal-times .t { font-size: 20px; }
 
       /* Seat-map modal — same treatment */
       .seat-modal-backdrop {
@@ -7473,6 +7566,13 @@
     if (!slice) return;
     const totalSegments = slice.segments.length;
 
+    // Phase D — build the sticky header title. Hopper-style "Origin Airport (XXX)
+    // to Destination Airport (YYY)" using the first segment's origin and the last
+    // segment's destination so multi-segment trips show the true endpoints.
+    const firstSeg = slice.segments[0];
+    const lastSeg  = slice.segments[slice.segments.length - 1] || firstSeg;
+    const headerRoute = `${escapeHtml(firstSeg.origin_name || firstSeg.origin)} (${escapeHtml(firstSeg.origin)}) to ${escapeHtml(lastSeg.destination_name || lastSeg.destination)} (${escapeHtml(lastSeg.destination)})`;
+
     const sections = slice.segments.map((seg, i) => {
       const num = `Flight ${i + 1} of ${totalSegments}`;
       const depDate = new Date(seg.departure).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' });
@@ -7510,7 +7610,6 @@
               <div class="end">${escapeHtml(seg.destination)}</div>
             </div>
             ${renderOperatedByDisclosure(seg)}
-            ${seg.aircraft ? `<div style="font-size:12px;color:var(--text-3);margin-top:4px;text-align:right;">Aircraft: ${escapeHtml(seg.aircraft)}</div>` : ''}
           </div>
           ${renderAmenitiesBlock(seg)}
           ${layoverHtml}
@@ -7521,8 +7620,16 @@
     const backdrop = document.createElement('div');
     backdrop.className = 'modal-backdrop';
     backdrop.innerHTML = `
-      <div class="modal-card" role="dialog" aria-modal="true">
-        <button class="modal-close" onclick="closeModal()" aria-label="Close">✕</button>
+      <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="modal-route-title">
+        <div class="modal-mobile-header">
+          <span class="modal-mobile-header-handle"></span>
+          <div class="modal-mobile-header-title" id="modal-route-title">${headerRoute}</div>
+          <button class="modal-close" onclick="closeModal()" aria-label="Close">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+              <path d="M18 6 6 18M6 6l12 12" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+            </svg>
+          </button>
+        </div>
         <div class="modal-body">
           ${sections}
           ${renderFlexibilityBlock(offer)}
@@ -7613,26 +7720,63 @@
   // If nothing is confirmed, returns empty string (no section appears).
   function renderAmenitiesBlock(seg) {
     const a = seg.amenities;
-    if (!a) return '';
     const items = [];
-    if (a.wifi?.available) {
+
+    // Wi-Fi
+    const wifiIcon = `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+        <path d="M2 8.5C5 5.5 8.5 4 12 4s7 1.5 10 4.5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
+        <path d="M5 12c2-2 4.5-3 7-3s5 1 7 3" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
+        <path d="M8 15.5c1.2-1.2 2.5-1.7 4-1.7s2.8 0.5 4 1.7" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
+        <circle cx="12" cy="19" r="1.4" fill="currentColor"/>
+      </svg>`;
+    if (a?.wifi?.available) {
       const cost = a.wifi.cost;
       let label = 'Wi-Fi available';
       if (cost === 'free') label = 'Free Wi-Fi';
       else if (cost === 'paid') label = 'Wi-Fi available (paid)';
-      items.push(`<div>✓ ${escapeHtml(label)}</div>`);
+      items.push({ icon: wifiIcon, label });
     }
-    if (a.power?.available) {
-      items.push(`<div>✓ Power outlets</div>`);
+
+    // Power
+    if (a?.power?.available) {
+      const powerIcon = `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+        <path d="M8 4v5M16 4v5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
+        <rect x="6" y="9" width="12" height="6" rx="1.5" stroke="currentColor" stroke-width="1.8"/>
+        <path d="M12 15v4" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
+      </svg>`;
+      items.push({ icon: powerIcon, label: 'Power outlets' });
     }
-    if (a.seat?.pitch) {
-      items.push(`<div>Seat pitch: ${escapeHtml(a.seat.pitch)}"</div>`);
+
+    // Seat pitch
+    if (a?.seat?.pitch) {
+      const seatIcon = `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+        <path d="M5 4v10a3 3 0 0 0 3 3h6" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
+        <path d="M9 17l-2 4M16 17v4" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
+        <path d="M9 4h3a2 2 0 0 1 2 2v6" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
+      </svg>`;
+      items.push({ icon: seatIcon, label: `Seat pitch: ${escapeHtml(String(a.seat.pitch))}"` });
     }
-    if (!items.length) return '';
+
+    // Aircraft note — goes alongside amenities in the same block. We surface
+    // this even if no amenity data is available, since it's useful detail.
+    const aircraftRow = seg.aircraft
+      ? `<div class="modal-amenity-aircraft">Aircraft: ${escapeHtml(seg.aircraft)}</div>`
+      : '';
+
+    if (!items.length && !aircraftRow) return '';
+
     return `
-      <div style="margin-top:14px;">
-        <div style="font-size:12px;text-transform:uppercase;letter-spacing:0.05em;color:var(--text-3);font-weight:600;margin-bottom:6px;">Amenities</div>
-        <div class="modal-amenities">${items.join('')}</div>
+      <div>
+        <div class="modal-amenities-label">Amenities</div>
+        <div class="modal-amenities">
+          ${items.map(it => `
+            <div class="modal-amenity">
+              ${it.icon}
+              <span>${escapeHtml(it.label)}</span>
+            </div>
+          `).join('')}
+          ${aircraftRow}
+        </div>
       </div>
     `;
   }
