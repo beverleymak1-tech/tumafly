@@ -93,10 +93,13 @@ serve(async (req) => {
       return darajaAck();
     }
 
-    // 2. Idempotency — already booked
-    if (pending.status === "booked") {
-      console.log(`Callback re-fired for already-booked ${checkoutRequestId}`);
-      return darajaAck();
+    // 2. Idempotency — already booked OR another worker is mid-booking.
+    // "booking" status means another invocation of this webhook claimed the row
+    // and is currently calling Duffel /air/orders. We must NOT try again — the
+    // other worker will finalise to "booked" or "paid_booking_failed".
+    if (pending.status === "booked" || pending.status === "booking") {
+      console.log(`Webhook re-fired for ${pending.status} booking (${trackingId})`);
+      return pesapalAck(trackingId, merchantRef, notificationType, 200);
     }
 
     // 3. Handle failure (any ResultCode != 0)
@@ -152,15 +155,49 @@ serve(async (req) => {
       return darajaAck();
     }
 
-    // 6. Mark as paid (idempotency lock before booking)
-    await supabase
-      .from("pending_bookings")
-      .update({
-        status: "paid",
-        mpesa_receipt_number: mpesaReceiptNumber,
-        mpesa_transaction_date: transactionDate?.toString() || null,
-      })
-      .eq("id", pending.id);
+   // 6. Mark as paid (logical milestone — payment is confirmed).
+   await supabase
+     .from("pending_bookings")
+     .update({
+       status: "paid",
+       mpesa_receipt_number: mpesaReceiptNumber,
+       mpesa_transaction_date: transactionDate?.toString() || null,
+     })
+     .eq("id", pending.id);
+
+   // 6b. Atomic claim — exactly one worker proceeds to Duffel.
+   // Postgres serialises the WHERE status='paid' check with the SET status='booking'
+   // write per row. If Daraja fires the callback twice (it does retry on slow
+   // acks), only one update returns affected rows; the other returns an empty
+   // array and bails cleanly without double-booking.
+   const { data: claimed, error: claimErr } = await supabase
+     .from("pending_bookings")
+     .update({ status: "booking" })
+     .eq("id", pending.id)
+     .eq("status", "paid")
+     .select();
+
+   if (claimErr) {
+     console.error("Atomic claim error:", claimErr);
+     // Don't ack — let Daraja retry once Supabase is healthy again.
+     await alertFounder("UNHANDLED_ERROR", {
+       function: "mpesa-callback",
+       message: "Atomic claim failed at booking step",
+       pending_id: pending.id,
+       error: claimErr.message,
+     });
+     // Returning darajaAck() would tell Daraja "stop retrying". We want it to
+     // retry so we get another chance to finish booking. Return a non-200 shape:
+     return new Response(
+       JSON.stringify({ ResultCode: 1, ResultDesc: "Transient claim error, retry" }),
+       { headers: { ...CORS_HEADERS, "Content-Type": "application/json" }, status: 500 }
+     );
+   }
+   if (!claimed || claimed.length === 0) {
+     // Another worker won the race.
+     console.log(`Booking already claimed by another worker for ${pending.id}`);
+     return darajaAck();
+   }
 
     // 7. Re-fetch Duffel offer (may have expired during STK push)
     const offerRes = await fetch(

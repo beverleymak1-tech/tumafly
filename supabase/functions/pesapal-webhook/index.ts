@@ -109,9 +109,12 @@ serve(async (req) => {
       return pesapalAck(trackingId, merchantRef, notificationType, 500);
     }
 
-    // 2. Idempotency — already booked
-    if (pending.status === "booked") {
-      console.log(`Webhook re-fired for already-booked ${trackingId}`);
+    // 2. Idempotency — already booked OR another worker is mid-booking.
+    // "booking" status means another invocation of this webhook claimed the row
+    // and is currently calling Duffel /air/orders. We must NOT try again — the
+    // other worker will finalise to "booked" or "paid_booking_failed".
+    if (pending.status === "booked" || pending.status === "booking") {
+      console.log(`Webhook re-fired for ${pending.status} booking (${trackingId})`);
       return pesapalAck(trackingId, merchantRef, notificationType, 200);
     }
 
@@ -164,13 +167,39 @@ serve(async (req) => {
       return pesapalAck(trackingId, merchantRef, notificationType, 200);
     }
 
-    // 5. Mark as paid before booking (so we don't double-book on retry)
+    // 5. Mark as paid (logical milestone — payment is confirmed).
     await supabase
       .from("pending_bookings")
       .update({ status: "paid", payment_method: paymentMethod })
       .eq("id", pending.id);
 
-    // 6. Re-fetch offer (may have expired during payment)
+    // 5b. Atomic claim — exactly one worker proceeds to Duffel.
+    // Postgres serialises the WHERE status='paid' check with the SET status='booking'
+    // write per row. If two workers race, only one update returns affected rows;
+    // the other returns an empty array and bails cleanly.
+    // We use .select() to get the affected rows back (Supabase doesn't return
+    // row count from .update() without it).
+    const { data: claimed, error: claimErr } = await supabase
+      .from("pending_bookings")
+      .update({ status: "booking" })
+      .eq("id", pending.id)
+      .eq("status", "paid")
+      .select();
+
+    if (claimErr) {
+      console.error("Atomic claim error:", claimErr);
+      // Treat as transient — let Pesapal retry. We don't want to ack a row we
+      // didn't claim and didn't book.
+      return pesapalAck(trackingId, merchantRef, notificationType, 500);
+    }
+    if (!claimed || claimed.length === 0) {
+      // Another worker won the race. They are responsible for the Duffel call
+      // and the final state transition. Just ack and return.
+      console.log(`Booking already claimed by another worker for ${pending.id}`);
+      return pesapalAck(trackingId, merchantRef, notificationType, 200);
+    }
+
+    // 6. Re-fetch Duffel offer (may have expired during payment)
     const offerRes = await fetch(
       `${DUFFEL_BASE_URL}/air/offers/${pending.duffel_offer_id}`,
       { headers: {
