@@ -3273,6 +3273,44 @@
     .mobile-fs-pill:active { transform: scale(0.985); }
     .mobile-fs-pill svg { flex-shrink: 0; }
 
+    /* ── Phase B follow-up — Cabin pill row ──────────────────────
+       Horizontally scrollable pill row (All / Economy / Premium / Business & First)
+       under the Filter/Sort row. Hidden on desktop; shown on mobile. */
+    .cabin-pill-row {
+      display: none; /* hidden on desktop */
+      gap: 8px;
+      overflow-x: auto;
+      scroll-snap-type: x proximity;
+      -webkit-overflow-scrolling: touch;
+      scrollbar-width: none;
+      margin: -2px -16px 14px;  /* negative inline margin = let pills run edge-to-edge */
+      padding: 2px 16px 4px;
+    }
+    .cabin-pill-row::-webkit-scrollbar { display: none; }
+    .cabin-pill {
+      flex: 0 0 auto;
+      scroll-snap-align: start;
+      background: var(--surface);
+      border: 1.5px solid var(--brand);
+      color: var(--brand-dark);
+      border-radius: 999px;
+      padding: 10px 18px;
+      font-family: inherit;
+      font-size: 14px;
+      font-weight: 600;
+      cursor: pointer;
+      min-height: 40px;
+      transition: background 0.12s, color 0.12s, border-color 0.12s, transform 0.05s;
+      white-space: nowrap;
+    }
+    .cabin-pill:hover { background: var(--brand-soft); }
+    .cabin-pill:active { transform: scale(0.97); }
+    .cabin-pill.active {
+      background: var(--brand);
+      color: white;
+      border-color: var(--brand);
+    }
+
     /* ── Phase B — Sort sheet body (rendered inline by openSortSheet) ── */
     .sort-sheet-list {
       padding: 8px 0 16px;
@@ -3638,6 +3676,8 @@
 
       /* Show Phase B mobile filter/sort row */
       .mobile-fs-row { display: flex; }
+      /* Show cabin pill row on mobile */
+      .cabin-pill-row { display: flex; }
 
       /* Hide the desktop sort pill on mobile — replaced by the Sort sheet.
          The <select id="sort-by"> inside stays in the DOM as the source of
@@ -3949,6 +3989,14 @@
             </svg>
             Sort
           </button>
+        </div>
+
+        <!-- Phase B follow-up — Cabin pill row. Each pill calls setCabinFilter. -->
+        <div class="cabin-pill-row" id="cabin-pill-row">
+          <button class="cabin-pill active" data-cabin="all"             onclick="setCabinFilter('all')"             type="button">All</button>
+          <button class="cabin-pill"        data-cabin="economy"         onclick="setCabinFilter('economy')"         type="button">Economy</button>
+          <button class="cabin-pill"        data-cabin="premium_economy" onclick="setCabinFilter('premium_economy')" type="button">Premium Economy</button>
+          <button class="cabin-pill"        data-cabin="business_first"  onclick="setCabinFilter('business_first')"  type="button">Business &amp; First</button>
         </div>
 
         <div class="route-header">
@@ -4556,6 +4604,8 @@
   let passengerCount = 1;
   let allOffers = [];
   let activeStopsFilter = 'all';
+  let activeCabinFilter = 'all';  // Phase B follow-up — pill row above results.
+                                  // 'all' | 'economy' | 'premium_economy' | 'business_first'
   let currentCurrency = 'KES';
   let rateInfo = { date: null, isLive: true };
   let cabinDiagnostics = null;
@@ -5561,6 +5611,8 @@
       if (stopsRadio) stopsRadio.checked = true;
       const africanCb = document.getElementById('filter-african');
       if (africanCb) africanCb.checked = false;
+      activeCabinFilter = 'all';
+      updateCabinPillsActive();
 
       // Reset airline + range filters to defaults for this fresh result set
       excludedAirlines = new Set();
@@ -5676,6 +5728,21 @@
   function setStopsFilter(value) {
     activeStopsFilter = value;
     renderResults();
+  }
+
+  // Phase B follow-up — cabin pill row above the results list on mobile.
+  // Filters to offers having at least one cabin in the chosen class. 'all'
+  // clears the filter. State lives in activeCabinFilter (top of file).
+  function setCabinFilter(value) {
+    activeCabinFilter = value;
+    updateCabinPillsActive();
+    renderResults();
+  }
+
+  function updateCabinPillsActive() {
+    document.querySelectorAll('.cabin-pill').forEach(btn => {
+      btn.classList.toggle('active', btn.dataset.cabin === activeCabinFilter);
+    });
   }
 
   function isAfrican(offer) { return AFRICAN_CARRIERS.includes(offer.airline); }
@@ -5896,6 +5963,17 @@
 
   function filterOffers() {
     const africanOnly = document.getElementById('filter-african')?.checked;
+    // Phase B follow-up — cabin pill row. Map the pill key to which offer.cabins
+    // entries must be present for the offer to pass.
+    const cabinKeysRequired = (() => {
+      switch (activeCabinFilter) {
+        case 'economy':         return ['economy'];
+        case 'premium_economy': return ['premium_economy'];
+        case 'business_first':  return ['business', 'first'];
+        default:                return null; // 'all' → no constraint
+      }
+    })();
+
     return allOffers.filter(o => {
       const slice = o.slices[0];
       const stops = slice?.stops ?? 0;
@@ -5904,6 +5982,11 @@
       if (africanOnly && !isAfrican(o)) return false;
       // Per-airline exclusion (empty set = no filter)
       if (excludedAirlines.size && excludedAirlines.has(o.airline)) return false;
+      // Cabin pill — offer must have at least one cabin matching the chosen class
+      if (cabinKeysRequired) {
+        const hasAny = cabinKeysRequired.some(k => o.cabins?.[k] != null);
+        if (!hasAny) return false;
+      }
       // Duration max
       if (rangeState.dur.max != null) {
         const dur = isoDurationToMinutes(slice?.duration);
@@ -7898,6 +7981,10 @@
     setRange('arr-max', 1440);
     setRange('price-max', 100);
     onRangeChange();
+
+    // Cabin pills back to "All"
+    activeCabinFilter = 'all';
+    updateCabinPillsActive();
 
     renderResults();
   }
