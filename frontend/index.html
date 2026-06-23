@@ -762,7 +762,7 @@
       display: grid;
       grid-template-columns: auto 2fr 1fr 1fr 1fr auto;
       gap: 10px;
-      align-items: center;
+      align-items: stretch;
     }
     @media (max-width: 1100px) {
       .summary-bar { grid-template-columns: auto 2fr 1fr 1fr 1fr; }
@@ -5653,12 +5653,21 @@
   // ============================================================
   // HELPERS
   // ============================================================
-  function showAlert(containerId, message, type = 'error') {
-    const el = document.getElementById(containerId);
+  function showAlert(containerOrId, message, type = 'error') {
+    // Accept either a string id or a DOM element — saveTraveler historically
+    // passed the element, which silently broke because getElementById(element)
+    // returns null and innerHTML threw. Now we handle both shapes safely.
+    const el = typeof containerOrId === 'string'
+      ? document.getElementById(containerOrId)
+      : containerOrId;
+    if (!el) return;
     el.innerHTML = `<div class="alert alert-${type}">${message}</div>`;
   }
-  function clearAlert(containerId) {
-    document.getElementById(containerId).innerHTML = '';
+  function clearAlert(containerOrId) {
+    const el = typeof containerOrId === 'string'
+      ? document.getElementById(containerOrId)
+      : containerOrId;
+    if (el) el.innerHTML = '';
   }
 
   function formatTime(iso) {
@@ -7819,7 +7828,7 @@
       // error text only after a failed save, never on first render.
       s.showRequiredErrors = true;
       const alertBox = document.getElementById('booking-alert');
-      if (alertBox) showAlert(alertBox, `Please fill in: ${errors.join(', ')} for Traveler ${i + 1}.`);
+      if (alertBox) showAlert('booking-alert', `Please fill in: ${errors.join(', ')} for Traveler ${i + 1}.`);
       renderPassengerForms();
       // Scroll the first error field of THIS traveler into view (not the global first —
       // earlier travelers may also have red fields from prior failed saves, and we
