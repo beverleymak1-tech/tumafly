@@ -6299,16 +6299,61 @@
       // Token is single-use — get a fresh one for the next search
       resetTurnstile('search');
       const rawOffers = data.offers || [];
-      // Filter out interline ghost offers where the first segment departs from
-      // a different airport than the user searched (e.g. Hahn Air HLA vs JNB).
-      // These are ticketing artifacts — the passenger can't actually board there.
+      // Build the set of acceptable origin airport IATAs for this search.
+      //
+      // - If the user picked a specific airport (e.g. JNB), we accept that
+      //   airport PLUS any other airports in the same city (e.g. HLA Lanseria
+      //   is also in Johannesburg — a legitimate alternative).
+      // - If the user picked an "All airports" city group, every airport in
+      //   that city is acceptable.
+      // - If we have no airport data (network slow / pre-load failed), don't
+      //   filter at all — better to show everything than hide real flights.
+      const acceptableOrigins = (() => {
+        if (!airportsData || !airportsData.length) return null; // skip filter
+        const searchedIata = origin?.toUpperCase();
+        if (!searchedIata) return null;
+        const set = new Set([searchedIata]);
+        // Find the city the searched IATA belongs to, then add every airport
+        // in that city. This handles both:
+        //   - specific airport pick (JNB) → add HLA, GCJ if same city
+        //   - city group pick (e.g. NYC) → city lookup finds all NYC airports
+        const searched = airportsData.find(a => a.iata === searchedIata);
+        if (searched) {
+          const cityKey = `${searched.city}|${searched.country}`.toLowerCase();
+          airportsData.forEach(a => {
+            if (`${a.city}|${a.country}`.toLowerCase() === cityKey) set.add(a.iata);
+          });
+        }
+        return set;
+      })();
+
+      // Filter offers whose first segment doesn't depart from an acceptable
+      // airport for this search. Same logic applies to destination — drop
+      // offers that arrive at a non-acceptable airport.
+      const acceptableDests = (() => {
+        if (!airportsData || !airportsData.length) return null;
+        const searchedIata = destination?.toUpperCase();
+        if (!searchedIata) return null;
+        const set = new Set([searchedIata]);
+        const searched = airportsData.find(a => a.iata === searchedIata);
+        if (searched) {
+          const cityKey = `${searched.city}|${searched.country}`.toLowerCase();
+          airportsData.forEach(a => {
+            if (`${a.city}|${a.country}`.toLowerCase() === cityKey) set.add(a.iata);
+          });
+        }
+        return set;
+      })();
+
       allOffers = rawOffers.filter(o => {
-        const seg0 = o.slices?.[0]?.segments?.[0];
-        if (!seg0) return true; // keep if no segment data
-        const offerOrigin = seg0.origin?.toUpperCase();
-        const searchOrigin = origin?.toUpperCase();
-        if (!offerOrigin || !searchOrigin) return true;
-        return offerOrigin === searchOrigin;
+        const slice = o.slices?.[0];
+        const segs = slice?.segments;
+        if (!segs || !segs.length) return true; // keep if no segment data
+        const firstOrigin = segs[0].origin?.toUpperCase();
+        const lastDest = segs[segs.length - 1].destination?.toUpperCase();
+        if (acceptableOrigins && firstOrigin && !acceptableOrigins.has(firstOrigin)) return false;
+        if (acceptableDests && lastDest && !acceptableDests.has(lastDest)) return false;
+        return true;
       });
       cabinDiagnostics = data.cabin_diagnostics || null;
       if (!allOffers.length) {
