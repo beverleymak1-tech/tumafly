@@ -3376,6 +3376,185 @@
       min-height: 44px;
     }
 
+    /* ═══════════════════════════════════════════════════════════════
+       PHASE C — FARE SELECTION BOTTOM-SHEET
+       Replaces the 4-cabin grid on mobile with a single tappable
+       price chip on each flight card. Tapping opens a bottom-sheet
+       with a horizontally-swipeable carousel of cabin cards, each
+       with its own Continue CTA. Hidden on desktop.
+       ═══════════════════════════════════════════════════════════════ */
+
+    /* The mobile-only price chip that sits at the bottom of a flight card */
+    .fc-mobile-price-chip {
+      display: none; /* hidden on desktop — the 4-cabin grid is used instead */
+      width: 100%;
+      align-items: center;
+      gap: 12px;
+      padding: 14px 16px;
+      background: var(--bg);
+      border: none;
+      border-radius: 10px;
+      cursor: pointer;
+      font-family: inherit;
+      text-align: left;
+      margin-top: 12px;
+      min-height: 44px;
+      transition: background 0.12s;
+    }
+    .fc-mobile-price-chip:hover { background: var(--brand-soft); }
+    .fc-mobile-price-chip:active { transform: scale(0.99); }
+    .fc-chip-price {
+      font-size: 18px;
+      font-weight: 700;
+      color: var(--ink);
+      font-variant-numeric: tabular-nums;
+      letter-spacing: -0.3px;
+      line-height: 1.2;
+    }
+    .fc-chip-meta {
+      font-size: 12px;
+      color: var(--text-2);
+      margin-top: 1px;
+      line-height: 1.2;
+    }
+    .fc-chip-body { flex: 1; min-width: 0; }
+    .fc-chip-chev {
+      color: var(--text-3);
+      flex-shrink: 0;
+    }
+
+    /* Fare sheet content — sits inside .tf-sheet-body */
+    .fare-sheet-meta {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 4px 0 14px;
+      border-bottom: 1px solid var(--border);
+      margin-bottom: 16px;
+    }
+    .fare-sheet-meta img {
+      width: 28px;
+      height: 28px;
+      object-fit: contain;
+      border-radius: 6px;
+      border: 1px solid var(--border);
+      background: white;
+      padding: 3px;
+      flex-shrink: 0;
+    }
+    .fare-sheet-meta-text {
+      flex: 1;
+      min-width: 0;
+    }
+    .fare-sheet-meta-airline {
+      font-size: 14px;
+      font-weight: 600;
+      color: var(--ink);
+    }
+    .fare-sheet-meta-route {
+      font-size: 13px;
+      color: var(--text-2);
+      margin-top: 2px;
+      font-variant-numeric: tabular-nums;
+    }
+
+    /* Horizontal swipeable carousel — uses scroll-snap so each cabin card
+       snaps to centre. The wrapper extends past the sheet body's side padding
+       (-20px margin) so the cards can sit edge-to-edge while the snap zone
+       is the full sheet width — gives a proper "peek" of the next card. */
+    .fare-sheet-carousel {
+      display: flex;
+      gap: 12px;
+      overflow-x: auto;
+      scroll-snap-type: x mandatory;
+      scroll-behavior: smooth;
+      margin: 0 -20px;
+      padding: 0 20px 4px;
+      -webkit-overflow-scrolling: touch;
+      scrollbar-width: none;
+    }
+    .fare-sheet-carousel::-webkit-scrollbar { display: none; }
+
+    .fare-card {
+      flex: 0 0 calc(100% - 40px); /* leave 20px peek of next card on each side via scroll padding */
+      max-width: 320px;
+      scroll-snap-align: center;
+      background: var(--surface);
+      border: 1.5px solid var(--border);
+      border-radius: 14px;
+      padding: 18px 18px 16px;
+      display: flex;
+      flex-direction: column;
+      gap: 14px;
+    }
+    .fare-card-name {
+      font-size: 18px;
+      font-weight: 700;
+      color: var(--ink);
+      letter-spacing: -0.2px;
+    }
+    .fare-card-section {
+      font-size: 13px;
+      color: var(--text-2);
+      line-height: 1.5;
+    }
+    .fare-card-section strong {
+      color: var(--ink);
+      font-weight: 600;
+      font-size: 12px;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      display: block;
+      margin-bottom: 4px;
+    }
+    .fare-card-cta {
+      margin-top: auto; /* push CTA to the bottom regardless of card content height */
+      padding-top: 4px;
+    }
+    .fare-card-cta .btn {
+      width: 100%;
+      min-height: 48px;
+      font-size: 15px;
+    }
+    .fare-card-foot {
+      font-size: 12px;
+      color: var(--text-3);
+      text-align: center;
+    }
+    .fare-card-details-link {
+      background: none;
+      border: none;
+      font-family: inherit;
+      font-size: 13px;
+      font-weight: 500;
+      color: var(--brand-dark);
+      cursor: pointer;
+      padding: 0;
+      text-align: center;
+      align-self: center;
+      text-decoration: underline;
+      text-underline-offset: 3px;
+    }
+
+    /* Dot indicator below the carousel — populated by openFareSheet. */
+    .fare-sheet-dots {
+      display: flex;
+      justify-content: center;
+      gap: 8px;
+      padding: 12px 0 4px;
+    }
+    .fare-sheet-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: var(--border-2);
+      transition: background 0.15s, transform 0.15s;
+    }
+    .fare-sheet-dot.active {
+      background: var(--brand);
+      transform: scale(1.15);
+    }
+
     /* ── Mobile overrides (≤768px) ───────────────────────────────── */
     @media (max-width: 768px) {
 
@@ -3437,8 +3616,14 @@
       /* Price panel — bump total font slightly */
       .price-panel .total { font-size: 20px; }
 
-      /* Flight card — 2-column cabin row (4-wide is too cramped at 320px) */
-      .fc-cabins { grid-template-columns: repeat(2, 1fr); }
+      /* Flight card — mobile: hide the 4-cabin grid and the bottom "Details"
+         link. Both are replaced by the single mobile price chip + fare sheet
+         (Phase C). The fare sheet itself contains a "View flight details" link. */
+      .fc-cabins { display: none; }
+      .fc-expand { display: none; }
+      .fc-mobile-price-chip { display: flex; }
+      /* The card layout collapses to a single column already, so the route
+         info now spans full width on mobile cleanly. */
 
       /* ── Phase B — hide desktop chrome on mobile ──
          The big editable summary-bar is replaced by the Phase A strip
@@ -6027,6 +6212,50 @@
                 </button>`;
       }).join('');
 
+      // Mobile-only price chip — shows lowest available cabin's price (outbound /
+      // one-way) or the locked-cabin price (inbound). Tapping opens the fare sheet.
+      // Built here so we can reuse the same diff/baseline logic as the cabin cells.
+      let chipHtml = '';
+      {
+        // Pick the cabin to feature on the chip
+        let chipCabin = null;
+        if (kind === 'inbound' && selectedOutbound?.cabin) {
+          chipCabin = selectedOutbound.cabin;
+        } else {
+          chipCabin = lowestCabin(offer);
+        }
+        const chipPrice = chipCabin ? cabinPriceOf(offer, chipCabin) : null;
+        if (chipPrice != null) {
+          const perPax = chipPrice / passengerCount;
+          let priceLine;
+          let metaLine;
+          if (kind === 'inbound' && inboundBaselineTotal != null) {
+            const diffPerPax = (chipPrice - inboundBaselineTotal) / passengerCount;
+            if (Math.abs(diffPerPax) < 1) {
+              priceLine = `<span style="color:var(--success);">Cheapest</span>`;
+              metaLine = `${CABIN_LABELS[chipCabin]} · vs cheapest pair`;
+            } else {
+              priceLine = `+${formatPrice(diffPerPax)}`;
+              metaLine = `${CABIN_LABELS[chipCabin]} · vs cheapest pair`;
+            }
+          } else {
+            priceLine = formatPrice(perPax);
+            metaLine = `${CABIN_LABELS[chipCabin]} · ${isRoundTrip ? 'Round-trip per traveler' : 'One-way per traveler'}`;
+          }
+          chipHtml = `
+            <button class="fc-mobile-price-chip" onclick="openFareSheet('${escapeHtml(offer.flight_key)}','${kind}')" type="button" aria-label="Choose fare">
+              <span class="fc-chip-body">
+                <span class="fc-chip-price">${priceLine}</span>
+                <span class="fc-chip-meta">${metaLine}</span>
+              </span>
+              <svg class="fc-chip-chev" width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                <path d="M9 6l6 6-6 6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+              </svg>
+            </button>
+          `;
+        }
+      }
+
       return `
         <div class="flight-card" id="${cardId}">
           <div class="fc-badges">${badges.join('')}</div>
@@ -6056,6 +6285,7 @@
             </div>
             <div class="fc-cabins">${cabinCells}</div>
           </div>
+          ${chipHtml}
           <div class="fc-expand">
             <button class="fc-expand-btn" onclick="viewCardDetails('${escapeHtml(offer.flight_key)}','${kind}')">Details</button>
           </div>
@@ -7569,6 +7799,8 @@
       sheet.classList.add('tf-hidden');
       document.body.style.overflow = '';
       restoreRelocatedFilters(); // Phase B — put the filter aside back if it was moved
+      // Phase C — kill the carousel observer if it's still alive
+      if (fareSheetObserver) { fareSheetObserver.disconnect(); fareSheetObserver = null; }
       // Wipe sheet content so the next open is clean (Phase B's relocate puts it back first)
       const body = document.getElementById('tf-sheet-body');
       if (body) body.innerHTML = '';
@@ -7700,6 +7932,143 @@
     if (sel) sel.value = value;
     renderResults();
     closeSheet();
+  }
+
+  // ============================================================
+  // PHASE C — FARE SELECTION BOTTOM-SHEET
+  // ============================================================
+  // Opens a sheet showing each available cabin as a swipeable card with a
+  // big Continue CTA. Tapping Continue calls the existing selectFlightCabin()
+  // and the user proceeds into the booking flow exactly as on desktop.
+  //
+  // Inbound (round-trip) shows only the cabin matching outbound (Duffel
+  // pricing is locked to the cabin pair). Outbound/one-way shows all
+  // available cabins for that offer.
+
+  let fareSheetObserver = null; // IntersectionObserver for the dot indicator
+
+  function openFareSheet(flightKey, kind) {
+    const offer = allOffers.find(o => o.flight_key === flightKey);
+    if (!offer) return;
+
+    const isRoundTrip = tripType === 'round';
+    const slice = kind === 'inbound' ? (offer.slices[1] || offer.slices[0]) : offer.slices[0];
+
+    // Pick the set of cabins to render — locked to one cabin on inbound.
+    let cabinsToShow = [];
+    if (kind === 'inbound' && selectedOutbound?.cabin) {
+      if (cabinPriceOf(offer, selectedOutbound.cabin) != null) {
+        cabinsToShow.push(selectedOutbound.cabin);
+      }
+    } else {
+      cabinsToShow = CABIN_KEYS.filter(c => cabinPriceOf(offer, c) != null);
+    }
+    if (!cabinsToShow.length) return;
+
+    // Meta line at the top of the sheet — keeps user oriented on what flight
+    // they're choosing a fare for.
+    const dep = formatTime(slice.departure);
+    const arr = formatTime(slice.arrival);
+    const stops = slice.stops ?? 0;
+    const midLabel = stops === 0 ? 'Nonstop' : stops === 1 ? '1 stop' : `${stops} stops`;
+    const meta = `
+      <div class="fare-sheet-meta">
+        <img src="${escapeHtml(offer.airline_logo || '')}" alt="${escapeHtml(offer.airline)}" onerror="this.style.opacity=0;">
+        <div class="fare-sheet-meta-text">
+          <div class="fare-sheet-meta-airline">${escapeHtml(offer.airline)} <span style="color:var(--text-3);font-weight:400;">· ${formatDuration(slice.duration)}</span></div>
+          <div class="fare-sheet-meta-route">${dep} — ${arr} · ${escapeHtml(slice.origin)} ${midLabel} ${escapeHtml(slice.destination)}</div>
+        </div>
+      </div>
+    `;
+
+    // One card per cabin. Continue CTA wires to existing selectFlightCabin.
+    const tripCaption = isRoundTrip ? 'Round-trip per traveler' : 'One-way per traveler';
+    const cards = cabinsToShow.map(c => {
+      const total = cabinPriceOf(offer, c);
+      const perPax = total / passengerCount;
+      return `
+        <div class="fare-card">
+          <div class="fare-card-name">${CABIN_LABELS[c]} Cabin</div>
+          <div class="fare-card-section">
+            Final price and fare rules are confirmed at booking. Tap "View details" below for the full flight breakdown.
+          </div>
+          <div class="fare-card-cta">
+            <button class="btn btn-primary"
+                    onclick="chooseFareFromSheet('${escapeHtml(offer.flight_key)}','${kind}','${c}')">
+              Continue for ${formatPrice(perPax)}
+            </button>
+          </div>
+          <div class="fare-card-foot">${tripCaption}</div>
+          <button class="fare-card-details-link"
+                  onclick="viewCardDetails('${escapeHtml(offer.flight_key)}','${kind}')">
+            View flight details →
+          </button>
+        </div>
+      `;
+    }).join('');
+
+    // Dots — only render when there's more than one cabin to flick between
+    const dots = cabinsToShow.length > 1
+      ? `<div class="fare-sheet-dots" id="fare-sheet-dots">
+           ${cabinsToShow.map((_, i) => `<span class="fare-sheet-dot ${i === 0 ? 'active' : ''}"></span>`).join('')}
+         </div>`
+      : '';
+
+    const html = `
+      ${meta}
+      <div class="fare-sheet-carousel" id="fare-sheet-carousel">
+        ${cards}
+      </div>
+      ${dots}
+    `;
+
+    openSheet('Select fare', html);
+
+    // Wire up the dot indicator via IntersectionObserver — fires when each card
+    // is mostly in view, then we mark the corresponding dot active.
+    if (cabinsToShow.length > 1) {
+      requestAnimationFrame(() => attachFareCarouselDots());
+    }
+  }
+
+  function attachFareCarouselDots() {
+    if (fareSheetObserver) {
+      fareSheetObserver.disconnect();
+      fareSheetObserver = null;
+    }
+    const carousel = document.getElementById('fare-sheet-carousel');
+    const dotsWrap = document.getElementById('fare-sheet-dots');
+    if (!carousel || !dotsWrap) return;
+    const cards = [...carousel.querySelectorAll('.fare-card')];
+    const dots = [...dotsWrap.querySelectorAll('.fare-sheet-dot')];
+
+    fareSheetObserver = new IntersectionObserver((entries) => {
+      // Pick the entry with the largest intersection ratio
+      let bestIdx = -1;
+      let bestRatio = 0;
+      entries.forEach(e => {
+        if (e.intersectionRatio > bestRatio) {
+          const idx = cards.indexOf(e.target);
+          if (idx >= 0) { bestRatio = e.intersectionRatio; bestIdx = idx; }
+        }
+      });
+      if (bestIdx >= 0) {
+        dots.forEach((d, i) => d.classList.toggle('active', i === bestIdx));
+      }
+    }, {
+      root: carousel,
+      threshold: [0.5, 0.75, 0.95],
+    });
+    cards.forEach(c => fareSheetObserver.observe(c));
+  }
+
+  // Called from each cabin card's Continue button. Closes the sheet, then
+  // delegates to existing selectFlightCabin() which handles selection state
+  // and navigation (booking view for inbound or round-trip completion;
+  // inbound list for outbound round-trip selection).
+  function chooseFareFromSheet(flightKey, kind, cabin) {
+    closeSheet();
+    selectFlightCabin(flightKey, kind, cabin);
   }
 
   // ============================================================
