@@ -407,7 +407,7 @@ s3_secret_key = "env(S3_SECRET_KEY)"
 
 [functions.search-flights]
 enabled = true
-verify_jwt = true
+verify_jwt = false
 import_map = "./functions/search-flights/deno.json"
 # Uncomment to specify a custom file path to the entrypoint.
 # Supported file extensions are: .ts, .js, .mjs, .jsx, .tsx
@@ -418,7 +418,7 @@ entrypoint = "./functions/search-flights/index.ts"
 
 [functions.create-booking]
 enabled = true
-verify_jwt = true
+verify_jwt = false
 import_map = "./functions/create-booking/deno.json"
 # Uncomment to specify a custom file path to the entrypoint.
 # Supported file extensions are: .ts, .js, .mjs, .jsx, .tsx
@@ -429,7 +429,7 @@ entrypoint = "./functions/create-booking/index.ts"
 
 [functions.send-confirmation]
 enabled = true
-verify_jwt = true
+verify_jwt = false
 import_map = "./functions/send-confirmation/deno.json"
 # Uncomment to specify a custom file path to the entrypoint.
 # Supported file extensions are: .ts, .js, .mjs, .jsx, .tsx
@@ -437,3 +437,34 @@ entrypoint = "./functions/send-confirmation/index.ts"
 # Specifies static files to be bundled with the function. Supports glob patterns.
 # For example, if you want to serve static HTML pages in your function:
 # static_files = [ "./functions/send-confirmation/*.html" ]
+[functions.create-payment]
+enabled = true
+verify_jwt = false
+
+[functions.pesapal-webhook]
+enabled = true
+verify_jwt = false
+
+[functions.mpesa-callback]
+enabled = true
+verify_jwt = false
+
+[functions.get-baggage-options]
+enabled = true
+verify_jwt = false
+
+[functions.get-seat-maps]
+enabled = true
+verify_jwt = false
+
+[functions.payment-status]
+enabled = true
+verify_jwt = false
+
+[functions.alert-founder]
+enabled = true
+verify_jwt = false
+
+[functions.retry-stuck-bookings]
+enabled = true
+verify_jwt = false
