@@ -4292,6 +4292,9 @@
 
       /* Compliance note — smaller on mobile */
       .compliance { font-size: 12px; margin-bottom: 8px; }
+      /* On mobile, hide the compliance note in the main flow and show it below the price card in the aside */
+      .booking-compliance-desktop { display: none !important; }
+      #booking-compliance-mobile { display: block !important; font-size: 12px; margin-top: 10px; color: var(--text-3); }
 
       /* ── Phase F — Payment page mobile ──────────────────────── */
 
@@ -4307,6 +4310,8 @@
       .payment-price-inline { display: block; margin-bottom: 4px; }
       /* Hide the right-rail price on mobile (it's now inline) */
       #view-payment aside { display: none; }
+      /* payment-main-col is a flex column on mobile so DOM order controls position */
+      .payment-main-col { display: flex; flex-direction: column; }
 
       /* Price panel inside mobile inline slot — card style */
       .payment-price-inline .price-panel {
@@ -4812,7 +4817,8 @@
           <p class="sub" style="margin-top:6px;">Available seat options for this flight. Selection may not be available on every airline; in that case you can choose seats at check-in.</p>
           <div id="seats-list"></div>
         </div>
-        <p class="compliance">
+        <!-- Desktop-only compliance note (hidden on mobile; mobile version injected below price slot) -->
+        <p class="compliance booking-compliance-desktop">
           By continuing, you confirm you have valid travel documents for your destination.
           Verify with your consulate before travel.
           <a href="https://www.iatatravelcentre.com" target="_blank" rel="noopener">Travel requirements →</a>
@@ -4832,6 +4838,12 @@
       <aside>
         <div id="booking-trip-slot"></div>
         <div id="booking-price-slot"></div>
+        <!-- Mobile-only compliance note rendered below price card (tan background context) -->
+        <p class="compliance booking-compliance-mobile" id="booking-compliance-mobile" style="display:none;">
+          By continuing, you confirm you have valid travel documents for your destination.
+          Verify with your consulate before travel.
+          <a href="https://www.iatatravelcentre.com" target="_blank" rel="noopener">Travel requirements →</a>
+        </p>
       </aside>
     </div>
   </div>
@@ -4853,7 +4865,10 @@
     </div>
     <div id="payment-fare-timer" class="fare-timer-bar hidden"></div>
     <div class="booking-layout">
-      <div>
+      <div class="payment-main-col">
+        <!-- Phase F: mobile-only inline price slot — above the payment card on mobile -->
+        <div class="payment-price-inline" id="payment-price-inline"></div>
+
         <div class="card">
           <h3>Pay for your booking</h3>
           <div class="pay-tabs">
@@ -4887,9 +4902,6 @@
 
           <div id="poll-area" class="hidden"></div>
         </div>
-
-        <!-- Phase F: mobile-only inline price slot — sits between payment method and CTA -->
-        <div class="payment-price-inline" id="payment-price-inline"></div>
 
         <p class="compliance">
           By confirming this booking, you confirm that you agree to the
@@ -6599,6 +6611,10 @@
     if (seatModalState && typeof renderSeatModal === 'function') {
       renderSeatModal();
     }
+    // If fare bottom-sheet is open, re-render so flexibility fees update with currency
+    if (_lastFareSheet && document.getElementById('fare-bottom-sheet')) {
+      openFareSheet(_lastFareSheet.flightKey, _lastFareSheet.kind);
+    }
   }
   function setStopsFilter(value) {
     activeStopsFilter = value;
@@ -7758,7 +7774,7 @@
           </div>
         ` : ''}
         <div class="seat-modal-foot">
-          <div class="seat-modal-total">${total > 0 ? `Seat charges: <strong>${formatKes(total)}</strong>` : 'Optional — skip to keep airline assignment'}</div>
+          <div class="seat-modal-total">${total > 0 ? `Total seat charges: <strong>${formatKes(total)}</strong>` : 'Optional — skip to keep airline assignment'}</div>
           <button type="button" class="btn btn-primary" onclick="closeSeatModal()">Done</button>
         </div>
       </div>
@@ -8557,6 +8573,17 @@
     const c = offer.conditions;
     if (!c) return '';
 
+    // Convert a penalty fee to the current display currency
+    function fmtPenalty(amount, sourceCurrency) {
+      const n = parseFloat(amount);
+      if (!n || n <= 0) return null;
+      const src = (sourceCurrency || '').toUpperCase();
+      if (src === 'KES') return formatKes(n);
+      if (src === 'USD' && rateInfo?.kesToUsd) return formatKes(n / rateInfo.kesToUsd);
+      // Non-KES, non-USD: show original (e.g. GBP 20.00) — honest fallback
+      return `${src} ${n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+    }
+
     const rows = [];
 
     if (c.change_before_departure) {
@@ -8567,7 +8594,8 @@
         rows.push({ icon: '✕', label: 'Changes', text: 'Non-changeable' });
       } else if (allowed === true) {
         if (fee && parseFloat(fee) > 0) {
-          rows.push({ icon: '✓', label: 'Changes', text: `Allowed · Fee from ${escapeHtml(currency)} ${escapeHtml(fee)}` });
+          const feeStr = fmtPenalty(fee, currency) || `${escapeHtml(currency)} ${escapeHtml(fee)}`;
+          rows.push({ icon: '✓', label: 'Changes', text: `Allowed · Fee from ${feeStr}` });
         } else if (fee === '0' || fee === 0) {
           rows.push({ icon: '✓', label: 'Changes', text: 'Allowed · No change fee' });
         } else {
@@ -8584,7 +8612,8 @@
         rows.push({ icon: '✕', label: 'Refunds', text: 'Non-refundable' });
       } else if (allowed === true) {
         if (fee && parseFloat(fee) > 0) {
-          rows.push({ icon: '✓', label: 'Refunds', text: `Allowed · Fee from ${escapeHtml(currency)} ${escapeHtml(fee)}` });
+          const feeStr = fmtPenalty(fee, currency) || `${escapeHtml(currency)} ${escapeHtml(fee)}`;
+          rows.push({ icon: '✓', label: 'Refunds', text: `Allowed · Fee from ${feeStr}` });
         } else if (fee === '0' || fee === 0) {
           rows.push({ icon: '✓', label: 'Refunds', text: 'Fully refundable' });
         } else {
@@ -8722,7 +8751,34 @@
   function goToPayment() {
     clearAlert('booking-alert');
     const r = collectPassengers();
-    if (r.error) return showAlert('booking-alert', r.error);
+    if (r.error) {
+      // Find the first unsaved traveler and surface its errors visually
+      const unsavedIdx = travelerStates.findIndex(s => !s.saved);
+      if (unsavedIdx >= 0) {
+        const s = travelerStates[unsavedIdx];
+        const d = s.data;
+        // Mark errors so the form re-renders with red borders
+        s.showRequiredErrors = true;
+        if (tripRequiresPassport && !travelerHasPassport(d)) {
+          s.showPassportErrors = true;
+          s.openSections.add('passport');
+        }
+        // Expand the card so the user can see the fields
+        s.openSections.add('personal');
+        renderPassengerForms();
+        showAlert('booking-alert', `Please complete and save Traveler ${unsavedIdx + 1}'s details before continuing.`);
+        // Scroll to the unsaved card
+        setTimeout(() => {
+          const card = document.querySelector(`[data-traveler-card="${unsavedIdx}"]`);
+          if (!card) return;
+          const firstErr = card.querySelector('.pax-input-err');
+          (firstErr || card).scrollIntoView({ behavior: 'smooth', block: 'center' });
+        }, 60);
+        return;
+      }
+      // Fallback for other collect errors
+      return showAlert('booking-alert', r.error);
+    }
     const email = document.getElementById('contact-email').value.trim();
     const phoneCC = countryPickerState.contact?.dial || '+254';
     const phoneRaw = document.getElementById('contact-phone').value.trim();
@@ -8732,11 +8788,20 @@
     const phoneLocal = phoneDigits.replace(/^0+/, '');
     const phone = phoneCC && phoneLocal ? `${phoneCC}${phoneLocal}` : '';
 
-    if (!email || !email.includes('@')) return showAlert('booking-alert', 'Please enter a valid email.');
+    if (!email || !email.includes('@')) {
+      const emailEl = document.getElementById('contact-email');
+      if (emailEl) emailEl.classList.add('pax-input-err');
+      showAlert('booking-alert', 'Please enter a valid email address.');
+      setTimeout(() => emailEl?.scrollIntoView({ behavior: 'smooth', block: 'center' }), 50);
+      return;
+    }
+    document.getElementById('contact-email')?.classList.remove('pax-input-err');
     if (!phoneLocal) {
       const grp = document.getElementById('contact-phone-group');
       if (grp) grp.classList.add('pax-input-err');
-      return showAlert('booking-alert', 'Please enter a phone number.');
+      showAlert('booking-alert', 'Please enter a phone number.');
+      setTimeout(() => grp?.scrollIntoView({ behavior: 'smooth', block: 'center' }), 50);
+      return;
     }
     document.getElementById('contact-phone-group')?.classList.remove('pax-input-err');
 
@@ -9090,6 +9155,7 @@
   // available cabins for that offer.
 
   let fareSheetObserver = null; // IntersectionObserver for the dot indicator
+  let _lastFareSheet = null;    // { flightKey, kind } — used to re-render on currency toggle
 
   // Build the Flexibility / Bags / Seats sections for one cabin card.
   //
@@ -9107,6 +9173,36 @@
     const c = cabinData.conditions || offer.conditions || null;
 
     // ── Flexibility ─────────────────────────────────────────────
+    // Duffel may return penalty amounts in any currency (GBP, USD, EUR, etc.).
+    // We convert to KES (or USD if toggled) using rateInfo so fees honour
+    // the global currency toggle. If we lack a rate for the source currency
+    // we show the original amount as a fallback rather than hiding it.
+    function formatFlexFee(amount, sourceCurrency) {
+      const n = parseFloat(amount);
+      if (!n || n <= 0) return null;
+      const src = (sourceCurrency || '').toUpperCase();
+      // If Duffel already returned KES, run through formatKes directly
+      if (src === 'KES') return formatKes(n);
+      // Try converting via our KES rate. rateInfo.kesToUsd = usd/kes, so kes = usd / kesToUsd
+      // We need: foreignCcy → KES. We approximate via USD as the bridge:
+      //   GBP/EUR → USD: Duffel's own price_usd on the offer gives us the implicit KES rate.
+      //   For non-USD source we fall back to showing original if we can't convert.
+      if (rateInfo?.kesToUsd && src === 'USD') {
+        // USD → KES
+        const kes = n / rateInfo.kesToUsd;
+        return formatKes(kes);
+      }
+      // For GBP and other currencies: use the offer's implicit USD value if available.
+      // We store usdToGbp on rateInfo if the search result gave us enough data.
+      // For now, if it's USD we converted above; for others we show original clearly.
+      // Future: extend when the backend exposes per-currency rates.
+      if (currentCurrency === 'USD') {
+        return `${src} ${n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+      }
+      // KES mode but non-KES, non-USD source: show original tagged with the currency
+      return `${src} ${n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+    }
+
     const flexRows = [];
     if (c?.change_before_departure) {
       const cbd = c.change_before_departure;
@@ -9115,8 +9211,10 @@
       if (cbd.allowed === false) {
         flexRows.push({ kind: 'no', text: 'Non-changeable' });
       } else if (cbd.allowed === true) {
-        if (fee && parseFloat(fee) > 0) flexRows.push({ kind: 'yes', text: `Change allowed for ${escapeHtml(cur)} ${escapeHtml(String(fee))}` });
-        else if (fee === '0' || fee === 0) flexRows.push({ kind: 'yes', text: 'Changes allowed · no fee' });
+        if (fee && parseFloat(fee) > 0) {
+          const feeStr = formatFlexFee(fee, cur) || `${escapeHtml(cur)} ${escapeHtml(String(fee))}`;
+          flexRows.push({ kind: 'yes', text: `Change allowed for ${feeStr}` });
+        } else if (fee === '0' || fee === 0) flexRows.push({ kind: 'yes', text: 'Changes allowed · no fee' });
         else flexRows.push({ kind: 'yes', text: 'Changes allowed' });
       }
     }
@@ -9127,8 +9225,10 @@
       if (rbd.allowed === false) {
         flexRows.push({ kind: 'no', text: 'Non-refundable' });
       } else if (rbd.allowed === true) {
-        if (fee && parseFloat(fee) > 0) flexRows.push({ kind: 'yes', text: `Refund allowed for ${escapeHtml(cur)} ${escapeHtml(String(fee))}` });
-        else if (fee === '0' || fee === 0) flexRows.push({ kind: 'yes', text: 'Fully refundable' });
+        if (fee && parseFloat(fee) > 0) {
+          const feeStr = formatFlexFee(fee, cur) || `${escapeHtml(cur)} ${escapeHtml(String(fee))}`;
+          flexRows.push({ kind: 'yes', text: `Refund allowed for ${feeStr}` });
+        } else if (fee === '0' || fee === 0) flexRows.push({ kind: 'yes', text: 'Fully refundable' });
         else flexRows.push({ kind: 'yes', text: 'Refund allowed' });
       }
     }
@@ -9212,6 +9312,7 @@
   }
 
   function openFareSheet(flightKey, kind) {
+    _lastFareSheet = { flightKey, kind };
     const offer = allOffers.find(o => o.flight_key === flightKey);
     if (!offer) return;
 
