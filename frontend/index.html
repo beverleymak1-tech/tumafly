@@ -2146,6 +2146,28 @@
     }
     .seat-cta-btn:last-child { margin-right: 0; }
 
+    /* Subtle re-expand link shown after the user dismisses the seat/bags upsell.
+       Sits where the 2 buttons were; clicking re-renders the full CTA group. */
+    .cta-collapsed-link {
+      display: inline-block;
+      margin: 14px 0 4px;
+      padding: 8px 14px;
+      background: transparent;
+      border: 1px dashed var(--border);
+      border-radius: var(--radius-sm);
+      color: var(--brand-dark);
+      font-size: 13px;
+      font-weight: 600;
+      cursor: pointer;
+      font-family: inherit;
+      min-height: 36px;
+    }
+    .cta-collapsed-link:hover {
+      background: var(--brand-soft);
+      border-color: var(--brand);
+      border-style: solid;
+    }
+
     /* ──────────────────────────────────────────────────────────────
        BAGGAGE — parallels seat styles (rows + modal + stepper)
        ────────────────────────────────────────────────────────────── */
@@ -4533,6 +4555,15 @@
       .bag-option { padding: 12px 14px; }
       .bag-step-btn { width: 40px; height: 40px; min-height: 40px; }
 
+      /* Collapsed CTA link on mobile — full-width, 44px tap target */
+      .cta-collapsed-link {
+        display: block;
+        width: 100%;
+        text-align: center;
+        min-height: 44px;
+        padding: 10px 14px;
+      }
+
       /* Bottom CTA bar — fixed to viewport bottom, not sticky (sticky misbehaves
          inside grid/overflow containers on mobile browsers) */
       .booking-cta-bar {
@@ -5702,6 +5733,11 @@
   let baggageModalState = null;
   let baggageOfferId = null;
   let baggagePassengerIds = [];
+  // "Add later" collapse state — when the user dismisses an upsell CTA group
+  // we hide the buttons and show a subtle re-expand link in their place.
+  // Reset on each entry into the booking view (in proceedToBooking).
+  let seatCTACollapsed = false;
+  let baggageCTACollapsed = false;
 
   // Autocomplete state
   let airportsData = null;
@@ -7756,6 +7792,9 @@
     renderBaggageList();        // initial render with empty/loading state
     renderBookingSummary();
     showView('booking');
+    // Reset CTA collapse flags each time we enter — fresh upsell every visit
+    seatCTACollapsed = false;
+    baggageCTACollapsed = false;
     // Populate the phone country-code dropdown (idempotent — no-op on subsequent visits)
     // Initialise the contact phone country picker (idempotent — sets the default
     // dial code + flag if not yet set, otherwise preserves whatever the user picked).
@@ -7818,7 +7857,9 @@
       !seatMapsData[leg.segment_id]?.unavailable && countAssignedSeatsForLeg(leg.segment_id) === 0
     );
 
-    const ctaGroup = anyUnselected ? `
+    const ctaGroup = anyUnselected ? (seatCTACollapsed ? `
+      <button type="button" class="cta-collapsed-link" onclick="expandSeatsCTA()">+ Add seats now</button>
+    ` : `
       <div class="seat-upsell">
         <svg width="15" height="15" viewBox="0 0 24 24" fill="none" aria-hidden="true">
           <path d="M7 7h10M7 12h6" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
@@ -7829,7 +7870,7 @@
       </div>
       <button type="button" class="btn btn-primary seat-cta-btn" onclick="openSeatModal(0)">Select seats now</button>
       <button type="button" class="btn btn-secondary seat-cta-btn" onclick="skipSeats()">Continue without seats</button>
-    ` : '';
+    `) : '';
 
     slot.innerHTML = legRows + ctaGroup;
   }
@@ -7903,14 +7944,25 @@
   // seat per passenger (clicking a passenger row in the sidebar focuses them).
 
   // Open the seat picker modal at a given leg index.
-  // "Continue without seats" — clears any partial seat selection and re-renders
-  // the seats list so the CTA group disappears, letting user proceed to payment.
+  // "Continue without seats" — collapse the upsell + 2 buttons into a subtle
+  // "Add seats later" link, then scroll to the bottom CTA (Continue to payment).
+  // Does NOT advance to payment — only the explicit Continue to payment button does.
   function skipSeats() {
-    selectedSeats = {};
-    // Re-render without the CTA group by marking all legs as "skipped"
-    // We do this by calling renderSeatsList which will now see no unselected legs
-    // only if we set a skip flag. Simpler: just proceed to payment directly.
-    goToPayment();
+    seatCTACollapsed = true;
+    renderSeatsList();
+    // Scroll to the end of the booking form so the Continue to payment button
+    // is in view. On mobile the fixed booking-cta-bar is always visible, but
+    // scrolling still helps surface that the user has reached the end.
+    setTimeout(() => {
+      const target = document.querySelector('.booking-inline-cta') ||
+                     document.getElementById('booking-alert');
+      target?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }, 50);
+  }
+
+  function expandSeatsCTA() {
+    seatCTACollapsed = false;
+    renderSeatsList();
   }
 
   async function openSeatModal(legIdx) {
@@ -8241,29 +8293,18 @@
     return m[t] || (t ? t.charAt(0).toUpperCase() + t.slice(1).replace(/_/g, ' ') : 'Bag');
   }
 
-  // Convert a baggage option's cost to KES. EF populates cost_kes when it can;
-  // when null, we fall back to rateInfo for USD, or honest passthrough for other
-  // currencies. Mirrors the formatFlexFee logic used in fare cards.
+  // Convert a baggage option's cost to KES. EF now always returns cost_kes
+  // (converted server-side via the same toKES helper create-payment uses), so
+  // we just trust it. Currency toggle is handled downstream via formatKes.
   function bagOptionCostKes(opt) {
-    if (opt.cost_kes != null) return opt.cost_kes;
-    const amt = parseFloat(opt.cost_amount) || 0;
-    const cur = (opt.cost_currency || '').toUpperCase();
-    if (cur === 'KES') return amt;
-    if (cur === 'USD' && rateInfo?.kesToUsd) return amt / rateInfo.kesToUsd;
-    return 0; // unknown currency — we display the original price string, but for
-              // total-math purposes we 0 it out client-side; create-payment
-              // re-validates from Duffel authoritatively.
+    return Number(opt.cost_kes) || 0;
   }
 
   function bagOptionPriceLabel(opt) {
-    const cur = (opt.cost_currency || '').toUpperCase();
-    // KES/USD: route through formatKes so the currency toggle applies
-    if (cur === 'KES' || cur === 'USD' || opt.cost_kes != null) {
-      return formatKes(bagOptionCostKes(opt));
-    }
-    // Other currency: show original amount tagged with code (e.g. GBP 25.00)
-    const amt = parseFloat(opt.cost_amount) || 0;
-    return `${cur} ${amt.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+    // formatKes handles the KES↔USD toggle automatically. All currencies have
+    // already been normalised to KES server-side, so this single path covers
+    // GBP, EUR, AED, etc. without per-currency frontend logic.
+    return formatKes(bagOptionCostKes(opt));
   }
 
   // Sum total KES across all selected baggages
@@ -8314,10 +8355,7 @@
       const res = await fetch(`${SUPABASE_URL}/functions/v1/get-baggage-options`, {
         method: 'POST',
         headers: { 'Authorization': `Bearer ${SUPABASE_ANON_KEY}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          offer_id: offerId,
-          kes_to_usd: rateInfo?.kesToUsd || null,
-        }),
+        body: JSON.stringify({ offer_id: offerId }),
       });
       const data = await res.json();
       baggageOptionsByOffer[offerId] = data;
@@ -8412,7 +8450,9 @@
       return opts.length > 0 && count === 0;
     });
 
-    const ctaGroup = anyWithOptionsUnpicked ? `
+    const ctaGroup = anyWithOptionsUnpicked ? (baggageCTACollapsed ? `
+      <button type="button" class="cta-collapsed-link" onclick="expandBaggageCTA()">+ Add bags now</button>
+    ` : `
       <div class="bag-upsell">
         <svg width="15" height="15" viewBox="0 0 24 24" fill="none" aria-hidden="true">
           <path d="M7 7h10M7 12h6" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
@@ -8423,18 +8463,28 @@
       </div>
       <button type="button" class="btn btn-primary bag-cta-btn" onclick="openBaggageModal(0)">Add bags now</button>
       <button type="button" class="btn btn-secondary bag-cta-btn" onclick="skipBags()">Continue without bags</button>
-    ` : '';
+    `) : '';
 
     slot.innerHTML = rows + ctaGroup;
   }
 
-  // "Continue without bags" — clear partial selection + proceed to payment.
-  // Parallels skipSeats(). On the booking page this just goes to payment.
+  // "Continue without bags" — collapse the upsell + 2 buttons into a subtle
+  // "Add bags later" link, then scroll to the next card (Seats). Does NOT
+  // advance to payment — only the explicit Continue to payment button does.
   function skipBags() {
-    selectedBaggages = {};
+    baggageCTACollapsed = true;
     renderBaggageList();
     renderBookingSummary();
-    goToPayment();
+    setTimeout(() => {
+      // The Seats card is the next one after Baggage. Scroll to it.
+      const seatsCard = document.getElementById('seats-list')?.closest('.card');
+      seatsCard?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }, 50);
+  }
+
+  function expandBaggageCTA() {
+    baggageCTACollapsed = false;
+    renderBaggageList();
   }
 
   // Open baggage modal. Holds a draft state so users can cancel without
@@ -8634,11 +8684,51 @@
     if (t && (t.matches('.pax-input.pax-input-err') || t.matches('.pax-select.pax-input-err'))) {
       clearFieldErrorIfFixed(t);
     }
+    // Clear the search "No flights found" / generic search alerts the moment
+    // the user starts editing either airport field, the date pickers, or
+    // the cabin/pax selectors on either home or results page. Same for the
+    // results-page edit-search modal.
+    if (t && t.id && (
+      t.id === 'origin' || t.id === 'destination' ||
+      t.id === 'r-origin' || t.id === 'r-destination' ||
+      t.id === 'depart-date' || t.id === 'return-date' ||
+      t.id === 'r-depart-date' || t.id === 'r-return-date'
+    )) {
+      clearAlert('search-alert');
+      clearAlert('results-alert');
+    }
+    // Clear booking alerts (e.g. "Please enter a valid email address",
+    // "Please enter a phone number", "Please complete and save Traveler N…")
+    // the moment the user starts editing the contact fields or any traveler
+    // field. clearFieldErrorIfFixed above already strips the per-field red
+    // border; this clears the banner so the page returns to a clean state.
+    if (t && t.id && (
+      t.id === 'contact-email' || t.id === 'contact-phone' ||
+      t.id.startsWith('p') && /^p\d+-/.test(t.id)
+    )) {
+      clearAlert('booking-alert');
+    }
   });
   document.addEventListener('change', (e) => {
     const t = e.target;
     if (t && (t.matches('.pax-input.pax-input-err') || t.matches('.pax-select.pax-input-err'))) {
       clearFieldErrorIfFixed(t);
+    }
+    // Same alert-clearing logic on `change` so date pickers + selects also fire it
+    if (t && t.id && (
+      t.id === 'origin' || t.id === 'destination' ||
+      t.id === 'r-origin' || t.id === 'r-destination' ||
+      t.id === 'depart-date' || t.id === 'return-date' ||
+      t.id === 'r-depart-date' || t.id === 'r-return-date'
+    )) {
+      clearAlert('search-alert');
+      clearAlert('results-alert');
+    }
+    if (t && t.id && (
+      t.id === 'contact-email' || t.id === 'contact-phone' ||
+      t.id.startsWith('p') && /^p\d+-/.test(t.id)
+    )) {
+      clearAlert('booking-alert');
     }
   });
 

@@ -72,6 +72,36 @@ async function alertFounder(level: string, code: string, detail: string) {
   } catch (_) { /* swallow — alerts must never block the response */ }
 }
 
+// ── FX: convert any Duffel currency to KES ─────────────────────────────────
+// Mirrors the toKES helper in create-payment so prices the user sees on the
+// baggage modal match what create-payment will re-cost server-side at booking.
+// Fetches live rates lazily, caches per-invocation, falls back to a static
+// table on network failure.
+const FALLBACK_RATES: Record<string, number> = {
+  GBP: 170, USD: 130, EUR: 140, AED: 35, QAR: 36, ZAR: 7, NGN: 0.08,
+};
+const liveRateCache: Record<string, number> = {};
+
+async function toKES(amount: number, fromCurrency: string): Promise<number> {
+  if (!fromCurrency || fromCurrency === 'KES') return Math.round(amount);
+  const ccy = fromCurrency.toUpperCase();
+  if (liveRateCache[ccy] != null) {
+    return Math.round(amount * liveRateCache[ccy]);
+  }
+  try {
+    const res = await fetch(`https://api.exchangerate-api.com/v4/latest/${ccy}`);
+    const data = await res.json();
+    const rate = data?.rates?.KES;
+    if (rate && rate > 0) {
+      liveRateCache[ccy] = rate;
+      return Math.round(amount * rate);
+    }
+  } catch (_) { /* fall through to static */ }
+  const fallback = FALLBACK_RATES[ccy] || 130;
+  liveRateCache[ccy] = fallback;
+  return Math.round(amount * fallback);
+}
+
 // ── Types ──────────────────────────────────────────────────────────────────
 interface BaggageOption {
   service_id: string;
@@ -81,7 +111,7 @@ interface BaggageOption {
   weight_lbs: number | null;
   cost_amount: string;       // raw Duffel amount in offer currency
   cost_currency: string;
-  cost_kes: number | null;   // null when not derivable; frontend converts
+  cost_kes: number;          // always populated (server-side FX via toKES)
   max_quantity: number;      // upper bound for the stepper UI
 }
 
@@ -107,10 +137,6 @@ serve(async (req: Request) => {
   try {
     const body = await req.json();
     const offer_id: string | undefined = body?.offer_id;
-    // Optional FX hint from frontend's rateInfo so the EF can populate cost_kes
-    // when the offer is priced in USD. Trusted for display only; create-payment
-    // re-validates from authoritative Duffel data.
-    const kes_to_usd: number | undefined = body?.kes_to_usd;
 
     if (!offer_id || typeof offer_id !== 'string') {
       return new Response(
@@ -192,16 +218,12 @@ serve(async (req: Request) => {
       // common "one service per quantity" pattern (e.g. svc_1bag, svc_2bags).
       const maxQ = Number(svc.maximum_quantity ?? meta.maximum_quantity ?? 1) || 1;
 
-      // Derive cost_kes when possible:
-      //   - If service is already in KES, pass through.
-      //   - If service is in USD and we have a kes_to_usd hint, convert.
-      //   - Otherwise null; frontend converts on display via formatKes.
-      let cost_kes: number | null = null;
-      if (currency === 'KES') {
-        cost_kes = amountNum;
-      } else if (currency === 'USD' && kes_to_usd && kes_to_usd > 0) {
-        cost_kes = amountNum / kes_to_usd;
-      }
+      // Derive cost_kes via authoritative server-side FX so the frontend
+      // doesn't need a per-currency rate. Mirrors create-payment's toKES so
+      // displayed prices match what gets charged. Live-rate fetched lazily
+      // per currency (cached within this invocation); fallback table covers
+      // network failure.
+      const cost_kes = await toKES(amountNum, currency);
 
       for (const pid of passengerIds) {
         if (!grouped[pid]) grouped[pid] = [];
