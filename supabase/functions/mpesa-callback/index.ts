@@ -440,8 +440,12 @@ serve(async (req) => {
       })
       .eq("id", pending.id);
 
-    // 11. Send confirmation email (fire-and-forget)
-    fetch(SEND_CONFIRMATION_URL, {
+    // 11. Send confirmation email. Wrapped in EdgeRuntime.waitUntil so the
+    // fetch survives the response (Supabase Edge Runtime aborts in-flight
+    // fetches when the handler returns — a bare `fetch().catch()` would
+    // silently drop the email before it leaves the box). Daraja still gets
+    // a fast callback ack because waitUntil doesn't block the response.
+    const sendEmailPromise = fetch(SEND_CONFIRMATION_URL, {
       method: "POST",
       headers: {
         Authorization: `Bearer ${SERVICE_ROLE_KEY}`,
@@ -465,6 +469,15 @@ serve(async (req) => {
         total_kes: pending.total_kes,
       }),
     }).catch(err => console.error("Email send failed (non-blocking):", err));
+
+    // @ts-ignore — EdgeRuntime is the Supabase Edge Runtime global; not in
+    // standard Deno types. Fall back to awaiting if it's missing.
+    if (typeof EdgeRuntime !== "undefined" && EdgeRuntime?.waitUntil) {
+      // @ts-ignore
+      EdgeRuntime.waitUntil(sendEmailPromise);
+    } else {
+      await sendEmailPromise;
+    }
 
     return darajaAck();
 
