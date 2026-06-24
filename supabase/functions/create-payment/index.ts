@@ -33,6 +33,65 @@ const CORS_HEADERS = {
   "Access-Control-Allow-Headers": "authorization, content-type",
 };
 
+// ── Mode/key mismatch guard ───────────────────────────────────────────────
+// Fires once at cold start if DUFFEL_MODE doesn't match the key prefix.
+// All requests refused with 503 + one CRITICAL alert per cold start. Catches
+// the launch-day disaster where mode is left as sandbox after key swap (or
+// vice versa). Mirrors the same guard in get-baggage-options, pesapal-webhook,
+// and mpesa-callback.
+let MODE_KEY_OK = true;
+let MODE_KEY_REASON = "";
+{
+  const isTestKey = DUFFEL_API_KEY.startsWith("duffel_test_");
+  const isLiveKey = DUFFEL_API_KEY.startsWith("duffel_live_");
+  if (!DUFFEL_API_KEY) {
+    MODE_KEY_OK = false;
+    MODE_KEY_REASON = "DUFFEL_API_KEY not set";
+  } else if (DUFFEL_MODE === "sandbox" && !isTestKey) {
+    MODE_KEY_OK = false;
+    MODE_KEY_REASON = "DUFFEL_MODE=sandbox but DUFFEL_API_KEY is not a test key";
+  } else if (DUFFEL_MODE === "production" && !isLiveKey) {
+    MODE_KEY_OK = false;
+    MODE_KEY_REASON = "DUFFEL_MODE=production but DUFFEL_API_KEY is not a live key";
+  } else if (DUFFEL_MODE !== "sandbox" && DUFFEL_MODE !== "production") {
+    MODE_KEY_OK = false;
+    MODE_KEY_REASON = `DUFFEL_MODE has unexpected value: "${DUFFEL_MODE}"`;
+  }
+}
+let modeKeyAlertFired = false;
+
+// Fire-and-forget alert helper. Calls alert-founder Edge Function so the
+// founder gets an email with full context. Never blocks the response path.
+async function alertFounder(alertType: string, context: Record<string, unknown>) {
+  try {
+    await fetch(`${SUPABASE_URL}/functions/v1/alert-founder`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${SERVICE_ROLE_KEY}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ alert_type: alertType, context }),
+    });
+  } catch (_) { /* swallow — alerts must never block */ }
+}
+
+// Helper used at the top of the request handler. Returns a Response (the 503)
+// when there's a mismatch — caller bails on it. Returns null when guard passes.
+async function checkDuffelModeKeyMismatch(
+  _alertFn: typeof alertFounder,
+  source: string,
+): Promise<Response | null> {
+  if (MODE_KEY_OK) return null;
+  if (!modeKeyAlertFired) {
+    modeKeyAlertFired = true;
+    await alertFounder("DUFFEL_MODE_KEY_MISMATCH", { source, reason: MODE_KEY_REASON });
+  }
+  return new Response(
+    JSON.stringify({ error: "Service temporarily unavailable. Please try again shortly." }),
+    { status: 503, headers: { ...CORS_HEADERS, "Content-Type": "application/json" } },
+  );
+}
+
 const FALLBACK_RATES: Record<string, number> = {
   GBP: 170, USD: 130, EUR: 140, AED: 35, QAR: 36,
 };
@@ -411,7 +470,7 @@ serve(async (req) => {
         currency: "KES",
         amount: totalKES,
         description: `TumaFly flight ${offer.slices[0].origin.iata_code}-${offer.slices[0].destination.iata_code}`,
-        callback_url: `${FRONTEND_URL}/payment-complete?ref=${merchantRef}`,
+        callback_url: `${FRONTEND_URL}/?ref=${merchantRef}`,
         notification_id: PESAPAL_IPN_ID,
         billing_address: {
           email_address: contact.email,

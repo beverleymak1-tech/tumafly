@@ -8322,6 +8322,20 @@
     return total;
   }
 
+  // Sum total number of bags across all passengers × all services × quantity.
+  // 4 travelers with 1 bag each = 4. 2 travelers with 2 bags each = 4.
+  // Displayed as "×N" next to the Baggage line item in the price panel.
+  function baggageTotalQuantity() {
+    let qty = 0;
+    for (const paxIdx of Object.keys(selectedBaggages)) {
+      const sel = selectedBaggages[paxIdx] || {};
+      for (const svcId of Object.keys(sel)) {
+        qty += Number(sel[svcId]) || 0;
+      }
+    }
+    return qty;
+  }
+
   // Returns array sent to create-payment for server-side re-validation
   function collectBaggageSelections() {
     const out = [];
@@ -8889,7 +8903,12 @@
       <div class="form-grid">
         <div class="full">
           <label class="pax-label ${ppCountryErr ? 'pax-label-err' : ''}">Country of issue${passportRequired ? REQ : ''}</label>
-          <input id="p${i}-pp-country" type="text" class="pax-input ${ppCountryErr ? 'pax-input-err' : ''}" value="${escapeHtml(d.passport.country)}" placeholder="e.g. Kenya">
+          <select id="p${i}-pp-country" class="pax-select ${ppCountryErr ? 'pax-input-err' : ''}">
+            <option value="" ${!d.passport.country ? 'selected' : ''}>Select country…</option>
+            ${PHONE_COUNTRIES.map(([iso, name]) =>
+              `<option value="${escapeHtml(iso)}" ${d.passport.country === iso ? 'selected' : ''}>${escapeHtml(name)}</option>`
+            ).join('')}
+          </select>
           ${ppCountryErr ? '<div class="pax-error">Please select a country of issue</div>' : ''}
         </div>
         <div>
@@ -9220,7 +9239,7 @@
     const breakdownHtml = `
       <div class="line"><span class="label">Flight <span style="color:var(--text-3);font-size:12px;">(taxes included)</span></span><span class="value">${formatKes(b.base_kes)}</span></div>
       ${seatsKes > 0 ? `<div class="line"><span class="label">Seat selection</span><span class="value">${formatKes(seatsKes)}</span></div>` : ''}
-      ${baggageKes > 0 ? `<div class="line"><span class="label">Baggage</span><span class="value">${formatKes(baggageKes)}</span></div>` : ''}
+      ${baggageKes > 0 ? `<div class="line"><span class="label">Baggage <span style="color:var(--text-3);font-size:12px;">×${baggageTotalQuantity()}</span></span><span class="value">${formatKes(baggageKes)}</span></div>` : ''}
       <div class="line"><span class="label">TumaFly service fee</span><span class="value">${formatKes(b.service_fee_kes)}</span></div>
       <div class="line"><span class="label">Payment processing</span><span class="value">${formatKes(b.processing_fee_kes)}</span></div>
       <div class="divider"></div>
@@ -9589,16 +9608,20 @@
     contactData = { email, phone_number: phone };
 
     renderPaymentSummary();
-    // reset payment UI
+    // Show a loading state immediately — the iframe loads itself, no gate.
+    // If startCardPayment fails (Turnstile, mode/key, etc.) the user gets a
+    // retry button via the error path inside startCardPayment.
     document.getElementById('card-iframe-wrap').innerHTML = `
-      <div>
-        <button class="btn btn-primary btn-lg" id="card-start-btn" onclick="startCardPayment()">Pay with card</button>
-        <div style="font-size:12px;color:var(--text-3);margin-top:14px;">Card details are handled by Pesapal. TumaFly never sees your card.</div>
+      <div style="display:flex;align-items:center;justify-content:center;padding:24px;color:var(--text-2);">
+        <div class="spinner" style="margin-right:10px;"></div>
+        Loading secure payment…
       </div>
     `;
     document.getElementById('poll-area').classList.add('hidden');
     clearAlert('payment-alert');
     showView('payment');
+    // Auto-load Pesapal iframe — no "Pay with card" click required
+    startCardPayment();
   }
 
   function selectPayTab(tab) {
@@ -9639,7 +9662,15 @@
       if (!res.ok || data.error || !data.redirect_url) {
         // Reset so the next attempt gets a fresh token
         resetTurnstile('payment');
-        return showAlert('payment-alert', data.error || 'Could not start payment. Please try again.');
+        showAlert('payment-alert', data.error || 'Could not start payment. Please try again.');
+        // No more "Pay with card" gate — surface a retry button inline since
+        // auto-load just failed and the loading spinner would otherwise hang.
+        document.getElementById('card-iframe-wrap').innerHTML = `
+          <div style="text-align:center;padding:18px;">
+            <button class="btn btn-primary btn-lg" onclick="resetPaymentPane()">Try again</button>
+          </div>
+        `;
+        return;
       }
       activeMerchantRef = data.merchant_ref;
       if (data.breakdown) renderPaymentSummary(data.breakdown);
@@ -9657,6 +9688,11 @@
       startPolling();
     } catch (e) {
       showAlert('payment-alert', 'Could not connect. Please check your network and try again.');
+      document.getElementById('card-iframe-wrap').innerHTML = `
+        <div style="text-align:center;padding:18px;">
+          <button class="btn btn-primary btn-lg" onclick="resetPaymentPane()">Try again</button>
+        </div>
+      `;
     } finally {
       if (btn) { btn.classList.remove('btn-loading'); btn.disabled = false; }
     }
@@ -9733,14 +9769,16 @@
 
   function resetPaymentPane() {
     activeMerchantRef = null;
+    // Show loading state and retry the iframe load — same as fresh entry
     document.getElementById('card-iframe-wrap').innerHTML = `
-      <div>
-        <button class="btn btn-primary btn-lg" id="card-start-btn" onclick="startCardPayment()">Pay with card</button>
-        <div style="font-size:12px;color:var(--text-3);margin-top:14px;">Card details are handled by Pesapal. TumaFly never sees your card.</div>
+      <div style="display:flex;align-items:center;justify-content:center;padding:24px;color:var(--text-2);">
+        <div class="spinner" style="margin-right:10px;"></div>
+        Reloading secure payment…
       </div>
     `;
     document.getElementById('poll-area').classList.add('hidden');
     clearAlert('payment-alert');
+    startCardPayment();
   }
 
   // ============================================================
@@ -10533,6 +10571,47 @@
     if (which === 'search') turnstileSearchToken = '';
     else turnstilePaymentToken = '';
   }
+
+  // ── Pesapal callback handler ───────────────────────────────────────────
+  // After a successful sandbox/production payment, Pesapal forces a top-level
+  // browser redirect to our callback_url. We point that at `/?ref=...` (root
+  // path) so it never 404s. On boot, detect Pesapal's appended params and
+  // rehydrate the success view from the merchant reference. Without this,
+  // the redirect blows away the in-iframe success state the user already saw.
+  (function handlePesapalCallback() {
+    try {
+      const params = new URLSearchParams(location.search);
+      const ref = params.get('OrderMerchantReference') || params.get('ref');
+      // Only fire when we actually have a Pesapal-style merchant ref + tracking
+      const trackingId = params.get('OrderTrackingId');
+      if (!ref || !trackingId) return;
+
+      // Clean the URL so a manual refresh doesn't re-trigger this path
+      history.replaceState(null, '', location.pathname);
+
+      activeMerchantRef = ref;
+      // Pre-fill the success view with the merchant ref so something is visible
+      // immediately. The proper PNR (booking_reference) overwrites it below.
+      const refSlot = document.getElementById('success-ref');
+      if (refSlot) refSlot.textContent = ref;
+      showView('success');
+
+      // Fetch the booking so we can display the real PNR. payment-status
+      // returns { state, booking: { booking_reference } } on success.
+      fetch(`${SUPABASE_URL}/functions/v1/payment-status?ref=${encodeURIComponent(ref)}`, {
+        headers: { 'Authorization': `Bearer ${SUPABASE_ANON_KEY}` },
+      })
+        .then(r => r.json())
+        .then(data => {
+          if (data?.booking?.booking_reference && refSlot) {
+            refSlot.textContent = data.booking.booking_reference;
+          }
+        })
+        .catch(() => { /* fallback to merchant ref already shown */ });
+    } catch (e) {
+      console.warn('Pesapal callback handler failed:', e);
+    }
+  })();
 
 </script>
 

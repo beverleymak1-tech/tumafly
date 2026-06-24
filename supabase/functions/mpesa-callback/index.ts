@@ -33,6 +33,45 @@ async function alertFounder(alertType: string, context: Record<string, unknown>)
   }
 }
 
+// ── Mode/key mismatch guard ───────────────────────────────────────────────
+// Fires once at cold start if DUFFEL_MODE doesn't match the key prefix.
+// All requests refused with 503 + one CRITICAL alert per cold start.
+let MODE_KEY_OK = true;
+let MODE_KEY_REASON = "";
+{
+  const isTestKey = DUFFEL_API_KEY.startsWith("duffel_test_");
+  const isLiveKey = DUFFEL_API_KEY.startsWith("duffel_live_");
+  if (!DUFFEL_API_KEY) {
+    MODE_KEY_OK = false;
+    MODE_KEY_REASON = "DUFFEL_API_KEY not set";
+  } else if (DUFFEL_MODE === "sandbox" && !isTestKey) {
+    MODE_KEY_OK = false;
+    MODE_KEY_REASON = "DUFFEL_MODE=sandbox but DUFFEL_API_KEY is not a test key";
+  } else if (DUFFEL_MODE === "production" && !isLiveKey) {
+    MODE_KEY_OK = false;
+    MODE_KEY_REASON = "DUFFEL_MODE=production but DUFFEL_API_KEY is not a live key";
+  } else if (DUFFEL_MODE !== "sandbox" && DUFFEL_MODE !== "production") {
+    MODE_KEY_OK = false;
+    MODE_KEY_REASON = `DUFFEL_MODE has unexpected value: "${DUFFEL_MODE}"`;
+  }
+}
+let modeKeyAlertFired = false;
+
+async function checkDuffelModeKeyMismatch(
+  _alertFn: typeof alertFounder,
+  source: string,
+): Promise<Response | null> {
+  if (MODE_KEY_OK) return null;
+  if (!modeKeyAlertFired) {
+    modeKeyAlertFired = true;
+    await alertFounder("DUFFEL_MODE_KEY_MISMATCH", { source, reason: MODE_KEY_REASON });
+  }
+  return new Response(
+    JSON.stringify({ error: "Service temporarily unavailable. Please try again shortly." }),
+    { status: 503, headers: { ...CORS_HEADERS, "Content-Type": "application/json" } },
+  );
+}
+
 // Daraja expects this exact response shape to acknowledge the callback
 function darajaAck() {
   return new Response(
