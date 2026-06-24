@@ -440,11 +440,26 @@ serve(async (req) => {
       })
       .eq("id", pending.id);
 
-    // 11. Send confirmation email. Wrapped in EdgeRuntime.waitUntil so the
-    // fetch survives the response (Supabase Edge Runtime aborts in-flight
-    // fetches when the handler returns — a bare `fetch().catch()` would
-    // silently drop the email before it leaves the box). Daraja still gets
-    // a fast callback ack because waitUntil doesn't block the response.
+    // 11. Send confirmation eTicket email. See pesapal-webhook for the full
+    // explanation — same EdgeRuntime.waitUntil pattern, same rich payload
+    // structure for the eTicket template.
+    //
+    // Note: `storedSeats` and `storedBaggages` are already declared higher up
+    // (around line 300) for the Duffel order construction — reuse them here.
+    const seatsKes = storedSeats.reduce((sum, s) => sum + (Number(s.cost_kes) || 0), 0);
+    const baggageKes = storedBaggages.reduce((sum, b) => sum + (Number(b.total_kes) || 0), 0);
+    const baggageQty = storedBaggages.reduce((sum, b) => sum + (Number(b.quantity) || 0), 0);
+    const flightKes = Math.max(0, (Number(pending.base_amount_kes) || 0) - seatsKes - baggageKes);
+    const breakdown_kes = {
+      flight: flightKes,
+      seats: seatsKes,
+      baggage: baggageKes,
+      baggage_qty: baggageQty,
+      service_fee: Number(pending.service_fee_kes) || 0,
+      processing_fee: Number(pending.processing_fee_kes) || 0,
+      total: Number(pending.total_kes) || 0,
+    };
+
     const sendEmailPromise = fetch(SEND_CONFIRMATION_URL, {
       method: "POST",
       headers: {
@@ -453,20 +468,9 @@ serve(async (req) => {
       },
       body: JSON.stringify({
         to: pending.contact.email,
-        booking_reference: order.booking_reference,
-        airline: order.owner.name,
-        origin: outbound.origin.iata_code,
-        destination: outbound.destination.iata_code,
-        departure: outboundSeg.departing_at,
-        arrival: outbound.segments[outbound.segments.length - 1].arriving_at,
-        return_airline: returnSlice ? order.owner.name : null,
-        return_departure: returnSeg?.departing_at || null,
-        return_arrival: returnSlice
-          ? returnSlice.segments[returnSlice.segments.length - 1].arriving_at
-          : null,
-        passengers: order.passengers,
-        trip_type: returnSlice ? "round" : "one_way",
-        total_kes: pending.total_kes,
+        order,
+        pending: { seats: storedSeats, baggages: storedBaggages },
+        breakdown_kes,
       }),
     }).catch(err => console.error("Email send failed (non-blocking):", err));
 
