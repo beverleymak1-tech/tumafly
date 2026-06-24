@@ -2146,6 +2146,260 @@
     }
     .seat-cta-btn:last-child { margin-right: 0; }
 
+    /* ──────────────────────────────────────────────────────────────
+       BAGGAGE — parallels seat styles (rows + modal + stepper)
+       ────────────────────────────────────────────────────────────── */
+    .bag-row {
+      display: flex;
+      align-items: center;
+      gap: 14px;
+      padding: 14px 0;
+      border-top: 1px solid var(--border);
+    }
+    .bag-row:first-child { border-top: none; }
+    .bag-row-icon {
+      width: 36px;
+      height: 36px;
+      border-radius: 8px;
+      background: var(--brand-soft);
+      color: var(--brand-dark);
+      display: grid;
+      place-items: center;
+      flex-shrink: 0;
+    }
+    .bag-row-info { flex: 1; min-width: 0; }
+    .bag-row-name {
+      font-size: 14px;
+      font-weight: 600;
+      color: var(--ink);
+    }
+    .bag-row-meta {
+      font-size: 13px;
+      color: var(--text-3);
+      margin-top: 2px;
+    }
+    .bag-row-status {
+      font-size: 13px;
+      color: var(--brand-dark);
+      font-weight: 600;
+      white-space: nowrap;
+    }
+    .bag-row-status.empty { color: var(--text-3); font-weight: 400; font-style: italic; }
+    .bag-row-cta {
+      font-family: inherit;
+      font-size: 13px;
+      font-weight: 600;
+      padding: 6px 12px;
+      background: var(--brand-soft);
+      color: var(--brand-dark);
+      border: 1px solid var(--brand);
+      border-radius: var(--radius-sm);
+      cursor: pointer;
+      white-space: nowrap;
+    }
+    .bag-row-cta:hover { background: var(--brand); color: white; }
+
+    .bag-upsell {
+      display: flex;
+      align-items: flex-start;
+      gap: 8px;
+      font-size: 13px;
+      color: var(--brand-dark);
+      font-weight: 600;
+      margin: 14px 0 12px;
+      line-height: 1.4;
+    }
+    .bag-upsell svg { flex-shrink: 0; margin-top: 1px; color: var(--brand); }
+    .bag-cta-btn {
+      margin-right: 10px;
+      margin-top: 4px;
+    }
+    .bag-cta-btn:last-child { margin-right: 0; }
+
+    /* Empty / unavailable fallback inside the Baggage card */
+    .bag-empty-note {
+      font-size: 13px;
+      color: var(--text-3);
+      line-height: 1.5;
+      padding: 10px 0 2px;
+    }
+
+    /* Baggage modal — same backdrop/surface as seat modal */
+    .bag-modal-backdrop {
+      position: fixed;
+      inset: 0;
+      background: rgba(15, 23, 42, 0.6);
+      z-index: 200;
+      display: grid;
+      place-items: center;
+      padding: 16px;
+    }
+    .bag-modal {
+      background: var(--surface);
+      border-radius: var(--radius-md);
+      width: 100%;
+      max-width: 620px;
+      max-height: 92vh;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+    .bag-modal-head {
+      padding: 18px 22px;
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      flex-shrink: 0;
+    }
+    .bag-modal-title {
+      font-size: 17px;
+      font-weight: 600;
+      color: var(--ink);
+    }
+    .bag-modal-sub {
+      font-size: 13px;
+      color: var(--text-3);
+      margin-top: 2px;
+    }
+    .bag-modal-close {
+      width: 32px;
+      height: 32px;
+      border: none;
+      background: transparent;
+      cursor: pointer;
+      color: var(--text-2);
+      border-radius: 50%;
+      display: grid;
+      place-items: center;
+      flex-shrink: 0;
+    }
+    .bag-modal-close:hover { background: var(--bg); color: var(--ink); }
+
+    /* Pax tabs at top of baggage modal */
+    .bag-modal-tabs {
+      display: flex;
+      gap: 4px;
+      padding: 12px 22px 4px;
+      border-bottom: 1px solid var(--border);
+      overflow-x: auto;
+      flex-wrap: nowrap;
+      flex-shrink: 0;
+    }
+    .bag-modal-tab {
+      font-family: inherit;
+      font-size: 13px;
+      font-weight: 500;
+      padding: 8px 14px;
+      background: transparent;
+      border: none;
+      border-bottom: 2px solid transparent;
+      color: var(--text-2);
+      cursor: pointer;
+      white-space: nowrap;
+      min-height: 44px;
+    }
+    .bag-modal-tab.active {
+      color: var(--brand-dark);
+      border-bottom-color: var(--brand);
+    }
+
+    .bag-modal-body {
+      padding: 16px 22px;
+      overflow-y: auto;
+      flex: 1;
+    }
+
+    /* Baggage option card inside the modal */
+    .bag-option {
+      display: flex;
+      align-items: center;
+      gap: 14px;
+      padding: 14px 16px;
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      margin-bottom: 10px;
+      background: var(--surface);
+    }
+    .bag-option.selected {
+      border-color: var(--brand);
+      background: var(--brand-soft);
+    }
+    .bag-option-left { flex: 1; min-width: 0; }
+    .bag-option-weight {
+      font-size: 15px;
+      font-weight: 600;
+      color: var(--ink);
+    }
+    .bag-option-type {
+      font-size: 13px;
+      color: var(--text-3);
+      margin-top: 3px;
+    }
+    .bag-option-price {
+      font-size: 15px;
+      font-weight: 600;
+      color: var(--ink);
+      white-space: nowrap;
+      margin-right: 14px;
+    }
+    .bag-option-stepper {
+      display: flex;
+      align-items: center;
+      gap: 0;
+      border: 1px solid var(--border);
+      border-radius: 999px;
+      background: var(--surface);
+      overflow: hidden;
+      flex-shrink: 0;
+    }
+    .bag-step-btn {
+      width: 34px;
+      height: 34px;
+      border: none;
+      background: transparent;
+      font-size: 18px;
+      font-weight: 600;
+      color: var(--ink);
+      cursor: pointer;
+      display: grid;
+      place-items: center;
+      font-family: inherit;
+    }
+    .bag-step-btn:disabled { color: var(--text-3); cursor: not-allowed; }
+    .bag-step-btn:hover:not(:disabled) { background: var(--bg); }
+    .bag-step-qty {
+      min-width: 24px;
+      text-align: center;
+      font-size: 14px;
+      font-weight: 600;
+      color: var(--ink);
+    }
+
+    .bag-modal-foot {
+      padding: 14px 22px;
+      border-top: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      flex-shrink: 0;
+    }
+    .bag-modal-total {
+      font-size: 14px;
+      color: var(--text-2);
+    }
+    .bag-modal-total strong { color: var(--ink); font-weight: 700; }
+    .bag-modal-fallback {
+      padding: 24px;
+      text-align: center;
+      color: var(--text-3);
+      font-size: 14px;
+      line-height: 1.5;
+    }
+    .bag-modal-fallback strong { color: var(--ink); font-size: 15px; display: block; margin-bottom: 8px; }
+
 
     .seat-modal-backdrop {
       position: fixed;
@@ -4257,6 +4511,28 @@
       }
       .seat-cta-btn:last-child { margin-bottom: 0; }
 
+      /* Baggage card CTAs — same pattern as seats on mobile */
+      .bag-cta-btn {
+        display: block;
+        width: 100%;
+        margin-right: 0;
+        margin-bottom: 10px;
+        min-height: 48px;
+      }
+      .bag-cta-btn:last-child { margin-bottom: 0; }
+      .bag-row-cta { min-height: 44px; }
+
+      /* Baggage modal — full-screen on mobile like seat modal */
+      .bag-modal-backdrop { padding: 0; align-items: flex-end; }
+      .bag-modal {
+        max-width: 100%;
+        max-height: 100vh;
+        height: 100vh;
+        border-radius: 0;
+      }
+      .bag-option { padding: 12px 14px; }
+      .bag-step-btn { width: 40px; height: 40px; min-height: 40px; }
+
       /* Bottom CTA bar — fixed to viewport bottom, not sticky (sticky misbehaves
          inside grid/overflow containers on mobile browsers) */
       .booking-cta-bar {
@@ -4803,7 +5079,8 @@
             </svg>
             <h3>Baggage</h3>
           </div>
-          <p class="sub" style="margin-top:6px;">If you're travelling with bags, you can add them on the airline's website after completing your purchase. Additional fees may apply depending on the airline and fare.</p>
+          <p class="sub" style="margin-top:6px;">Available baggage options for this flight. Selection may not be available on every airline; in that case extra bags can be added at check-in.</p>
+          <div id="baggage-list"></div>
         </div>
 
         <div class="card">
@@ -5410,6 +5687,21 @@
   let seatMapsByOffer = {};     // { [offerId]: rawResponse }
   let seatMapsData = {};        // { [segmentId]: normalisedSegment }
   let seatModalState = null;
+
+  // ── Baggage selection state — parallel to seats ─────────────────────────
+  // selectedBaggages: { [paxIdx]: { [service_id]: quantity } }  (stepper-driven)
+  // baggageOptionsByOffer: cached raw EF response keyed by offer_id
+  // baggageOptionsByPax: re-indexed by frontend pax index after correlation
+  //   { [paxIdx]: [BaggageOption, ...] }
+  // baggageModalState: null when closed, otherwise { activePaxIdx, draft: {paxIdx:{svc_id:qty}} }
+  // baggageOfferId: which offer's services we loaded (the booking offer)
+  // baggagePassengerIds: ordered array of Duffel passenger_id strings (index matches paxIdx)
+  let selectedBaggages = {};
+  let baggageOptionsByOffer = {};
+  let baggageOptionsByPax = {};
+  let baggageModalState = null;
+  let baggageOfferId = null;
+  let baggagePassengerIds = [];
 
   // Autocomplete state
   let airportsData = null;
@@ -6611,6 +6903,16 @@
     if (seatModalState && typeof renderSeatModal === 'function') {
       renderSeatModal();
     }
+    // If baggage modal is open, re-render to update prices + total
+    if (baggageModalState && typeof renderBaggageModal === 'function') {
+      renderBaggageModal();
+    }
+    // If booking view is showing and we have baggage options, refresh the card
+    // (status row shows total in current currency)
+    if (typeof renderBaggageList === 'function' &&
+        !document.getElementById('view-booking')?.classList.contains('hidden')) {
+      renderBaggageList();
+    }
     // If fare bottom-sheet is open, re-render so flexibility fees update with currency
     if (_lastFareSheet && document.getElementById('fare-bottom-sheet')) {
       openFareSheet(_lastFareSheet.flightKey, _lastFareSheet.kind);
@@ -7451,12 +7753,19 @@
 
     renderPassengerForms();
     renderSeatsList();
+    renderBaggageList();        // initial render with empty/loading state
     renderBookingSummary();
     showView('booking');
     // Populate the phone country-code dropdown (idempotent — no-op on subsequent visits)
     // Initialise the contact phone country picker (idempotent — sets the default
     // dial code + flag if not yet set, otherwise preserves whatever the user picked).
     initCountryPicker('contact', '+254');
+    // Kick off baggage options fetch in the background — when it arrives, the
+    // Baggage card swaps from the static fallback to the active picker.
+    loadBaggageForBookingOffer().then(() => {
+      renderBaggageList();
+      renderBookingSummary();
+    });
   }
 
   // Renders a row per slice (Outbound + Return if round-trip) inside the Seats card.
@@ -7910,6 +8219,383 @@
       }
     }
     return out;
+  }
+
+  // ============================================================
+  // BAGGAGE FLOW — parallels seat flow
+  // ============================================================
+  //
+  // Lifecycle:
+  //   proceedToBooking() → loadBaggageForBookingOffer() → renderBaggageList()
+  //   user taps "Add bags" → openBaggageModal() → renderBaggageModal()
+  //     • per-passenger tabs, stepper-driven cards
+  //     • Done commits draft to selectedBaggages
+  //   selectedBaggages flows into create-payment via collectBaggageSelections()
+  //
+  // Selection shape: { [paxIdx]: { [service_id]: quantity } }
+  //   - quantity is bounded by option.max_quantity (returned by the EF)
+  //   - per-quantity Duffel patterns also work: max_quantity=1 acts as a toggle
+
+  function bagsLabelForType(t) {
+    const m = { checked: 'Checked bag', carry_on: 'Carry-on bag', personal_item: 'Personal item' };
+    return m[t] || (t ? t.charAt(0).toUpperCase() + t.slice(1).replace(/_/g, ' ') : 'Bag');
+  }
+
+  // Convert a baggage option's cost to KES. EF populates cost_kes when it can;
+  // when null, we fall back to rateInfo for USD, or honest passthrough for other
+  // currencies. Mirrors the formatFlexFee logic used in fare cards.
+  function bagOptionCostKes(opt) {
+    if (opt.cost_kes != null) return opt.cost_kes;
+    const amt = parseFloat(opt.cost_amount) || 0;
+    const cur = (opt.cost_currency || '').toUpperCase();
+    if (cur === 'KES') return amt;
+    if (cur === 'USD' && rateInfo?.kesToUsd) return amt / rateInfo.kesToUsd;
+    return 0; // unknown currency — we display the original price string, but for
+              // total-math purposes we 0 it out client-side; create-payment
+              // re-validates from Duffel authoritatively.
+  }
+
+  function bagOptionPriceLabel(opt) {
+    const cur = (opt.cost_currency || '').toUpperCase();
+    // KES/USD: route through formatKes so the currency toggle applies
+    if (cur === 'KES' || cur === 'USD' || opt.cost_kes != null) {
+      return formatKes(bagOptionCostKes(opt));
+    }
+    // Other currency: show original amount tagged with code (e.g. GBP 25.00)
+    const amt = parseFloat(opt.cost_amount) || 0;
+    return `${cur} ${amt.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  }
+
+  // Sum total KES across all selected baggages
+  function baggageTotalCostKes() {
+    let total = 0;
+    for (const paxIdx of Object.keys(selectedBaggages)) {
+      const opts = baggageOptionsByPax[paxIdx] || [];
+      const sel = selectedBaggages[paxIdx] || {};
+      for (const svcId of Object.keys(sel)) {
+        const opt = opts.find(o => o.service_id === svcId);
+        if (!opt) continue;
+        total += bagOptionCostKes(opt) * sel[svcId];
+      }
+    }
+    return total;
+  }
+
+  // Returns array sent to create-payment for server-side re-validation
+  function collectBaggageSelections() {
+    const out = [];
+    for (const paxIdx of Object.keys(selectedBaggages)) {
+      const sel = selectedBaggages[paxIdx] || {};
+      for (const svcId of Object.keys(sel)) {
+        const qty = sel[svcId];
+        if (qty > 0) {
+          out.push({
+            passenger_index: Number(paxIdx),
+            service_id: svcId,
+            quantity: qty,
+          });
+        }
+      }
+    }
+    return out;
+  }
+
+  // Fetch baggage options for the booking offer (the offer paired with the user's
+  // final outbound + return selection). Mirrors loadSeatMapForOffer.
+  async function loadBaggageForBookingOffer() {
+    const offerId = (selectedInbound || selectedOutbound)?.cabinPricing?.offer_id;
+    if (!offerId) return;
+    baggageOfferId = offerId;
+    if (baggageOptionsByOffer[offerId]) {
+      indexBaggageOptionsByPax();
+      return;
+    }
+    try {
+      const res = await fetch(`${SUPABASE_URL}/functions/v1/get-baggage-options`, {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${SUPABASE_ANON_KEY}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          offer_id: offerId,
+          kes_to_usd: rateInfo?.kesToUsd || null,
+        }),
+      });
+      const data = await res.json();
+      baggageOptionsByOffer[offerId] = data;
+    } catch (e) {
+      console.warn('Failed to load baggage options', e);
+      baggageOptionsByOffer[offerId] = { baggages_by_passenger: {}, passengers: [] };
+    }
+    indexBaggageOptionsByPax();
+  }
+
+  // Map Duffel passenger_id strings (returned by EF) to our pax indices (0..n-1)
+  // by their order in offer.passengers — same approach used elsewhere when we
+  // need to zip frontend pax order to Duffel IDs.
+  function indexBaggageOptionsByPax() {
+    baggageOptionsByPax = {};
+    const data = baggageOptionsByOffer[baggageOfferId];
+    if (!data) return;
+    const ordered = Array.isArray(data.passengers) ? data.passengers : [];
+    baggagePassengerIds = ordered.map(p => p.id);
+    const byPassenger = data.baggages_by_passenger || {};
+    ordered.forEach((p, idx) => {
+      baggageOptionsByPax[idx] = byPassenger[p.id] || [];
+    });
+  }
+
+  function baggageAnyOptionsAvailable() {
+    if (!baggageOfferId) return false;
+    for (const idx of Object.keys(baggageOptionsByPax)) {
+      if ((baggageOptionsByPax[idx] || []).length > 0) return true;
+    }
+    return false;
+  }
+
+  // Render the Baggage card body — either status rows + CTA group, or
+  // the static fallback note (mode kept identical to pre-baggage build).
+  function renderBaggageList() {
+    const slot = document.getElementById('baggage-list');
+    if (!slot) return;
+    if (!baggageAnyOptionsAvailable()) {
+      slot.innerHTML = `
+        <div class="bag-empty-note">
+          If you're travelling with bags, you can add them on the airline's website after completing your purchase. Additional fees may apply depending on the airline and fare.
+        </div>
+      `;
+      return;
+    }
+
+    // Status rows: one per passenger summarising their bag selection (if any)
+    const rows = Array.from({ length: passengerCount }).map((_, i) => {
+      const opts = baggageOptionsByPax[i] || [];
+      const sel = selectedBaggages[i] || {};
+      const count = Object.values(sel).reduce((a, b) => a + b, 0);
+      const totalForPax = Object.keys(sel).reduce((sum, svcId) => {
+        const o = opts.find(x => x.service_id === svcId);
+        return sum + (o ? bagOptionCostKes(o) * sel[svcId] : 0);
+      }, 0);
+      const traveler = passengerData[i] || travelerStates[i]?.data || {};
+      const name = (traveler.given_name || `Traveler ${i + 1}`) + (traveler.family_name ? ' ' + traveler.family_name : '');
+
+      let statusHtml;
+      if (count > 0) {
+        statusHtml = `<div class="bag-row-status">${count} bag${count > 1 ? 's' : ''} · ${formatKes(totalForPax)}</div>
+          <button type="button" class="bag-row-cta" onclick="openBaggageModal(${i})">Change</button>`;
+      } else if (opts.length === 0) {
+        statusHtml = `<div class="bag-row-status empty">Not available</div>`;
+      } else {
+        statusHtml = `<span class="seat-row-dash">—</span>`;
+      }
+
+      return `
+        <div class="bag-row">
+          <div class="bag-row-icon">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+              <rect x="5" y="8" width="14" height="12" rx="1.5" stroke="currentColor" stroke-width="1.7"/>
+              <path d="M9 8V5.5a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1V8" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/>
+            </svg>
+          </div>
+          <div class="bag-row-info">
+            <div class="bag-row-name">${escapeHtml(name)}</div>
+            <div class="bag-row-meta">${opts.length > 0 ? `${opts.length} option${opts.length > 1 ? 's' : ''} available` : 'Add at airline check-in'}</div>
+          </div>
+          ${statusHtml}
+        </div>
+      `;
+    }).join('');
+
+    // Show CTA group only if at least one pax has options + no selection yet
+    const anyWithOptionsUnpicked = Array.from({ length: passengerCount }).some((_, i) => {
+      const opts = baggageOptionsByPax[i] || [];
+      const sel = selectedBaggages[i] || {};
+      const count = Object.values(sel).reduce((a, b) => a + b, 0);
+      return opts.length > 0 && count === 0;
+    });
+
+    const ctaGroup = anyWithOptionsUnpicked ? `
+      <div class="bag-upsell">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+          <path d="M7 7h10M7 12h6" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+          <circle cx="18" cy="18" r="5" fill="var(--brand)" stroke="none"/>
+          <path d="M18 15v3l2 1" stroke="white" stroke-width="1.5" stroke-linecap="round"/>
+        </svg>
+        <span>Add checked or carry-on bags now — often cheaper than at the airport.</span>
+      </div>
+      <button type="button" class="btn btn-primary bag-cta-btn" onclick="openBaggageModal(0)">Add bags now</button>
+      <button type="button" class="btn btn-secondary bag-cta-btn" onclick="skipBags()">Continue without bags</button>
+    ` : '';
+
+    slot.innerHTML = rows + ctaGroup;
+  }
+
+  // "Continue without bags" — clear partial selection + proceed to payment.
+  // Parallels skipSeats(). On the booking page this just goes to payment.
+  function skipBags() {
+    selectedBaggages = {};
+    renderBaggageList();
+    renderBookingSummary();
+    goToPayment();
+  }
+
+  // Open baggage modal. Holds a draft state so users can cancel without
+  // mutating selectedBaggages (parallel to how the seat modal commits on Done).
+  function openBaggageModal(paxIdx) {
+    if (!baggageAnyOptionsAvailable()) return;
+    // Deep-clone current selections into the modal draft
+    const draft = {};
+    for (const k of Object.keys(selectedBaggages)) {
+      draft[k] = { ...(selectedBaggages[k] || {}) };
+    }
+    baggageModalState = {
+      activePaxIdx: paxIdx || 0,
+      draft,
+    };
+    renderBaggageModal();
+  }
+
+  function closeBaggageModal() {
+    baggageModalState = null;
+    const el = document.getElementById('bag-modal-root');
+    if (el) el.remove();
+  }
+
+  function switchBaggageModalPax(paxIdx) {
+    if (!baggageModalState) return;
+    baggageModalState.activePaxIdx = paxIdx;
+    renderBaggageModal();
+  }
+
+  // Stepper: change quantity for a service in the draft
+  function adjustBaggageQty(paxIdx, serviceId, delta) {
+    if (!baggageModalState) return;
+    const opts = baggageOptionsByPax[paxIdx] || [];
+    const opt = opts.find(o => o.service_id === serviceId);
+    if (!opt) return;
+    if (!baggageModalState.draft[paxIdx]) baggageModalState.draft[paxIdx] = {};
+    const cur = baggageModalState.draft[paxIdx][serviceId] || 0;
+    const max = Math.max(1, opt.max_quantity || 1);
+    const next = Math.max(0, Math.min(max, cur + delta));
+    if (next === 0) {
+      delete baggageModalState.draft[paxIdx][serviceId];
+    } else {
+      baggageModalState.draft[paxIdx][serviceId] = next;
+    }
+    renderBaggageModal();
+  }
+
+  function commitBaggageSelection() {
+    if (!baggageModalState) return;
+    // Replace selectedBaggages with the draft (pruning empties)
+    const clean = {};
+    for (const k of Object.keys(baggageModalState.draft)) {
+      const row = baggageModalState.draft[k];
+      if (row && Object.keys(row).length > 0) clean[k] = row;
+    }
+    selectedBaggages = clean;
+    closeBaggageModal();
+    renderBaggageList();
+    renderBookingSummary();
+  }
+
+  // Compute draft total inside the modal (so the footer updates live as the
+  // user steps without mutating selectedBaggages)
+  function baggageDraftTotalKes() {
+    if (!baggageModalState) return 0;
+    let total = 0;
+    for (const paxIdx of Object.keys(baggageModalState.draft)) {
+      const opts = baggageOptionsByPax[paxIdx] || [];
+      const row = baggageModalState.draft[paxIdx] || {};
+      for (const svcId of Object.keys(row)) {
+        const opt = opts.find(o => o.service_id === svcId);
+        if (opt) total += bagOptionCostKes(opt) * row[svcId];
+      }
+    }
+    return total;
+  }
+
+  function renderBaggageModal() {
+    let root = document.getElementById('bag-modal-root');
+    if (root) root.remove();
+    if (!baggageModalState) return;
+
+    const { activePaxIdx, draft } = baggageModalState;
+
+    root = document.createElement('div');
+    root.id = 'bag-modal-root';
+    root.className = 'bag-modal-backdrop';
+    root.addEventListener('click', (e) => {
+      if (e.target === root) closeBaggageModal();
+    });
+
+    // Pax tabs
+    const tabsHtml = Array.from({ length: passengerCount }).map((_, i) => {
+      const traveler = passengerData[i] || travelerStates[i]?.data || {};
+      const name = traveler.given_name ? traveler.given_name : `Traveler ${i + 1}`;
+      const count = Object.values(draft[i] || {}).reduce((a, b) => a + b, 0);
+      const badge = count > 0 ? ` (${count})` : '';
+      return `<button type="button" class="bag-modal-tab ${i === activePaxIdx ? 'active' : ''}"
+        onclick="switchBaggageModalPax(${i})">${escapeHtml(name)}${badge}</button>`;
+    }).join('');
+
+    // Option cards for active pax
+    const opts = baggageOptionsByPax[activePaxIdx] || [];
+    const paxDraft = draft[activePaxIdx] || {};
+
+    let bodyHtml;
+    if (opts.length === 0) {
+      bodyHtml = `
+        <div class="bag-modal-fallback">
+          <strong>No paid baggage available for this traveller.</strong>
+          The airline will let you add bags at check-in.
+        </div>
+      `;
+    } else {
+      bodyHtml = opts.map(opt => {
+        const qty = paxDraft[opt.service_id] || 0;
+        const max = Math.max(1, opt.max_quantity || 1);
+        const weightLabel = opt.weight_kg
+          ? `${opt.weight_kg} kg <span style="color:var(--text-3);font-weight:400;">/ ${opt.weight_lbs} lbs</span>`
+          : bagsLabelForType(opt.bag_type);
+        const priceLabel = bagOptionPriceLabel(opt);
+        return `
+          <div class="bag-option ${qty > 0 ? 'selected' : ''}">
+            <div class="bag-option-left">
+              <div class="bag-option-weight">${weightLabel}</div>
+              <div class="bag-option-type">${escapeHtml(bagsLabelForType(opt.bag_type))}</div>
+            </div>
+            <div class="bag-option-price">${priceLabel}</div>
+            <div class="bag-option-stepper" role="group" aria-label="Quantity">
+              <button type="button" class="bag-step-btn" onclick="adjustBaggageQty(${activePaxIdx}, '${escapeHtml(opt.service_id)}', -1)" ${qty === 0 ? 'disabled' : ''} aria-label="Decrease">−</button>
+              <span class="bag-step-qty">${qty}</span>
+              <button type="button" class="bag-step-btn" onclick="adjustBaggageQty(${activePaxIdx}, '${escapeHtml(opt.service_id)}', 1)" ${qty >= max ? 'disabled' : ''} aria-label="Increase">+</button>
+            </div>
+          </div>
+        `;
+      }).join('');
+    }
+
+    const total = baggageDraftTotalKes();
+
+    root.innerHTML = `
+      <div class="bag-modal">
+        <div class="bag-modal-head">
+          <div>
+            <div class="bag-modal-title">Add bags</div>
+            <div class="bag-modal-sub">Pick per traveller</div>
+          </div>
+          <button type="button" class="bag-modal-close" onclick="closeBaggageModal()" aria-label="Close">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><path d="M6 6l12 12M6 18L18 6" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+          </button>
+        </div>
+        <div class="bag-modal-tabs">${tabsHtml}</div>
+        <div class="bag-modal-body">${bodyHtml}</div>
+        <div class="bag-modal-foot">
+          <div class="bag-modal-total">${total > 0 ? `Total baggage charges: <strong>${formatKes(total)}</strong>` : 'Optional — skip to add bags at check-in'}</div>
+          <button type="button" class="btn btn-primary" onclick="commitBaggageSelection()">Done</button>
+        </div>
+      </div>
+    `;
+    document.body.appendChild(root);
   }
 
   // Capture current form values into the state without saving (used before re-rendering
@@ -8413,12 +9099,14 @@
     // Seat selection fees roll into the base (treated as part of the flight price
     // for fee/tax purposes — Pesapal gross-up applies on the full subtotal).
     const seatsKes = seatTotalCostKes();
-    const subtotal = baseKes + seatsKes + TUMAFLY_SERVICE_FEE_KES;
+    const baggageKes = baggageTotalCostKes();
+    const subtotal = baseKes + seatsKes + baggageKes + TUMAFLY_SERVICE_FEE_KES;
     const processingFeeKes = Math.ceil(subtotal * PESAPAL_FEE_RATE / (1 - PESAPAL_FEE_RATE));
     const totalKes = subtotal + processingFeeKes;
     return {
       base_kes: baseKes,
       seats_kes: seatsKes,
+      baggage_kes: baggageKes,
       service_fee_kes: TUMAFLY_SERVICE_FEE_KES,
       processing_fee_kes: processingFeeKes,
       total_kes: totalKes,
@@ -8437,10 +9125,12 @@
     const b = breakdown || estimateBreakdown();
     const isEstimate = !breakdown && !opts.isPayment;
     const seatsKes = b.seats_kes || 0;
+    const baggageKes = b.baggage_kes || 0;
 
     const breakdownHtml = `
       <div class="line"><span class="label">Flight <span style="color:var(--text-3);font-size:12px;">(taxes included)</span></span><span class="value">${formatKes(b.base_kes)}</span></div>
       ${seatsKes > 0 ? `<div class="line"><span class="label">Seat selection</span><span class="value">${formatKes(seatsKes)}</span></div>` : ''}
+      ${baggageKes > 0 ? `<div class="line"><span class="label">Baggage</span><span class="value">${formatKes(baggageKes)}</span></div>` : ''}
       <div class="line"><span class="label">TumaFly service fee</span><span class="value">${formatKes(b.service_fee_kes)}</span></div>
       <div class="line"><span class="label">Payment processing</span><span class="value">${formatKes(b.processing_fee_kes)}</span></div>
       <div class="divider"></div>
@@ -8851,6 +9541,7 @@
           passengers: passengerData,
           contact: contactData,
           seats: collectSeatSelections(),
+          baggages: collectBaggageSelections(),
           turnstile_token: turnstileToken,
         }),
       });
