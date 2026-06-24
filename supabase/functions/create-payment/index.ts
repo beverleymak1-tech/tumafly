@@ -106,7 +106,7 @@ serve(async (req) => {
   const supabase = createClient(SUPABASE_URL, SERVICE_ROLE_KEY);
 
   try {
-    const { offer_id, passengers, contact, seats, turnstile_token } = await req.json();
+    const { offer_id, passengers, contact, seats, baggages, turnstile_token } = await req.json();
 
     // 1. Validate
     if (!offer_id || !passengers?.length || !contact?.email) {
@@ -131,8 +131,10 @@ serve(async (req) => {
       });
     }
 
-    // 2. Re-fetch offer to confirm validity & current price
-    const offerRes = await fetch(`${DUFFEL_BASE_URL}/air/offers/${offer_id}`, {
+    // 2. Re-fetch offer to confirm validity & current price. We also request
+    // `available_services` here so the baggage validation block (below) can
+    // re-cost selected baggage without a second offer round-trip.
+    const offerRes = await fetch(`${DUFFEL_BASE_URL}/air/offers/${offer_id}?return_available_services=true`, {
       headers: {
         Authorization: `Bearer ${DUFFEL_API_KEY}`,
         "Duffel-Version": "v2",
@@ -255,10 +257,108 @@ serve(async (req) => {
       }
     }
 
+    // 3b. Validate baggage selections — mirror the seat pattern. Each
+    // frontend submission is { passenger_index, service_id, quantity }; we
+    // re-cost from authoritative Duffel data, bound quantity by Duffel's
+    // maximum_quantity, and store on contact.baggages (no schema change).
+    // Sandbox soft-skip if the service is missing — Duffel test mode often
+    // omits baggage services from /air/orders even when they appear on the
+    // offer endpoint.
+    type ValidatedBaggage = {
+      passenger_index: number;
+      service_id: string;
+      quantity: number;
+      cost_kes: number;        // per-unit cost in KES
+      total_kes: number;       // cost_kes * quantity
+      original_amount: string; // per-unit Duffel amount
+      original_currency: string;
+    };
+    let validatedBaggages: ValidatedBaggage[] = [];
+    let baggageTotalKES = 0;
+    if (Array.isArray(baggages) && baggages.length > 0) {
+      // Build a service_id → { amount, currency, max_quantity } lookup from
+      // the offer's available_services we fetched in step 2.
+      const allServices: any[] = Array.isArray(offer.available_services)
+        ? offer.available_services
+        : [];
+      const baggageLookup: Record<string, {
+        amount: string;
+        currency: string;
+        max_quantity: number;
+        passenger_ids: string[];
+      }> = {};
+      for (const svc of allServices) {
+        if (svc?.type !== "baggage") continue;
+        const maxQ = Number(svc.maximum_quantity ?? svc.metadata?.maximum_quantity ?? 1) || 1;
+        baggageLookup[svc.id] = {
+          amount: svc.total_amount,
+          currency: svc.total_currency,
+          max_quantity: Math.max(1, Math.min(maxQ, 10)),
+          passenger_ids: Array.isArray(svc.passenger_ids) ? svc.passenger_ids : [],
+        };
+      }
+
+      for (const b of baggages) {
+        if (!b?.service_id) continue;
+        const qty = Number(b.quantity) || 0;
+        if (qty <= 0) continue;
+
+        const svc = baggageLookup[b.service_id];
+        if (!svc) {
+          if (DUFFEL_MODE === "sandbox") {
+            console.warn("Baggage service not re-found in re-validation (sandbox soft-skip):", b.service_id);
+            continue;
+          }
+          return new Response(JSON.stringify({
+            error: "A baggage selection is no longer available. Please reselect.",
+          }), {
+            status: 409,
+            headers: { ...CORS_HEADERS, "Content-Type": "application/json" },
+          });
+        }
+
+        // Bound quantity by Duffel's maximum_quantity (defensive — frontend
+        // already does this, but we trust nothing from the wire).
+        const boundedQty = Math.min(qty, svc.max_quantity);
+        if (boundedQty !== qty) {
+          console.warn("Baggage quantity capped to Duffel max:", b.service_id, qty, "→", boundedQty);
+        }
+
+        // Validate the passenger_index has a corresponding Duffel passenger_id
+        // that this service is actually offered for.
+        const duffelPaxId = offer.passengers?.[b.passenger_index]?.id;
+        if (duffelPaxId && svc.passenger_ids.length > 0 && !svc.passenger_ids.includes(duffelPaxId)) {
+          if (DUFFEL_MODE === "sandbox") {
+            console.warn("Baggage service not offered for this passenger (sandbox soft-skip):", b.service_id, duffelPaxId);
+            continue;
+          }
+          return new Response(JSON.stringify({
+            error: "A baggage selection isn't valid for the selected passenger. Please reselect.",
+          }), {
+            status: 409,
+            headers: { ...CORS_HEADERS, "Content-Type": "application/json" },
+          });
+        }
+
+        const perUnitKES = await toKES(parseFloat(svc.amount), svc.currency);
+        const lineKES = perUnitKES * boundedQty;
+        baggageTotalKES += lineKES;
+        validatedBaggages.push({
+          passenger_index: b.passenger_index,
+          service_id: b.service_id,
+          quantity: boundedQty,
+          cost_kes: perUnitKES,
+          total_kes: lineKES,
+          original_amount: svc.amount,
+          original_currency: svc.currency,
+        });
+      }
+    }
+
     // Roll seat costs into base — they're part of the airline-side cost for fee
     // and tax purposes (Pesapal gross-up applies on the full subtotal).
     const baseWithSeatsKES = baseAmountKES + seatsTotalKES;
-    const subtotal = baseWithSeatsKES + TUMAFLY_SERVICE_FEE_KES;
+    const subtotal = baseWithSeatsKES + baggageTotalKES + TUMAFLY_SERVICE_FEE_KES;
     // Gross-up: Pesapal charges rate on the total they receive, not on our subtotal.
     // So processingFee = subtotal * rate / (1 - rate) to ensure we net the full subtotal.
     const processingFeeKES = Math.ceil(subtotal * PESAPAL_FEE_RATE / (1 - PESAPAL_FEE_RATE));
@@ -267,9 +367,10 @@ serve(async (req) => {
     // 4. Insert pending_booking BEFORE Pesapal call (so webhook can always find it)
     const merchantRef = `TF-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 
-    // Stash seat selections on the contact JSON (no schema change). The webhook
-    // reads contact.seats when building the Duffel order's services array.
-    const contactWithSeats = { ...contact, seats: validatedSeats };
+    // Stash seat + baggage selections on the contact JSON (no schema change).
+    // The webhook reads contact.seats and contact.baggages when building the
+    // Duffel order's services array.
+    const contactWithSeats = { ...contact, seats: validatedSeats, baggages: validatedBaggages };
 
     const { data: pending, error: insertErr } = await supabase
       .from("pending_bookings")
@@ -278,7 +379,10 @@ serve(async (req) => {
         duffel_offer_id: offer_id,
         passengers,
         contact: contactWithSeats,
-        base_amount_kes: baseWithSeatsKES,
+        // base_amount_kes includes flight + seats + baggage (everything that
+        // flows to Duffel / the airline as services). Keeps the webhook's
+        // total-validation math straightforward.
+        base_amount_kes: baseWithSeatsKES + baggageTotalKES,
         service_fee_kes: TUMAFLY_SERVICE_FEE_KES,
         processing_fee_kes: processingFeeKES,
         total_kes: totalKES,
@@ -341,6 +445,7 @@ serve(async (req) => {
       breakdown: {
         base_kes: baseAmountKES,
         seats_kes: seatsTotalKES,
+        baggage_kes: baggageTotalKES,
         service_fee_kes: TUMAFLY_SERVICE_FEE_KES,
         processing_fee_kes: processingFeeKES,
         total_kes: totalKES,

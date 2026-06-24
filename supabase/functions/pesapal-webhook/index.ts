@@ -246,20 +246,24 @@ serve(async (req) => {
       phone_number: pending.contact.phone_number || null,
     }));
 
-    // 7a. Build seat services from the stashed seat selections (set by create-payment).
-    // Each entry on pending.contact.seats has passenger_index + service_id; we zip
-    // the index against offer.passengers to get the Duffel passenger.id Duffel needs.
-    // The total order amount has to include seat costs, otherwise the balance payment
-    // won't cover them and Duffel will reject the order.
+    // 7a. Build services from stashed seat + baggage selections (set by create-payment).
+    // Each seat entry on pending.contact.seats has passenger_index + service_id; each
+    // baggage entry on pending.contact.baggages has passenger_index + service_id + quantity.
+    // We zip the index against offer.passengers to get the Duffel passenger.id Duffel needs.
+    // The total order amount has to include seat AND baggage costs, otherwise the balance
+    // payment won't cover them and Duffel will reject the order.
     //
-    // SANDBOX BEHAVIOUR: Duffel test mode often issues seat services that aren't
+    // SANDBOX BEHAVIOUR: Duffel test mode often issues seat/baggage services that aren't
     // valid at /air/orders. We pass an empty services array AND keep offer total
-    // unchanged, so the order books cleanly without seats. The customer "selected"
+    // unchanged, so the order books cleanly without extras. The customer "selected"
     // them in the UI but no actual reservation happens — fine for dev testing.
     const storedSeats: any[] = Array.isArray(pending.contact?.seats) ? pending.contact.seats : [];
+    const storedBaggages: any[] = Array.isArray(pending.contact?.baggages) ? pending.contact.baggages : [];
     const services: Array<{ id: string; quantity: number; passenger_id: string }> = [];
-    let seatsAmountInOfferCurrency = 0;
+    let extrasAmountInOfferCurrency = 0;
     if (DUFFEL_MODE !== "sandbox") {
+      // Seats — always quantity 1 per service_id (Duffel issues a distinct service
+      // per (segment, passenger, seat) combination).
       for (const seat of storedSeats) {
         const dpax = offerPassengers[seat.passenger_index];
         if (!dpax || !seat.service_id) continue;
@@ -272,11 +276,27 @@ serve(async (req) => {
         // original_currency at create-payment time. Duffel always quotes seat services
         // in the same currency as the parent offer, so we treat them as additive.
         if (seat.original_amount) {
-          seatsAmountInOfferCurrency += parseFloat(seat.original_amount);
+          extrasAmountInOfferCurrency += parseFloat(seat.original_amount);
+        }
+      }
+      // Baggage — Duffel /air/orders accepts a quantity field for baggage services,
+      // so we pass the validated quantity through directly. original_amount is the
+      // per-unit price; multiply by quantity for the total contribution.
+      for (const bag of storedBaggages) {
+        const dpax = offerPassengers[bag.passenger_index];
+        if (!dpax || !bag.service_id) continue;
+        const qty = Number(bag.quantity) || 1;
+        services.push({
+          id: bag.service_id,
+          quantity: qty,
+          passenger_id: dpax.id,
+        });
+        if (bag.original_amount) {
+          extrasAmountInOfferCurrency += parseFloat(bag.original_amount) * qty;
         }
       }
     }
-    const orderTotalAmount = (parseFloat(offer.total_amount) + seatsAmountInOfferCurrency).toFixed(2);
+    const orderTotalAmount = (parseFloat(offer.total_amount) + extrasAmountInOfferCurrency).toFixed(2);
 
     const orderRes = await fetch(`${DUFFEL_BASE_URL}/air/orders`, {
       method: "POST",
@@ -317,6 +337,7 @@ serve(async (req) => {
         customer_phone: pending.contact.phone_number,
         passengers: pending.passengers,
         seat_selections: storedSeats,
+        baggage_selections: storedBaggages,
         duffel_error: orderData,
       });
 
