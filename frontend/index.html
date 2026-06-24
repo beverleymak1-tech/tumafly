@@ -1279,6 +1279,19 @@
       font-weight: 500;
     }
     .fc-line-iata.end { text-align: right; }
+    /* City subtitle under each IATA — shows e.g. "Lanseria" under HLA so
+       users know which Joburg-area airport the flight departs from. */
+    .fc-line-city {
+      font-size: 11px;
+      color: var(--text-3);
+      opacity: 0.75;
+      margin-top: 1px;
+      max-width: 90px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .fc-line-city.end { text-align: right; }
     .fc-line {
       position: relative;
       height: 8px;
@@ -5751,6 +5764,10 @@
   let rDestinationSelectedIata = null;
   // Generic map: input element id → selected IATA. Used by autocomplete.
   const apSelections = {};
+  // Parallel map: same keys as apSelections, value = true if the user picked
+  // a city group ("Johannesburg, All airports") vs false/undefined for a
+  // specific airport pick. Read by the search-result filter.
+  const apSelectionIsCityGroup = {};
 
   // Swap From ↔ To. Works on both home form and results summary bar.
   // Swaps the input values, the iata selection state, and the apSelections map entries.
@@ -6183,6 +6200,28 @@
     'jakarta|indonesia': 'JKT',
     'rome|italy': 'ROM',
     'houston|united states': 'HOU',
+    // African multi-airport cities. IATA uses the same code for the metro
+    // and the primary airport — passing the metro code to Duffel returns
+    // offers across every airport in the city. Without these, the picker
+    // falls back to airports[0] which is often a tiny secondary aerodrome
+    // (e.g. Joburg → GCJ Grand Central instead of JNB OR Tambo).
+    'johannesburg|south africa': 'JNB',  // JNB (OR Tambo) + HLA (Lanseria) + GCJ (Grand Central)
+    'nairobi|kenya': 'NBO',              // NBO (JKIA) + WIL (Wilson)
+    'lagos|nigeria': 'LOS',
+    'cairo|egypt': 'CAI',
+    'addis ababa|ethiopia': 'ADD',
+    'casablanca|morocco': 'CMN',
+    'accra|ghana': 'ACC',
+    'kigali|rwanda': 'KGL',
+    'dar es salaam|tanzania': 'DAR',
+    'kampala|uganda': 'EBB',
+    'lusaka|zambia': 'LUN',
+    'harare|zimbabwe': 'HRE',
+    'kinshasa|democratic republic of the congo': 'FIH',
+    'dakar|senegal': 'DKR',
+    'abidjan|ivory coast': 'ABJ',
+    'algiers|algeria': 'ALG',
+    'tunis|tunisia': 'TUN',
   };
 
   // Synthetic "city group" entries built at airports.json load time. Each entry
@@ -6451,6 +6490,12 @@
 
     input.value = displayLabel;
     apSelections[which] = storedIata;
+    // Track whether the pick was a city group (broad "all airports") or a
+    // specific airport. Used downstream by the search filter to decide
+    // whether to accept same-city alternatives:
+    //   - city group ("Johannesburg, All airports") → accept JNB + HLA + GCJ
+    //   - specific airport ("JNB - OR Tambo")       → accept JNB only
+    apSelectionIsCityGroup[which] = !!isGroup;
     if (which === 'origin') originSelectedIata = storedIata;
     else if (which === 'destination') destinationSelectedIata = storedIata;
     else if (which === 'r-origin') rOriginSelectedIata = storedIata;
@@ -6724,22 +6769,22 @@
       const rawOffers = data.offers || [];
       // Build the set of acceptable origin airport IATAs for this search.
       //
-      // - If the user picked a specific airport (e.g. JNB), we accept that
-      //   airport PLUS any other airports in the same city (e.g. HLA Lanseria
-      //   is also in Johannesburg — a legitimate alternative).
-      // - If the user picked an "All airports" city group, every airport in
-      //   that city is acceptable.
+      // - If the user picked a SPECIFIC airport ("JNB - OR Tambo"), we accept
+      //   ONLY that exact IATA. Searching JNB means OR Tambo, not Lanseria
+      //   or Grand Central — secondary airports may be 30-50km away.
+      // - If the user picked a CITY GROUP ("Johannesburg, All airports"),
+      //   we accept every airport in that city.
       // - If we have no airport data (network slow / pre-load failed), don't
       //   filter at all — better to show everything than hide real flights.
+      const originIsCityGroup = !!apSelectionIsCityGroup['origin'];
+      const destIsCityGroup   = !!apSelectionIsCityGroup['destination'];
+
       const acceptableOrigins = (() => {
         if (!airportsData || !airportsData.length) return null; // skip filter
         const searchedIata = origin?.toUpperCase();
         if (!searchedIata) return null;
         const set = new Set([searchedIata]);
-        // Find the city the searched IATA belongs to, then add every airport
-        // in that city. This handles both:
-        //   - specific airport pick (JNB) → add HLA, GCJ if same city
-        //   - city group pick (e.g. NYC) → city lookup finds all NYC airports
+        if (!originIsCityGroup) return set; // specific pick → strict
         const searched = airportsData.find(a => a.iata === searchedIata);
         if (searched) {
           const cityKey = `${searched.city}|${searched.country}`.toLowerCase();
@@ -6750,14 +6795,13 @@
         return set;
       })();
 
-      // Filter offers whose first segment doesn't depart from an acceptable
-      // airport for this search. Same logic applies to destination — drop
-      // offers that arrive at a non-acceptable airport.
+      // Same logic for destination — drop offers arriving at a non-acceptable airport.
       const acceptableDests = (() => {
         if (!airportsData || !airportsData.length) return null;
         const searchedIata = destination?.toUpperCase();
         if (!searchedIata) return null;
         const set = new Set([searchedIata]);
+        if (!destIsCityGroup) return set; // specific pick → strict
         const searched = airportsData.find(a => a.iata === searchedIata);
         if (searched) {
           const cityKey = `${searched.city}|${searched.country}`.toLowerCase();
@@ -6975,6 +7019,16 @@
   }
 
   function isAfrican(offer) { return AFRICAN_CARRIERS.includes(offer.airline); }
+
+  // Look up the city name for a given IATA code from the loaded airports
+  // dataset. Returns "" if the dataset hasn't loaded yet or the IATA isn't
+  // known — render-time consumers must handle the empty-string case so
+  // cards still display the IATA on its own when this fails.
+  function airportCity(iata) {
+    if (!iata || !airportsData) return '';
+    const a = airportsData.find(x => x.iata === iata.toUpperCase());
+    return a?.city || '';
+  }
 
   // ============================================================
   // AIRLINE FILTER (per-airline checkboxes)
@@ -7628,14 +7682,20 @@
                 <div class="fc-time end tabular">${formatTime(slice.arrival)}${dayOffset(slice.departure, slice.arrival).replace('vertical-align:super;', '')}</div>
               </div>
               <div class="fc-line-wrap">
-                <div class="fc-line-iata">${escapeHtml(slice.origin)}</div>
+                <div>
+                  <div class="fc-line-iata">${escapeHtml(slice.origin)}</div>
+                  <div class="fc-line-city">${escapeHtml(airportCity(slice.origin))}</div>
+                </div>
                 <div class="fc-line">
                   <span class="bar"></span>
                   <span class="endpoint left"></span>
                   ${renderStopDots(stops)}
                   <span class="endpoint right"></span>
                 </div>
-                <div class="fc-line-iata end">${escapeHtml(slice.destination)}</div>
+                <div>
+                  <div class="fc-line-iata end">${escapeHtml(slice.destination)}</div>
+                  <div class="fc-line-city end">${escapeHtml(airportCity(slice.destination))}</div>
+                </div>
               </div>
             </div>
             <div class="fc-cabins">${cabinCells}</div>
@@ -10573,45 +10633,55 @@
   }
 
   // ── Pesapal callback handler ───────────────────────────────────────────
-  // After a successful sandbox/production payment, Pesapal forces a top-level
-  // browser redirect to our callback_url. We point that at `/?ref=...` (root
-  // path) so it never 404s. On boot, detect Pesapal's appended params and
-  // rehydrate the success view from the merchant reference. Without this,
-  // the redirect blows away the in-iframe success state the user already saw.
-  (function handlePesapalCallback() {
-    try {
-      const params = new URLSearchParams(location.search);
-      const ref = params.get('OrderMerchantReference') || params.get('ref');
-      // Only fire when we actually have a Pesapal-style merchant ref + tracking
-      const trackingId = params.get('OrderTrackingId');
-      if (!ref || !trackingId) return;
+  // After payment, Pesapal forces a top-level browser redirect to our
+  // callback_url. We point that at `/?ref=...` (root path, never 404s).
+  // On boot, detect Pesapal's appended params and rehydrate the success
+  // view from the merchant reference.
+  //
+  // We use `window.addEventListener('load', ...)` instead of an IIFE so the
+  // handler runs AFTER all SPA init (default view, hashchange listeners,
+  // etc.) — an immediate IIFE was racing those and getting its showView
+  // call overridden, dumping the user back on the home view.
+  window.addEventListener('load', () => {
+    setTimeout(() => {
+      try {
+        const params = new URLSearchParams(location.search);
+        const ref = params.get('OrderMerchantReference') || params.get('ref');
+        if (!ref) return;
+        console.log('[Pesapal] Detected callback, merchant_ref=', ref);
 
-      // Clean the URL so a manual refresh doesn't re-trigger this path
-      history.replaceState(null, '', location.pathname);
+        // Clean URL so refresh doesn't re-trigger. Preserve any hash we set below.
+        history.replaceState(null, '', location.pathname);
 
-      activeMerchantRef = ref;
-      // Pre-fill the success view with the merchant ref so something is visible
-      // immediately. The proper PNR (booking_reference) overwrites it below.
-      const refSlot = document.getElementById('success-ref');
-      if (refSlot) refSlot.textContent = ref;
-      showView('success');
+        activeMerchantRef = ref;
+        const refSlot = document.getElementById('success-ref');
+        if (refSlot) refSlot.textContent = ref;
 
-      // Fetch the booking so we can display the real PNR. payment-status
-      // returns { state, booking: { booking_reference } } on success.
-      fetch(`${SUPABASE_URL}/functions/v1/payment-status?ref=${encodeURIComponent(ref)}`, {
-        headers: { 'Authorization': `Bearer ${SUPABASE_ANON_KEY}` },
-      })
-        .then(r => r.json())
-        .then(data => {
-          if (data?.booking?.booking_reference && refSlot) {
-            refSlot.textContent = data.booking.booking_reference;
-          }
+        // Route to the success view. Set both the hash and call showView so
+        // either routing mechanism picks it up.
+        location.hash = 'success';
+        if (typeof showView === 'function') showView('success');
+
+        // Fetch the booking so we can display the real PNR (booking_reference)
+        // instead of the merchant ref. If still in 'paid' state (booking not
+        // committed yet), the user sees the merchant ref temporarily — they
+        // can refresh to re-fetch.
+        fetch(`${SUPABASE_URL}/functions/v1/payment-status?ref=${encodeURIComponent(ref)}`, {
+          headers: { 'Authorization': `Bearer ${SUPABASE_ANON_KEY}` },
         })
-        .catch(() => { /* fallback to merchant ref already shown */ });
-    } catch (e) {
-      console.warn('Pesapal callback handler failed:', e);
-    }
-  })();
+          .then(r => r.json())
+          .then(data => {
+            console.log('[Pesapal] payment-status =', data?.state, 'pnr=', data?.booking?.booking_reference);
+            if (data?.booking?.booking_reference && refSlot) {
+              refSlot.textContent = data.booking.booking_reference;
+            }
+          })
+          .catch(err => console.warn('[Pesapal] payment-status fetch failed:', err));
+      } catch (e) {
+        console.error('[Pesapal] callback handler failed:', e);
+      }
+    }, 50); // tiny defer so any synchronous init completes first
+  });
 
 </script>
 
