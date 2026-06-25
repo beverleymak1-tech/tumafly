@@ -5930,89 +5930,78 @@
   // EARLY BOOT — OAuth restore preview (skeleton injection)
   // ============================================================
   // The HEAD script already set html[data-restoring-view] BEFORE body parsed,
-  // so CSS has hidden home and shown the target view. Here we just add a
-  // skeleton overlay into the target view to convey loading.
+  // so CSS has hidden home and shown the target view. Here we inject ghost
+  // flight cards INTO #results-list directly (not as an overlay on the grid —
+  // that was the v1 bug; the grid is 260px+1fr and an appended 3rd child
+  // wraps below the empty layout instead of covering it). When the real
+  // search completes, renderResults() replaces #results-list.innerHTML and
+  // the ghosts disappear naturally.
+  //
+  // Also fires showSearchLoading() immediately so the foreground spinner
+  // is visible without waiting for Supabase + Turnstile + search to resolve.
   (function earlyOAuthBoot() {
     try {
       const view = document.documentElement.getAttribute('data-restoring-view');
       if (!view) return;
       console.log('[early-boot] restoring view=', view);
 
-      // Set body data-view so showView logic and other features (currency-hide-on-home)
-      // see the right context.
+      // Set body data-view so showView logic and other features see the right context
       document.body.setAttribute('data-view', view);
 
+      // ── Skeleton: inject ghost flight cards into #results-list ───────────
+      // Only meaningful when restoring to results/booking/payment (booking and
+      // payment views also need #view-results populated underneath in case the
+      // user backs out, so we render skeletons there too).
       if (view === 'results' || view === 'booking' || view === 'payment') {
-        const targetEl = document.getElementById('view-' + view);
-        if (!targetEl) return;
-        // Find the results-layout container so we replace just the flight-card area,
-        // not the whole view (the summary bar at the top is real, already populated).
-        const layout = targetEl.querySelector('.results-layout');
-        const overlay = document.createElement('div');
-        overlay.id = 'tf-oauth-skeleton';
-        overlay.className = 'tf-restore-skeleton';
-        // Ghost cards that roughly match real flight-card height (~140px)
-        const cardHtml = `
-          <div class="skeleton tf-ghost-card">
-            <div style="display:flex;justify-content:space-between;align-items:center;padding:18px 20px;">
-              <div style="flex:1;">
-                <div class="skeleton-row" style="width:30%;height:14px;margin-bottom:10px;"></div>
-                <div class="skeleton-row" style="width:65%;height:22px;margin-bottom:8px;"></div>
-                <div class="skeleton-row" style="width:45%;height:12px;"></div>
+        const list = document.getElementById('results-list');
+        if (list && !list.dataset.tfSkeletonDone) {
+          list.dataset.tfSkeletonDone = '1';
+          const ghost = `
+            <div class="tf-ghost-card" aria-hidden="true">
+              <div class="tf-ghost-row">
+                <div class="tf-ghost-left">
+                  <div class="tf-ghost-bar" style="width:30%;height:14px;"></div>
+                  <div class="tf-ghost-bar" style="width:65%;height:22px;"></div>
+                  <div class="tf-ghost-bar" style="width:45%;height:12px;"></div>
+                </div>
+                <div class="tf-ghost-right">
+                  <div class="tf-ghost-bar" style="width:90px;height:24px;margin-left:auto;"></div>
+                  <div class="tf-ghost-bar" style="width:60px;height:12px;margin-left:auto;"></div>
+                </div>
               </div>
-              <div style="text-align:right;">
-                <div class="skeleton-row" style="width:90px;height:24px;margin-bottom:6px;margin-left:auto;"></div>
-                <div class="skeleton-row" style="width:60px;height:12px;margin-left:auto;"></div>
-              </div>
-            </div>
-          </div>`;
-        overlay.innerHTML = `
-          <div class="tf-skel-grid">
-            <aside class="tf-skel-sidebar">
-              <div class="skeleton-row" style="width:50%;height:14px;margin-bottom:14px;"></div>
-              <div class="skeleton-row" style="width:100%;height:34px;margin-bottom:8px;"></div>
-              <div class="skeleton-row" style="width:100%;height:34px;margin-bottom:24px;"></div>
-              <div class="skeleton-row" style="width:60%;height:14px;margin-bottom:14px;"></div>
-              <div class="skeleton-row" style="width:100%;height:34px;margin-bottom:8px;"></div>
-              <div class="skeleton-row" style="width:100%;height:34px;"></div>
-            </aside>
-            <div class="tf-skel-results">
-              ${cardHtml}${cardHtml}${cardHtml}${cardHtml}
-            </div>
-          </div>
-          <style>
-            .tf-restore-skeleton { max-width: 1120px; margin: 0 auto; padding: 24px; opacity: 0.55; pointer-events: none; }
-            .tf-skel-grid { display: grid; grid-template-columns: 260px 1fr; gap: 24px; }
-            .tf-skel-sidebar { background: var(--surface, #fff); border: 1px solid var(--border, #e5e9ef); border-radius: 12px; padding: 20px; }
-            .tf-skel-results > * + * { margin-top: 12px; }
-            .tf-ghost-card { background: var(--surface, #fff); border: 1px solid var(--border, #e5e9ef); border-radius: 12px; }
-            .skeleton-row { background: #e5e9ef; border-radius: 6px;
-              background-image: linear-gradient(90deg, #e5e9ef 25%, #f5f6f8 50%, #e5e9ef 75%);
-              background-size: 200% 100%;
-              animation: tfShimmer 1.4s infinite; }
-            @keyframes tfShimmer { 0% { background-position: 200% 0; } 100% { background-position: -200% 0; } }
-            @media (max-width: 768px) {
-              .tf-skel-grid { grid-template-columns: 1fr; }
-              .tf-skel-sidebar { display: none; }
-            }
-          </style>`;
-        // If we have the results-layout container, replace its contents.
-        // Otherwise inject at the top of the view (booking/payment).
-        if (view === 'results' && layout) {
-          layout.style.position = 'relative';
-          layout.appendChild(overlay);
-        } else {
-          targetEl.prepend(overlay);
+            </div>`;
+          list.innerHTML = ghost + ghost + ghost + ghost + ghost;
+          // Inject the shimmer CSS once (idempotent: id check prevents dupes)
+          if (!document.getElementById('tf-ghost-style')) {
+            const s = document.createElement('style');
+            s.id = 'tf-ghost-style';
+            s.textContent = `
+              .tf-ghost-card { background: var(--surface, #fff); border: 1px solid var(--border, #e5e9ef); border-radius: 12px; margin-bottom: 12px; opacity: 0.7; }
+              .tf-ghost-row { display: flex; justify-content: space-between; align-items: center; padding: 18px 20px; gap: 16px; }
+              .tf-ghost-left { flex: 1; display: flex; flex-direction: column; gap: 10px; }
+              .tf-ghost-right { text-align: right; display: flex; flex-direction: column; gap: 6px; align-items: flex-end; }
+              .tf-ghost-bar { background: #e5e9ef; border-radius: 6px;
+                background-image: linear-gradient(90deg, #e5e9ef 25%, #f5f6f8 50%, #e5e9ef 75%);
+                background-size: 200% 100%;
+                animation: tfShimmer 1.4s infinite; }
+              @keyframes tfShimmer { 0% { background-position: 200% 0; } 100% { background-position: -200% 0; } }
+            `;
+            document.head.appendChild(s);
+          }
         }
 
-        // Show the search loading modal immediately — same UX as a normal search.
-        // showSearchLoading lives later in the script; check before calling.
+        // ── Foreground spinner: call showSearchLoading() immediately ─────────
+        // It's a function declaration further down this same <script>, so it's
+        // hoisted and callable from here. snap may be missing (race or fresh
+        // sign-in), so pass undefined-safe params — the function null-checks.
         try {
           const snap = window.__tfBootSnapshot;
-          if (typeof showSearchLoading === 'function' && snap?.criteria) {
-            showSearchLoading(snap.criteria.origin, snap.criteria.destination);
+          if (typeof showSearchLoading === 'function') {
+            showSearchLoading(snap?.criteria?.origin, snap?.criteria?.destination);
           }
-        } catch (_) {}
+        } catch (e) {
+          console.warn('[early-boot] showSearchLoading failed:', e);
+        }
       }
     } catch (e) {
       console.warn('[early-boot] failed:', e);
