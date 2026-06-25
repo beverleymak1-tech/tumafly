@@ -10613,6 +10613,92 @@
   // ============================================================
   // PAYMENT
   // ============================================================
+  //
+  // Surfaced IMMEDIATELY when backgroundReValidate detects that the user's
+  // selected outbound or inbound offer is no longer available (sold out or
+  // expired). Friendly message + 4-second auto-redirect countdown to results.
+  // User can short-circuit with "Search now". Once countdown ends or button
+  // clicked, runSearch fires with lastSearchParams and the user lands on
+  // fresh results with the same route/date/passengers pre-set.
+  //
+  // Unlike the price-update modal, this fires immediately because the user
+  // can't proceed at all — the offer is gone. Sitting them mid-form filling
+  // in passengers for a flight they can no longer book is worse UX than
+  // pulling them out to find another.
+  function showOfferGoneModal(opts) {
+    opts = opts || {};
+    document.getElementById('offer-gone-modal')?.remove();
+
+    const headline = opts.isReturn
+      ? "Your return flight just sold out"
+      : "Looks like that flight just sold out";
+
+    const modal = document.createElement('div');
+    modal.id = 'offer-gone-modal';
+    // Reuse the loader backdrop so the visual language is familiar
+    modal.className = 'search-loading-backdrop';
+    modal.innerHTML = `
+      <div class="search-loading-card" style="max-width:400px;text-align:center;">
+        <div style="display:flex;justify-content:center;margin-bottom:14px;">
+          <div style="width:48px;height:48px;border-radius:50%;background:var(--warning-soft,#FEF6E7);display:flex;align-items:center;justify-content:center;">
+            <svg width="26" height="26" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+              <path d="M12 8v4M12 16h.01" stroke="var(--warning,#B45309)" stroke-width="2.5" stroke-linecap="round"/>
+              <circle cx="12" cy="12" r="10" stroke="var(--warning,#B45309)" stroke-width="2"/>
+            </svg>
+          </div>
+        </div>
+        <div style="font-size:18px;font-weight:600;color:var(--ink,#0F1923);margin-bottom:8px;">
+          ${headline}
+        </div>
+        <div style="font-size:14px;color:var(--text-2,#4A5568);margin-bottom:20px;line-height:1.5;">
+          Let's find you another one.
+        </div>
+        <div id="offer-gone-countdown" style="font-size:13px;color:var(--text-3,#8A96A3);margin-bottom:18px;">
+          Searching in 4…
+        </div>
+        <button onclick="searchNowFromOfferGone()" style="width:100%;padding:12px 16px;border-radius:10px;border:none;background:var(--brand,#3D95F5);color:#fff;font-weight:600;cursor:pointer;font-size:14px;">
+          Search now
+        </button>
+      </div>
+    `;
+    document.body.appendChild(modal);
+
+    // 4-second countdown — auto-redirects when it hits zero
+    let remaining = 4;
+    if (window.__offerGoneTimer) clearInterval(window.__offerGoneTimer);
+    window.__offerGoneTimer = setInterval(() => {
+      remaining--;
+      const el = document.getElementById('offer-gone-countdown');
+      if (el) {
+        el.textContent = remaining > 0 ? `Searching in ${remaining}…` : 'Searching…';
+      }
+      if (remaining <= 0) {
+        clearInterval(window.__offerGoneTimer);
+        window.__offerGoneTimer = null;
+        searchNowFromOfferGone();
+      }
+    }, 1000);
+  }
+
+  function searchNowFromOfferGone() {
+    if (window.__offerGoneTimer) {
+      clearInterval(window.__offerGoneTimer);
+      window.__offerGoneTimer = null;
+    }
+    document.getElementById('offer-gone-modal')?.remove();
+    // Clear any pending price-update (irrelevant if the offer's gone)
+    pendingPriceUpdate = null;
+    // Clear booking selections — the offer no longer exists
+    selectedOutbound = null;
+    selectedInbound = null;
+    selectedOffer = null;
+    if (lastSearchParams) {
+      runSearch(lastSearchParams).catch(e => console.warn('[offer-gone] runSearch failed:', e));
+    } else {
+      showView('home');
+    }
+  }
+
   // Surfaced when goToPayment() is called with a pendingPriceUpdate set by
   // the background re-validation. User accepts → swap selectedOutbound/Inbound
   // to the fresh selections + retry goToPayment. User cancels → stay on the
@@ -10655,8 +10741,8 @@
           </div>
         </div>
         <div style="display:flex;gap:10px;">
-          <button onclick="cancelPriceUpdate()" style="flex:1;padding:12px 16px;border-radius:10px;border:1px solid var(--border,#E5E9EF);background:var(--surface,#fff);color:var(--text,#1A202C);font-weight:500;cursor:pointer;font-size:14px;">
-            Go back
+          <button onclick="tryAnotherSearchFromPriceDrift()" style="flex:1;padding:12px 16px;border-radius:10px;border:1px solid var(--border,#E5E9EF);background:var(--surface,#fff);color:var(--text,#1A202C);font-weight:500;cursor:pointer;font-size:14px;">
+            Try another search
           </button>
           <button onclick="acceptPriceUpdate()" style="flex:1.4;padding:12px 16px;border-radius:10px;border:none;background:var(--brand,#3D95F5);color:#fff;font-weight:600;cursor:pointer;font-size:14px;">
             Continue at new price
@@ -10665,6 +10751,21 @@
       </div>
     `;
     document.body.appendChild(modal);
+  }
+
+  // Cleared when user picks "Try another search" — fresh search, no stale state
+  function tryAnotherSearchFromPriceDrift() {
+    pendingPriceUpdate = null;
+    document.getElementById('price-update-modal')?.remove();
+    // Clear booking selections so the user picks fresh from results
+    selectedOutbound = null;
+    selectedInbound = null;
+    selectedOffer = null;
+    if (lastSearchParams) {
+      runSearch(lastSearchParams).catch(e => console.warn('[price-drift] runSearch failed:', e));
+    } else {
+      showView('home');
+    }
   }
 
   function cancelPriceUpdate() {
@@ -12290,9 +12391,11 @@
     // Re-find selections against fresh data
     const outboundMatch = refindOfferInResults(snap.selectedOutboundOfferId, snap.selectedOutboundOfferKes);
     if (!outboundMatch) {
-      // Offer is gone — show a non-blocking error and tell them to pick again
-      showRestoreBanner(`Your selected flight is no longer available. Please pick again.`, 'warn');
-      // Don't auto-clear selection — user can read the message; clicking back-to-results clears
+      // Offer is gone — show the modal IMMEDIATELY. 4-second countdown then
+      // auto-redirect to results with same search params. User can pick a
+      // different flight from there.
+      console.log('[bg-validate] outbound offer gone — showing modal');
+      showOfferGoneModal({ isReturn: false });
       return;
     }
 
@@ -12300,7 +12403,8 @@
     if (snap.selectedInboundOfferId) {
       inboundMatch = refindOfferInResults(snap.selectedInboundOfferId, snap.selectedInboundOfferKes);
       if (!inboundMatch) {
-        showRestoreBanner(`Your return flight is no longer available. Please pick again.`, 'warn');
+        console.log('[bg-validate] inbound offer gone — showing modal');
+        showOfferGoneModal({ isReturn: true });
         return;
       }
     }
