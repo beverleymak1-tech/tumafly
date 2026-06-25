@@ -6475,10 +6475,13 @@
     showView(view, { fromPopState: true });
   });
 
-  // On initial load, set the base state so the first back press doesn't leave the site
+  // On initial load, set the base state so the first back press doesn't leave the site.
+  // BUT: if the URL has an OAuth callback hash (#access_token=...), don't touch it —
+  // Supabase needs to read it to complete sign-in. We'll clean it up after auth resolves.
   let initialState = null;
   try { initialState = history.state; } catch (_) {}
-  if (!initialState) {
+  const _isOAuthCallback = window.location.hash.includes('access_token=') || window.location.hash.includes('error=');
+  if (!initialState && !_isOAuthCallback) {
     safeHistory('replace', { view: 'home' }, window.location.pathname);
   }
 
@@ -11228,6 +11231,10 @@
   function onSignedIn(user) {
     currentUser = user;
     updateNavForUser(user);
+    // Clean OAuth tokens out of the URL after sign-in completes
+    if (window.location.hash.includes('access_token=')) {
+      try { history.replaceState({ view: 'home' }, '', window.location.pathname); } catch (_) {}
+    }
     // If there's a pending post-booking link, attach user_id to booking
     const nudge = document.getElementById('save-booking-nudge');
     if (nudge) nudge.classList.add('hidden');
