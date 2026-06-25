@@ -96,6 +96,92 @@ const FALLBACK_RATES: Record<string, number> = {
   GBP: 170, USD: 130, EUR: 140, AED: 35, QAR: 36,
 };
 
+// ── Phone validation ──────────────────────────────────────────────────────
+// Server-side belt-and-suspenders mirror of the frontend's validatePhoneLocal.
+// Parses dial code straight from the E.164 string (longest-first match) so we
+// don't need the client to send a separate iso. Where multiple countries share
+// a dial code (+1, +7, +212) we use a single range that fits all of them.
+// Returns null if OK, error string otherwise.
+const DIAL_DIGIT_COUNTS: Record<string, [number, number]> = {
+  // Africa
+  "254":[9,9], "256":[9,9], "255":[9,9], "250":[9,9], "251":[9,9],
+  "27":[9,9], "234":[10,10], "233":[9,9], "20":[10,10], "212":[9,9],
+  "243":[9,9], "221":[9,9], "225":[10,10], "237":[9,9], "260":[9,9],
+  "263":[9,9], "267":[8,8], "230":[8,8], "264":[9,9], "258":[9,9],
+  "261":[9,9], "265":[9,9], "244":[9,9], "257":[8,8], "211":[9,9],
+  "252":[9,9], "253":[8,8], "291":[7,7], "249":[9,9], "216":[8,8],
+  "213":[9,9], "218":[9,9], "223":[8,8], "226":[8,8], "227":[8,8],
+  "235":[8,8], "222":[8,8], "220":[7,7], "224":[9,9], "245":[7,7],
+  "232":[8,8], "231":[8,8], "228":[8,8], "229":[8,8], "242":[9,9],
+  "241":[8,8], "236":[8,8], "240":[9,9], "239":[7,7], "238":[7,7],
+  "269":[7,7], "248":[7,7], "266":[8,8], "268":[8,8],
+  // Middle East
+  "971":[9,9], "974":[8,8], "966":[9,9], "965":[8,8], "973":[8,8],
+  "968":[8,8], "962":[9,9], "961":[8,8], "972":[9,9], "970":[9,9],
+  "964":[10,10], "963":[9,9], "967":[9,9], "98":[10,10], "90":[10,10],
+  // Europe
+  "44":[10,10], "353":[9,9], "33":[9,9], "49":[9,11], "34":[9,9],
+  "39":[9,10], "351":[9,9], "31":[9,9], "32":[9,9], "352":[9,10],
+  "41":[9,9], "43":[10,11], "45":[8,8], "46":[8,10], "47":[8,8],
+  "358":[9,10], "354":[7,7], "48":[9,9], "420":[9,9], "421":[9,9],
+  "36":[9,9], "40":[9,9], "359":[9,9], "30":[10,10], "357":[8,8],
+  "356":[8,8], "381":[9,9], "385":[8,9], "386":[8,8], "387":[8,8],
+  "382":[8,8], "389":[8,8], "355":[9,9], "383":[8,8], "372":[7,8],
+  "371":[8,8], "370":[8,8], "375":[9,9], "380":[9,9], "373":[8,8],
+  "7":[10,10], "995":[9,9], "374":[8,8], "994":[9,9],
+  // Americas (note: +1 covers all NANP — US/CA/JM/BS/etc all 10 digits)
+  "1":[10,10], "52":[10,10], "55":[10,11], "54":[10,10], "56":[9,9],
+  "57":[10,10], "51":[9,9], "58":[10,10], "593":[9,9], "591":[8,8],
+  "595":[9,9], "598":[8,9], "506":[8,8], "507":[8,8], "502":[8,8],
+  "504":[8,8], "503":[8,8], "505":[8,8], "53":[8,8], "509":[8,8],
+  // Asia
+  "86":[11,11], "852":[8,8], "853":[8,8], "886":[9,9], "81":[10,11],
+  "82":[10,11], "976":[8,8], "91":[10,10], "92":[10,10], "880":[10,10],
+  "94":[9,9], "960":[7,7], "977":[10,10], "975":[8,8], "93":[9,9],
+  "66":[9,9], "84":[9,10], "856":[9,9], "855":[8,9], "95":[9,10],
+  "60":[9,10], "65":[8,8], "62":[9,12], "63":[10,10], "673":[7,7],
+  "998":[9,9], "996":[9,9], "992":[9,9], "993":[8,8],
+  // Oceania
+  "61":[9,9], "64":[8,9], "679":[7,7], "675":[8,8],
+};
+
+function validateE164(phone: string): string | null {
+  if (!phone || typeof phone !== "string") return "Invalid phone number.";
+  if (!phone.startsWith("+")) return "Invalid phone number.";
+  const digits = phone.slice(1).replace(/\D/g, "");
+  if (digits.length < 6 || digits.length > 15) return "Invalid phone number.";
+  // Longest-first dial code match (4 down to 1) so +254 resolves before +2
+  for (let len = 4; len >= 1; len--) {
+    const candidate = digits.slice(0, len);
+    if (DIAL_DIGIT_COUNTS[candidate]) {
+      const [min, max] = DIAL_DIGIT_COUNTS[candidate];
+      const body = digits.slice(len);
+      return (body.length < min || body.length > max) ? "Invalid phone number." : null;
+    }
+  }
+  // No dial code matched — permissive fallback
+  return digits.length < 7 ? "Invalid phone number." : null;
+}
+
+// ── Email validation ──────────────────────────────────────────────────────
+// Single-line address only. Catches typos like missing @, missing TLD, spaces,
+// trailing dots, doubled @, and other obvious garbage. NOT a deliverability
+// check — that's only possible by sending mail (eTicket bounce is the
+// downstream signal).
+function validateEmail(email: string): string | null {
+  if (!email || typeof email !== "string") return "Invalid email address.";
+  const trimmed = email.trim();
+  if (trimmed.length < 5 || trimmed.length > 254) return "Invalid email address.";
+  // RFC-flavoured but practical: local-part@domain.tld, no spaces, single @
+  const re = /^[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}$/;
+  if (!re.test(trimmed)) return "Invalid email address.";
+  // Defensive: no consecutive dots, no leading/trailing dot in local-part
+  const [local, domain] = trimmed.split("@");
+  if (local.startsWith(".") || local.endsWith(".") || local.includes("..")) return "Invalid email address.";
+  if (domain.startsWith(".") || domain.endsWith(".") || domain.includes("..")) return "Invalid email address.";
+  return null;
+}
+
 // Verify a Cloudflare Turnstile token by calling their siteverify endpoint.
 // Returns true (allow) when no secret is configured — this is intentional: lets
 // the function ship before the Turnstile site is registered at Cloudflare and
@@ -175,7 +261,28 @@ serve(async (req) => {
       });
     }
 
-    // 1a. Bot protection (Cloudflare Turnstile). No-op when TURNSTILE_SECRET
+    // 1a. Validate email format. Blocks obvious typos (missing @, no TLD, etc)
+    // BEFORE Pesapal charges, so the customer can correct without losing money.
+    const emailErr = validateEmail(contact.email);
+    if (emailErr) {
+      return new Response(JSON.stringify({ error: emailErr }), {
+        status: 400,
+        headers: { ...CORS_HEADERS, "Content-Type": "application/json" },
+      });
+    }
+
+    // 1b. Validate E.164 phone. Blocks bad digit counts (Victoria too short,
+    // Tina too long) BEFORE Pesapal charges. Two confirmed PAID_NO_TICKET
+    // refunds came from this exact bug — see TumaFly_Handoff_NextChat_8.md.
+    const phoneErr = validateE164(contact.phone_number || "");
+    if (phoneErr) {
+      return new Response(JSON.stringify({ error: phoneErr }), {
+        status: 400,
+        headers: { ...CORS_HEADERS, "Content-Type": "application/json" },
+      });
+    }
+
+    // 1c. Bot protection (Cloudflare Turnstile). No-op when TURNSTILE_SECRET
     // isn't set, so this is safe to deploy before the Turnstile site is registered.
     const clientIp = req.headers.get("x-forwarded-for")?.split(",")[0]?.trim()
       || req.headers.get("cf-connecting-ip")

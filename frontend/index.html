@@ -5503,6 +5503,7 @@
             <div class="full">
               <label class="pax-label">Email <span class="pax-required">*</span></label>
               <input id="contact-email" type="email" class="pax-input" placeholder="you@example.com">
+              <p id="contact-email-hint" style="display:none;margin:4px 0 0;font-size:12px;color:var(--danger);"></p>
             </div>
             <div class="full">
               <label class="pax-label">Phone <span class="pax-required">*</span></label>
@@ -6295,6 +6296,24 @@
     // Oceania
     AU:[9,9], NZ:[8,9], FJ:[7,7], PG:[8,8], WS:[7,7], TO:[7,7],
   };
+
+  // Returns null if email is valid, or a human-readable error string.
+  // Single-line address only. Catches typos like missing @, missing TLD,
+  // spaces, trailing dots, doubled @, and other obvious garbage.
+  // Mirrors the server-side validator in create-payment EF.
+  function validateEmail(email) {
+    if (!email || typeof email !== 'string') return 'Invalid email address.';
+    const trimmed = email.trim();
+    if (trimmed.length < 5 || trimmed.length > 254) return 'Invalid email address.';
+    const re = /^[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}$/;
+    if (!re.test(trimmed)) return 'Invalid email address.';
+    const parts = trimmed.split('@');
+    if (parts.length !== 2) return 'Invalid email address.';
+    const [local, domain] = parts;
+    if (local.startsWith('.') || local.endsWith('.') || local.includes('..')) return 'Invalid email address.';
+    if (domain.startsWith('.') || domain.endsWith('.') || domain.includes('..')) return 'Invalid email address.';
+    return null;
+  }
 
   // Returns null if phone is valid, or a human-readable error string.
   // iso: ISO-2 from countryPickerState; localDigits: digits after stripping dial code + leading zeros.
@@ -8739,6 +8758,26 @@
     // Initialise the contact phone country picker (idempotent — sets the default
     // dial code + flag if not yet set, otherwise preserves whatever the user picked).
     initCountryPicker('contact', '+254');
+    // Wire real-time validation on the contact email field (blur first, then live).
+    const contactEmailEl = document.getElementById('contact-email');
+    if (contactEmailEl && !contactEmailEl.dataset.emailValidHooked) {
+      contactEmailEl.dataset.emailValidHooked = '1';
+      let emailBlurred = false;
+      const showEmailHint = (msg) => {
+        const hint = document.getElementById('contact-email-hint');
+        if (!hint) return;
+        if (msg) {
+          hint.textContent = msg; hint.style.display = 'block';
+          contactEmailEl.classList.add('pax-input-err');
+        } else {
+          hint.textContent = ''; hint.style.display = 'none';
+          contactEmailEl.classList.remove('pax-input-err');
+        }
+      };
+      const runEmailValidation = () => showEmailHint(validateEmail(contactEmailEl.value.trim()));
+      contactEmailEl.addEventListener('blur', () => { emailBlurred = true; runEmailValidation(); });
+      contactEmailEl.addEventListener('input', () => { if (emailBlurred) runEmailValidation(); });
+    }
     // Wire real-time digit-count validation on the contact phone field.
     // Attach only once per page load (guarded by data attribute).
     const contactPhoneEl = document.getElementById('contact-phone');
@@ -10542,14 +10581,18 @@
     const phoneLocal = phoneDigits.replace(/^0+/, '');
     const phone = phoneCC && phoneLocal ? `${phoneCC}${phoneLocal}` : '';
 
-    if (!email || !email.includes('@')) {
+    const emailErr = validateEmail(email);
+    if (emailErr) {
       const emailEl = document.getElementById('contact-email');
+      const hint = document.getElementById('contact-email-hint');
       if (emailEl) emailEl.classList.add('pax-input-err');
-      showAlert('booking-alert', 'Please enter a valid email address.');
+      if (hint) { hint.textContent = emailErr; hint.style.display = 'block'; }
+      showAlert('booking-alert', emailErr);
       setTimeout(() => emailEl?.scrollIntoView({ behavior: 'smooth', block: 'center' }), 50);
       return;
     }
     document.getElementById('contact-email')?.classList.remove('pax-input-err');
+    { const h = document.getElementById('contact-email-hint'); if (h) { h.textContent = ''; h.style.display = 'none'; } }
     const phoneIso = countryPickerState.contact?.iso || 'KE';
     const phoneErr = validatePhoneLocal(phoneIso, phoneLocal);
     if (phoneErr) {
