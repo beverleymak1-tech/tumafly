@@ -5721,20 +5721,13 @@
       </button>
       <div class="auth-divider">or</div>
       <label class="auth-label">Phone number</label>
-      <div class="auth-phone-row">
-        <select class="auth-country-sel" id="auth-country-code">
-          <option value="+254">🇰🇪 +254</option>
-          <option value="+255">🇹🇿 +255</option>
-          <option value="+256">🇺🇬 +256</option>
-          <option value="+250">🇷🇼 +250</option>
-          <option value="+251">🇪🇹 +251</option>
-          <option value="+27">🇿🇦 +27</option>
-          <option value="+234">🇳🇬 +234</option>
-          <option value="+233">🇬🇭 +233</option>
-          <option value="+44">🇬🇧 +44</option>
-          <option value="+1">🇺🇸 +1</option>
-        </select>
-        <input type="tel" class="auth-input" id="auth-phone" placeholder="712 345 678" inputmode="numeric">
+      <div class="phone-input-group" id="auth-phone-group" style="margin-bottom:16px;">
+        <button type="button" class="phone-cc-trigger" id="auth-phone-cc-btn" onclick="openCountryPicker('auth')" aria-label="Choose country code">
+          <span class="phone-cc-flag" id="auth-phone-cc-flag"></span>
+          <svg class="phone-cc-chevron" width="10" height="10" viewBox="0 0 12 12" fill="none" aria-hidden="true"><path d="M3 5l3 3 3-3" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        </button>
+        <span class="phone-cc-prefix" id="auth-phone-cc-prefix">+254</span>
+        <input id="auth-phone" type="tel" class="phone-num" placeholder="712 345 678" inputmode="tel" autocomplete="tel-national">
       </div>
       <div id="auth-choose-error" class="auth-error hidden"></div>
       <button class="auth-btn" id="auth-send-otp-btn" onclick="sendOtp()">Continue</button>
@@ -11292,6 +11285,8 @@
     document.getElementById('auth-step-otp').classList.add('hidden');
     document.getElementById('auth-choose-error').classList.add('hidden');
     document.getElementById('auth-phone').value = '';
+    // Initialise the country picker (defaults to +254 KE)
+    try { initCountryPicker('auth', '+254'); } catch (_) {}
     document.getElementById('auth-phone').focus();
   }
   function closeAuthModal() {
@@ -11318,13 +11313,13 @@
 
   // ── Phone OTP ────────────────────────────────────────────────
   async function sendOtp() {
-    const countryCode = document.getElementById('auth-country-code').value;
+    const sel = countryPickerState['auth'] || { dial: '+254' };
     const raw = document.getElementById('auth-phone').value.replace(/\D/g, '');
     if (!raw || raw.length < 6) {
       showAuthError('auth-choose-error', 'Please enter a valid phone number.');
       return;
     }
-    pendingPhone = countryCode + raw;
+    pendingPhone = sel.dial + raw;
 
     const btn = document.getElementById('auth-send-otp-btn');
     btn.disabled = true; btn.textContent = 'Sending…';
@@ -11426,7 +11421,7 @@
   async function loadProfile() {
     if (!currentUser) { showView('home'); openAuthModal(); return; }
     const sb = await getSupabase();
-    const { data } = await sb.from('profiles').select('*').eq('id', currentUser.id).single();
+    const { data } = await sb.from('profiles').select('*').eq('id', currentUser.id).maybeSingle();
 
     // Fall back to Google OAuth metadata if DB fields are empty
     const meta = currentUser.user_metadata || {};
