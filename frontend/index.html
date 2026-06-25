@@ -171,11 +171,30 @@
       /* Hide nav text links on mobile but KEEP the currency toggle visible */
       .nav-links { gap: 8px; }
       .nav-links .nav-link { display: none; }
-      .nav-sign-in { display: none !important; }
-      .nav-user-btn { display: none !important; }
+      /* Sign-in/user buttons get compressed to icon-only on mobile */
+      .nav-sign-in {
+        padding: 0 !important;
+        width: 36px; height: 36px;
+        border-radius: 50% !important;
+        font-size: 0 !important; /* hide "Sign in" text, keep the icon */
+        display: flex !important;
+        align-items: center; justify-content: center;
+      }
+      .nav-sign-in::before {
+        content: '';
+        width: 18px; height: 18px;
+        background: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='white' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><circle cx='12' cy='8' r='4'/><path d='M4 21v-1a8 8 0 0116 0v1'/></svg>") center/contain no-repeat;
+      }
+      .nav-user-btn span { display: none; }
+      .nav-user-btn { padding: 4px; }
+      .nav-user-btn svg { display: none; }
+      .nav-avatar { width: 30px; height: 30px; font-size: 12px; }
       /* Show Find Bookings icon only on mobile */
       .nav-find-mobile { display: flex !important; }
     }
+
+    /* On home view only (desktop + mobile), hide currency toggle */
+    body[data-view="home"] .nav-currency { display: none !important; }
 
     /* ─── Nav auth controls ──────────────────────────────────────── */
     .nav-find-mobile {
@@ -4942,7 +4961,7 @@
     } /* end @media (max-width: 768px) */
   </style>
 </head>
-<body>
+<body data-view="home">
 
 <nav class="nav">
   <div class="nav-inner">
@@ -5616,47 +5635,80 @@
         </svg>
         Add new traveler
       </button>
-      <!-- Inline traveler form — hidden until add/edit clicked -->
+      <!-- Inline traveler form — hidden until add/edit clicked.
+           Markup mirrors the booking-side traveler form so the same fields, options,
+           and UX are presented. Validation is lighter (everything optional for saved
+           travelers — they may be partial profiles that get completed at booking time). -->
       <div class="traveler-form hidden" id="traveler-form">
         <div class="traveler-form-title" id="traveler-form-title">New traveler</div>
         <input type="hidden" id="tf-id">
-        <div class="account-field-row">
-          <div class="account-field"><label>First name *</label><input type="text" id="tf-first" placeholder="First name"></div>
-          <div class="account-field"><label>Middle name</label><input type="text" id="tf-middle" placeholder="Middle name"></div>
-        </div>
-        <div class="account-field"><label>Last name *</label><input type="text" id="tf-last" placeholder="Last name"></div>
-        <div class="account-field-row">
-          <div class="account-field">
-            <label>Date of birth</label>
-            <input type="date" id="tf-dob">
+
+        <div class="form-grid">
+          <div>
+            <label class="pax-label">Title</label>
+            <select id="tf-title" class="pax-select">
+              <option value="">— select —</option>
+              <option value="mr">Mr</option>
+              <option value="mrs">Mrs</option>
+              <option value="ms">Ms</option>
+              <option value="dr">Dr</option>
+            </select>
           </div>
-          <div class="account-field">
-            <label>Gender</label>
-            <select id="tf-gender">
+          <div>
+            <label class="pax-label">Gender</label>
+            <select id="tf-gender" class="pax-select">
               <option value="">— select —</option>
               <option value="m">Male</option>
               <option value="f">Female</option>
-              <option value="x">Non-binary / other</option>
             </select>
           </div>
+          <div>
+            <label class="pax-label">First name <span class="pax-required">*</span></label>
+            <input id="tf-first" type="text" class="pax-input" placeholder="As on passport">
+          </div>
+          <div>
+            <label class="pax-label">Middle name <span style="color:var(--text-3);font-weight:400;">(optional)</span></label>
+            <input id="tf-middle" type="text" class="pax-input" placeholder="As on passport">
+          </div>
+          <div class="full">
+            <label class="pax-label">Last name <span class="pax-required">*</span></label>
+            <input id="tf-last" type="text" class="pax-input" placeholder="As on passport">
+          </div>
+          <div>
+            <label class="pax-label">Date of birth</label>
+            <input id="tf-dob" type="date" class="pax-input">
+          </div>
+          <div>
+            <label class="pax-label">Nationality <span style="color:var(--text-3);font-weight:400;">(optional)</span></label>
+            <select id="tf-nationality" class="pax-select"></select>
+          </div>
         </div>
-        <div class="account-field">
-          <label>Nationality</label>
-          <select id="tf-nationality"></select>
+
+        <div style="margin-top:20px;">
+          <div class="pax-section-title" style="margin-bottom:12px;font-size:14px;font-weight:600;color:var(--ink);">Passport details <span style="color:var(--text-3);font-weight:400;">(optional)</span></div>
+          <div class="pax-collapse-note" style="margin-bottom:12px;font-size:13px;color:var(--text-2);">Adding passport info now means it auto-fills at booking — required for international flights.</div>
+          <div class="form-grid">
+            <div class="full">
+              <label class="pax-label">Country of issue</label>
+              <select id="tf-passport-country" class="pax-select"></select>
+            </div>
+            <div>
+              <label class="pax-label">Passport number</label>
+              <input id="tf-passport-num" type="text" class="pax-input" placeholder="A12345678">
+            </div>
+            <div>
+              <label class="pax-label">Passport expiry</label>
+              <input id="tf-passport-exp" type="date" class="pax-input">
+            </div>
+          </div>
         </div>
-        <div class="account-field-row">
-          <div class="account-field"><label>Passport number</label><input type="text" id="tf-passport-num" placeholder="A12345678"></div>
-          <div class="account-field"><label>Passport expiry</label><input type="date" id="tf-passport-exp"></div>
-        </div>
-        <div class="account-field">
-          <label>Passport issuing country</label>
-          <select id="tf-passport-country"></select>
-        </div>
-        <div class="account-field">
-          <label>Frequent flyer programs</label>
+
+        <div style="margin-top:20px;">
+          <div class="pax-section-title" style="margin-bottom:12px;font-size:14px;font-weight:600;color:var(--ink);">Frequent flyer programs <span style="color:var(--text-3);font-weight:400;">(optional)</span></div>
           <div id="tf-ff-list"></div>
           <button class="ff-add-btn" type="button" onclick="addFFRow()">+ Add program</button>
         </div>
+
         <div class="traveler-form-actions">
           <button class="account-save-btn" onclick="saveTravelerProfile()">Save traveler</button>
           <button class="btn btn-ghost" onclick="closeTravelerForm()">Cancel</button>
@@ -6306,6 +6358,7 @@
     ['home','results','booking','payment','success','profile','my-trips','find-booking'].forEach(n => {
       document.getElementById('view-' + n).classList.toggle('hidden', n !== name);
     });
+    document.body.setAttribute('data-view', name);
     window.scrollTo({ top: 0, behavior: 'instant' });
     updateMobileSummaryPill(name); // Phase A — keep nav pill in sync
     if (pollHandle && name !== 'payment') {
@@ -11235,6 +11288,26 @@
     if (window.location.hash.includes('access_token=')) {
       try { history.replaceState({ view: 'home' }, '', window.location.pathname); } catch (_) {}
     }
+    // Restore the view the user was on before sign-in (if any)
+    try {
+      const preAuthView = sessionStorage.getItem('tf_pre_auth_view');
+      if (preAuthView && preAuthView !== 'home' && document.body.getAttribute('data-view') === 'home') {
+        // Only restore if we'd otherwise be on home AND the saved view was non-home
+        // AND that view's data is still available (e.g. search results still loaded)
+        const targetEl = document.getElementById('view-' + preAuthView);
+        if (targetEl) {
+          // Only restore results/booking/payment if they have content; otherwise stay home
+          const restorable = ['results', 'booking', 'payment', 'profile', 'my-trips', 'find-booking'];
+          if (restorable.includes(preAuthView)) {
+            // For results/booking/payment, only restore if state still present
+            if (preAuthView === 'results' && (allOffers?.length > 0)) showView('results');
+            else if (preAuthView === 'booking' && selectedOutbound) showView('booking');
+            else if (['profile','my-trips','find-booking'].includes(preAuthView)) showView(preAuthView);
+          }
+        }
+      }
+      sessionStorage.removeItem('tf_pre_auth_view');
+    } catch (_) {}
     // If there's a pending post-booking link, attach user_id to booking
     const nudge = document.getElementById('save-booking-nudge');
     if (nudge) nudge.classList.add('hidden');
@@ -11307,6 +11380,11 @@
   // ── Google OAuth ─────────────────────────────────────────────
   async function signInWithGoogle() {
     try {
+      // Remember which view the user is currently on so we can return them there
+      try {
+        const currentView = document.body.getAttribute('data-view') || 'home';
+        sessionStorage.setItem('tf_pre_auth_view', currentView);
+      } catch (_) {}
       const sb = await getSupabase();
       const { error } = await sb.auth.signInWithOAuth({
         provider: 'google',
@@ -11499,18 +11577,22 @@
     const list = document.getElementById('travelers-list');
     if (!list) return;
     if (!savedTravelersCache.length) { list.innerHTML = ''; return; }
-    list.innerHTML = savedTravelersCache.map(t => `
+    const titleMap = { mr: 'Mr', mrs: 'Mrs', ms: 'Ms', dr: 'Dr' };
+    list.innerHTML = savedTravelersCache.map(t => {
+      const titleLabel = t.title ? titleMap[t.title] + ' ' : '';
+      const middle = t.middle_name ? t.middle_name + ' ' : '';
+      return `
       <div class="traveler-card">
         <div class="traveler-card-info">
-          <div class="traveler-card-name">${t.first_name} ${t.middle_name ? t.middle_name + ' ' : ''}${t.last_name}</div>
+          <div class="traveler-card-name">${titleLabel}${t.first_name} ${middle}${t.last_name}</div>
           <div class="traveler-card-meta">${t.nationality || ''}${t.passport_number ? ' · Passport: ' + t.passport_number : ''}</div>
         </div>
         <div class="traveler-card-actions">
           <button class="traveler-card-btn" onclick="openTravelerForm('${t.id}')">Edit</button>
           <button class="traveler-card-btn danger" onclick="deleteTraveler('${t.id}')">Remove</button>
         </div>
-      </div>
-    `).join('');
+      </div>`;
+    }).join('');
   }
 
   function openTravelerForm(id) {
@@ -11518,13 +11600,14 @@
     const addBtn = document.getElementById('add-traveler-btn');
     form.classList.remove('hidden');
     addBtn.classList.add('hidden');
-    // Populate country dropdowns if not yet done
+    // Populate country dropdowns
     populateCountryDropdowns();
     if (id) {
       const t = savedTravelersCache.find(x => x.id === id);
       if (!t) return;
       document.getElementById('traveler-form-title').textContent = 'Edit traveler';
       document.getElementById('tf-id').value             = t.id;
+      document.getElementById('tf-title').value          = t.title        || '';
       document.getElementById('tf-first').value          = t.first_name   || '';
       document.getElementById('tf-middle').value         = t.middle_name  || '';
       document.getElementById('tf-last').value           = t.last_name    || '';
@@ -11539,6 +11622,7 @@
       document.getElementById('traveler-form-title').textContent = 'New traveler';
       document.getElementById('tf-id').value = '';
       ['tf-first','tf-middle','tf-last','tf-passport-num'].forEach(id => document.getElementById(id).value = '');
+      document.getElementById('tf-title').value = '';
       document.getElementById('tf-dob').value = '';
       document.getElementById('tf-gender').value = '';
       document.getElementById('tf-nationality').value = '';
@@ -11567,6 +11651,7 @@
     const id = document.getElementById('tf-id').value;
     const payload = {
       user_id:          currentUser.id,
+      title:            document.getElementById('tf-title').value || null,
       first_name:       first,
       middle_name:      document.getElementById('tf-middle').value.trim() || null,
       last_name:        last,
@@ -11598,40 +11683,44 @@
     await loadSavedTravelers();
   }
 
-  // Frequent flyer rows
-  const AIRLINES_FF = [
-    'Kenya Airways (KQ)','Ethiopian Airlines (ET)','RwandAir (WB)','South African Airways (SA)',
-    'Emirates (EK)','Qatar Airways (QR)','British Airways (BA)','KLM (KL)','Lufthansa (LH)',
-    'Turkish Airlines (TK)','Air France (AF)','Singapore Airlines (SQ)','Other'
-  ];
+  // Frequent flyer rows (saved-traveler form) — matches booking-side ff-row pattern
   function renderFFRows(rows) {
     const list = document.getElementById('tf-ff-list');
+    if (!list) return;
     list.innerHTML = rows.map((r, i) => `
-      <div class="ff-row" data-ff="${i}">
-        <select class="ff-airline"><option value="">Airline</option>${AIRLINES_FF.map(a=>`<option value="${a}" ${r.airline===a?'selected':''}>${a}</option>`).join('')}</select>
-        <input type="text" class="ff-number" placeholder="Frequent flyer number" value="${r.ffn || ''}">
-        <button type="button" onclick="this.closest('.ff-row').remove()">✕</button>
+      <div class="ff-row" data-ff="${i}" style="display:grid;grid-template-columns:1fr 2fr auto;gap:8px;margin-bottom:8px;">
+        <div>
+          <label class="pax-label" style="font-size:11px;margin-bottom:2px;">Airline (IATA)</label>
+          <input class="pax-input ff-airline" type="text" value="${r.airline_iata_code || r.airline || ''}" placeholder="e.g. KQ" maxlength="3" style="text-transform:uppercase;">
+        </div>
+        <div>
+          <label class="pax-label" style="font-size:11px;margin-bottom:2px;">Account number</label>
+          <input class="pax-input ff-number" type="text" value="${r.account_number || r.ffn || ''}" placeholder="Frequent flyer number">
+        </div>
+        <button type="button" onclick="this.closest('.ff-row').remove()" aria-label="Remove" style="align-self:end;border:1px solid var(--border-2);background:none;border-radius:var(--radius-sm);cursor:pointer;color:var(--danger);font-size:14px;padding:8px 10px;">×</button>
       </div>
     `).join('');
   }
-  function addFFRow() { renderFFRows([...collectFFRows(), { airline: '', ffn: '' }]); }
+  function addFFRow() { renderFFRows([...collectFFRows(), { airline_iata_code: '', account_number: '' }]); }
   function collectFFRows() {
     return [...document.querySelectorAll('#tf-ff-list .ff-row')].map(row => ({
-      airline: row.querySelector('.ff-airline').value,
-      ffn:     row.querySelector('.ff-number').value.trim(),
-    })).filter(r => r.airline || r.ffn);
+      airline_iata_code: row.querySelector('.ff-airline').value.trim().toUpperCase(),
+      account_number:    row.querySelector('.ff-number').value.trim(),
+    })).filter(r => r.airline_iata_code || r.account_number);
   }
 
   // Country dropdowns for traveler form
   function populateCountryDropdowns() {
     const nSel = document.getElementById('tf-nationality');
     const pSel = document.getElementById('tf-passport-country');
-    if (nSel.options.length > 1) return; // already populated
-    // Build from existing PHONE_COUNTRIES data (already in scope)
+    if (!nSel || nSel.options.length > 1) return; // already populated
+    // PHONE_COUNTRIES is an array of [iso, name, dial] tuples
     const html = '<option value="">— select —</option>' +
-      PHONE_COUNTRIES.map(c => `<option value="${c.code}">${c.flag} ${c.name}</option>`).join('');
+      PHONE_COUNTRIES.map(([iso, name]) =>
+        `<option value="${iso}">${name}</option>`
+      ).join('');
     nSel.innerHTML = html;
-    pSel.innerHTML = html;
+    if (pSel) pSel.innerHTML = html;
   }
 
   // Set DOB max = today, passport expiry min = tomorrow
