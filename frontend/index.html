@@ -5854,6 +5854,68 @@
 
 <script>
   // ============================================================
+  // EARLY BOOT — OAuth restore preview
+  // ============================================================
+  // Runs SYNCHRONOUSLY before any other JS. If we detect an OAuth callback
+  // (hash contains access_token) AND we have a state snapshot in sessionStorage,
+  // we immediately hide the home view and show a skeleton in the target view
+  // so the user never sees a flash of home before the restore completes.
+  (function earlyOAuthBoot() {
+    try {
+      const hasOAuthHash = window.location.hash.includes('access_token=');
+      if (!hasOAuthHash) return;
+      const raw = sessionStorage.getItem('tf_auth_snapshot');
+      if (!raw) return;
+      const snap = JSON.parse(raw);
+      const view = snap?.view;
+      if (!view || view === 'home') return;
+      // Hide home, show the target view immediately
+      const homeEl = document.getElementById('view-home');
+      const targetEl = document.getElementById('view-' + view);
+      if (homeEl) homeEl.classList.add('hidden');
+      if (targetEl) {
+        targetEl.classList.remove('hidden');
+        // Inject a lightweight skeleton overlay so user sees motion until
+        // the real search completes. We mark it with a class so restore can remove it.
+        if (view === 'results' || view === 'booking' || view === 'payment') {
+          const overlay = document.createElement('div');
+          overlay.id = 'tf-oauth-skeleton';
+          overlay.style.cssText = 'padding:40px 24px;max-width:1120px;margin:0 auto;opacity:0.5;'; // dimmed — modal is in front;
+          overlay.innerHTML = `
+            <div style="display:grid;grid-template-columns:280px 1fr;gap:20px;">
+              <div>
+                <div class="skeleton" style="height:60px;margin-bottom:12px;border-radius:8px;background:#e5e9ef;"></div>
+                <div class="skeleton" style="height:120px;margin-bottom:12px;border-radius:8px;background:#e5e9ef;"></div>
+                <div class="skeleton" style="height:120px;border-radius:8px;background:#e5e9ef;"></div>
+              </div>
+              <div>
+                <div class="skeleton" style="height:160px;margin-bottom:12px;border-radius:12px;background:#e5e9ef;"></div>
+                <div class="skeleton" style="height:160px;margin-bottom:12px;border-radius:12px;background:#e5e9ef;"></div>
+                <div class="skeleton" style="height:160px;border-radius:12px;background:#e5e9ef;"></div>
+              </div>
+            </div>
+            <style>
+              #tf-oauth-skeleton .skeleton {
+                background: linear-gradient(90deg, #e5e9ef 25%, #f5f6f8 50%, #e5e9ef 75%) !important;
+                background-size: 200% 100% !important;
+                animation: tfShimmer 1.4s infinite;
+              }
+              @keyframes tfShimmer { 0% { background-position: 200% 0; } 100% { background-position: -200% 0; } }
+              @media (max-width: 900px) {
+                #tf-oauth-skeleton > div:last-child { grid-template-columns: 1fr !important; }
+              }
+            </style>`;
+          targetEl.prepend(overlay);
+        }
+        document.body.setAttribute('data-view', view);
+      }
+    } catch (e) {
+      // Best-effort — if anything fails, fall through to normal load
+      console.warn('[early-boot] OAuth preview failed:', e);
+    }
+  })();
+
+  // ============================================================
   // CONFIG & STATE
   // ============================================================
   const SUPABASE_URL = 'https://wmplcauhaqtyenwvkrkq.supabase.co';
@@ -11473,23 +11535,30 @@
       if (snap.criteria.tripType) tripType = snap.criteria.tripType;
 
       // Reset Turnstile widget so a fresh token gets generated for the re-search.
-      // Without this, the widget may still be mid-execute from page load and
-      // .execute() throws "already executing" — leaving us with no token → 403.
       try { resetTurnstile('search'); } catch (_) {}
-      // Small delay so the widget can fully reset before re-execute
       await new Promise(r => setTimeout(r, 200));
 
-      // Re-run the search silently (uses the standard loading modal)
+      // Mark restore-in-progress so runSearch skips the modal — we already
+      // have a skeleton + welcome banner from earlyOAuthBoot.
+      window.__tfRestoreInProgress = true;
+
       await runSearch({
         origin:      snap.criteria.origin,
         destination: snap.criteria.destination,
         date:        snap.criteria.date,
         returnDate:  snap.criteria.returnDate,
       });
+
+      window.__tfRestoreInProgress = false;
     } catch (e) {
+      window.__tfRestoreInProgress = false;
       console.warn('[auth] restore re-search failed', e);
+      document.getElementById('tf-oauth-skeleton')?.remove();
       showView('home');
       return;
+    } finally {
+      // Always remove the skeleton overlay once results are rendered (or failed)
+      document.getElementById('tf-oauth-skeleton')?.remove();
     }
 
     // Search complete — runSearch already navigated to results view
