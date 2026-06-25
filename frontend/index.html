@@ -11372,6 +11372,7 @@
   })();
 
   function onSignedIn(user) {
+    console.log('[auth] onSignedIn called, current view:', document.body.getAttribute('data-view'));
     currentUser = user;
     updateNavForUser(user);
     // Clean OAuth tokens out of the URL after sign-in completes
@@ -11578,6 +11579,9 @@
 
       window.__tfRestoreInProgress = false;
       console.log('[restore] runSearch complete, allOffers.length=', allOffers?.length);
+      console.log('[restore] body data-view AFTER runSearch:', document.body.getAttribute('data-view'));
+      console.log('[restore] view-home hidden?', document.getElementById('view-home').classList.contains('hidden'));
+      console.log('[restore] view-results hidden?', document.getElementById('view-results').classList.contains('hidden'));
     } catch (e) {
       window.__tfRestoreInProgress = false;
       console.warn('[restore] re-search failed', e);
