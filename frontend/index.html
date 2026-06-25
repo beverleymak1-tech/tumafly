@@ -11427,12 +11427,17 @@
     if (!currentUser) { showView('home'); openAuthModal(); return; }
     const sb = await getSupabase();
     const { data } = await sb.from('profiles').select('*').eq('id', currentUser.id).single();
-    if (data) {
-      document.getElementById('profile-first-name').value = data.first_name || '';
-      document.getElementById('profile-last-name').value  = data.last_name  || '';
-      document.getElementById('profile-email').value      = data.email      || currentUser.email || '';
-      document.getElementById('profile-phone').value      = data.phone      || '';
-    }
+
+    // Fall back to Google OAuth metadata if DB fields are empty
+    const meta = currentUser.user_metadata || {};
+    const fullName = meta.full_name || meta.name || '';
+    const [metaFirst, ...metaRest] = fullName.split(' ');
+    const metaLast = metaRest.join(' ');
+
+    document.getElementById('profile-first-name').value = (data?.first_name) || metaFirst || '';
+    document.getElementById('profile-last-name').value  = (data?.last_name)  || metaLast  || '';
+    document.getElementById('profile-email').value      = (data?.email)      || currentUser.email || '';
+    document.getElementById('profile-phone').value      = (data?.phone)      || currentUser.phone || '';
     loadSavedTravelers();
   }
 
