@@ -5594,7 +5594,14 @@
       </div>
       <div class="account-field">
         <label>Phone number</label>
-        <input type="tel" id="profile-phone" placeholder="+254 7XX XXX XXX">
+        <div class="phone-input-group" id="profile-phone-group">
+          <button type="button" class="phone-cc-trigger" id="profile-phone-cc-btn" onclick="openCountryPicker('profile')" aria-label="Choose country code">
+            <span class="phone-cc-flag" id="profile-phone-cc-flag"></span>
+            <svg class="phone-cc-chevron" width="10" height="10" viewBox="0 0 12 12" fill="none" aria-hidden="true"><path d="M3 5l3 3 3-3" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          </button>
+          <span class="phone-cc-prefix" id="profile-phone-cc-prefix">+254</span>
+          <input id="profile-phone" type="tel" class="phone-num" placeholder="712 345 678" inputmode="tel" autocomplete="tel-national">
+        </div>
       </div>
       <button class="account-save-btn" onclick="saveProfile()">Save changes</button>
       <div id="profile-msg" style="font-size:13px;margin-top:10px;"></div>
@@ -11432,24 +11439,45 @@
     document.getElementById('profile-first-name').value = (data?.first_name) || metaFirst || '';
     document.getElementById('profile-last-name').value  = (data?.last_name)  || metaLast  || '';
     document.getElementById('profile-email').value      = (data?.email)      || currentUser.email || '';
-    document.getElementById('profile-phone').value      = (data?.phone)      || currentUser.phone || '';
+
+    // Phone — split E.164 into dial + local
+    const storedPhone = (data?.phone) || currentUser.phone || '';
+    let defaultDial = '+254';
+    let localNum = '';
+    if (storedPhone) {
+      const matched = PHONE_COUNTRIES.find(c => storedPhone.startsWith(c[2]));
+      if (matched) {
+        defaultDial = matched[2];
+        localNum = storedPhone.slice(matched[2].length);
+      } else if (storedPhone.startsWith('+')) {
+        localNum = storedPhone;
+      } else {
+        localNum = storedPhone;
+      }
+    }
+    try { initCountryPicker('profile', defaultDial); } catch (_) {}
+    document.getElementById('profile-phone').value = localNum;
+
     loadSavedTravelers();
   }
 
   async function saveProfile() {
     if (!currentUser) return;
+    const sel = countryPickerState['profile'] || { dial: '+254' };
+    const phoneLocal = document.getElementById('profile-phone').value.replace(/\D/g, '');
+    const fullPhone = phoneLocal ? sel.dial + phoneLocal : null;
+
     const sb = await getSupabase();
     const updates = {
       first_name: document.getElementById('profile-first-name').value.trim(),
       last_name:  document.getElementById('profile-last-name').value.trim(),
-      phone:      document.getElementById('profile-phone').value.trim(),
+      phone:      fullPhone,
       email:      currentUser.email,
     };
     const { error } = await sb.from('profiles').upsert({ id: currentUser.id, ...updates });
     const msg = document.getElementById('profile-msg');
     if (error) { msg.textContent = 'Save failed: ' + error.message; msg.style.color = 'var(--danger)'; }
     else { msg.textContent = 'Saved ✓'; msg.style.color = 'var(--success)'; setTimeout(() => msg.textContent = '', 3000); }
-    // Update nav name
     if (!error && updates.first_name) {
       document.getElementById('nav-user-name').textContent = updates.first_name;
       document.getElementById('nav-avatar').textContent = updates.first_name[0].toUpperCase();
