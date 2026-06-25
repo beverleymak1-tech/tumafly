@@ -410,6 +410,10 @@ serve(async (req) => {
           total_kes: lineKES,
           original_amount: svc.amount,
           original_currency: svc.currency,
+          // Bag metadata used by the eTicket email template. Sandbox sometimes
+          // omits these — null-safe rendering is on the email side.
+          bag_type: svc.metadata?.type || "checked",
+          weight_kg: svc.metadata?.maximum_weight_kg ?? null,
         });
       }
     }
