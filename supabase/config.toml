@@ -468,3 +468,9 @@ verify_jwt = false
 [functions.retry-stuck-bookings]
 enabled = true
 verify_jwt = false
+
+[functions.send-otp]
+verify_jwt = false
+
+[functions.get-user-trips]
+verify_jwt = false

@@ -171,7 +171,270 @@
       /* Hide nav text links on mobile but KEEP the currency toggle visible */
       .nav-links { gap: 8px; }
       .nav-links .nav-link { display: none; }
+      .nav-sign-in { display: none !important; }
+      .nav-user-btn { display: none !important; }
+      /* Show Find Bookings icon only on mobile */
+      .nav-find-mobile { display: flex !important; }
     }
+
+    /* ─── Nav auth controls ──────────────────────────────────────── */
+    .nav-find-mobile {
+      display: none;
+      align-items: center;
+      justify-content: center;
+      width: 36px; height: 36px;
+      border: none; background: none; cursor: pointer;
+      color: var(--text-2); border-radius: 8px;
+    }
+    .nav-find-mobile:hover { background: var(--border); color: var(--ink); }
+    .nav-sign-in {
+      padding: 7px 16px;
+      background: var(--brand);
+      color: white;
+      border: none;
+      border-radius: 20px;
+      font-family: inherit;
+      font-size: 13px;
+      font-weight: 600;
+      cursor: pointer;
+      white-space: nowrap;
+    }
+    .nav-sign-in:hover { background: var(--brand-dark); }
+    .nav-user-btn {
+      display: flex; align-items: center; gap: 8px;
+      padding: 5px 12px 5px 5px;
+      border: 1px solid var(--border-2);
+      border-radius: 20px;
+      background: var(--surface);
+      cursor: pointer; font-family: inherit; font-size: 13px; font-weight: 500;
+      color: var(--text); position: relative;
+    }
+    .nav-user-btn:hover { border-color: var(--brand); }
+    .nav-avatar {
+      width: 26px; height: 26px; border-radius: 50%;
+      background: var(--brand); color: white;
+      display: grid; place-items: center;
+      font-size: 11px; font-weight: 700; flex-shrink: 0;
+    }
+    /* User dropdown */
+    .nav-user-dropdown {
+      position: absolute; top: calc(100% + 8px); right: 0;
+      background: var(--surface); border: 1px solid var(--border);
+      border-radius: var(--radius); box-shadow: var(--shadow-lg);
+      min-width: 180px; z-index: 200; overflow: hidden;
+      display: none;
+    }
+    .nav-user-dropdown.open { display: block; }
+    .nav-dd-item {
+      display: block; width: 100%; text-align: left;
+      padding: 11px 16px; font-family: inherit; font-size: 14px;
+      font-weight: 500; color: var(--text); background: none; border: none;
+      cursor: pointer; border-bottom: 1px solid var(--border);
+    }
+    .nav-dd-item:last-child { border-bottom: none; }
+    .nav-dd-item:hover { background: var(--brand-soft); color: var(--brand-dark); }
+    .nav-dd-item.danger { color: var(--danger); }
+    .nav-dd-item.danger:hover { background: var(--danger-soft); }
+
+    /* ─── Auth modal overlay ─────────────────────────────────────── */
+    .auth-overlay {
+      position: fixed; inset: 0; z-index: 300;
+      background: rgba(15,25,35,0.5);
+      display: flex; align-items: center; justify-content: center;
+      padding: 16px;
+    }
+    .auth-overlay.hidden { display: none !important; }
+    .auth-card {
+      background: var(--surface); border-radius: var(--radius-lg);
+      box-shadow: var(--shadow-lg);
+      width: 100%; max-width: 420px;
+      padding: 32px;
+    }
+    .auth-close {
+      float: right; background: none; border: none; cursor: pointer;
+      color: var(--text-3); padding: 4px; margin: -8px -8px 0 0;
+      border-radius: 8px;
+    }
+    .auth-close:hover { background: var(--border); color: var(--ink); }
+    .auth-title { font-size: 20px; font-weight: 700; color: var(--ink); margin-bottom: 6px; clear: both; }
+    .auth-sub { font-size: 14px; color: var(--text-2); margin-bottom: 24px; }
+    .auth-google-btn {
+      display: flex; align-items: center; justify-content: center; gap: 10px;
+      width: 100%; padding: 12px; border: 1.5px solid var(--border-2);
+      border-radius: var(--radius); background: var(--surface);
+      font-family: inherit; font-size: 14px; font-weight: 600; color: var(--ink);
+      cursor: pointer; margin-bottom: 20px;
+    }
+    .auth-google-btn:hover { border-color: var(--brand); background: var(--brand-soft); }
+    .auth-divider {
+      display: flex; align-items: center; gap: 12px;
+      color: var(--text-3); font-size: 13px; margin-bottom: 20px;
+    }
+    .auth-divider::before, .auth-divider::after {
+      content: ''; flex: 1; height: 1px; background: var(--border);
+    }
+    .auth-label { font-size: 13px; font-weight: 500; color: var(--text-2); margin-bottom: 6px; display: block; }
+    .auth-phone-row { display: flex; gap: 8px; margin-bottom: 16px; }
+    .auth-country-sel {
+      width: 110px; flex-shrink: 0;
+      padding: 10px 8px; border: 1.5px solid var(--border-2);
+      border-radius: var(--radius-sm); font-family: inherit; font-size: 14px;
+      color: var(--text); background: var(--surface); cursor: pointer;
+    }
+    .auth-country-sel:focus { outline: none; border-color: var(--brand); }
+    .auth-input {
+      width: 100%; padding: 10px 12px;
+      border: 1.5px solid var(--border-2); border-radius: var(--radius-sm);
+      font-family: inherit; font-size: 14px; color: var(--text);
+      background: var(--surface);
+    }
+    .auth-input:focus { outline: none; border-color: var(--brand); }
+    .auth-input.err { border-color: var(--danger); }
+    .auth-btn {
+      width: 100%; padding: 12px;
+      background: var(--brand); color: white; border: none;
+      border-radius: var(--radius); font-family: inherit; font-size: 15px;
+      font-weight: 600; cursor: pointer; margin-top: 4px;
+    }
+    .auth-btn:hover { background: var(--brand-dark); }
+    .auth-btn:disabled { opacity: 0.6; cursor: not-allowed; }
+    .auth-otp-row { display: flex; gap: 8px; margin-bottom: 16px; }
+    .auth-otp-row input {
+      flex: 1; text-align: center; font-size: 22px; font-weight: 700;
+      padding: 12px 4px; border: 1.5px solid var(--border-2);
+      border-radius: var(--radius-sm); font-family: var(--mono);
+      color: var(--ink); background: var(--surface);
+    }
+    .auth-otp-row input:focus { outline: none; border-color: var(--brand); }
+    .auth-resend { font-size: 13px; color: var(--text-2); text-align: center; margin-top: 12px; }
+    .auth-resend button { background: none; border: none; color: var(--brand); cursor: pointer; font-weight: 600; font-size: 13px; }
+    .auth-error { font-size: 13px; color: var(--danger); margin-top: 8px; text-align: center; }
+    .auth-terms { font-size: 12px; color: var(--text-3); text-align: center; margin-top: 16px; line-height: 1.5; }
+    .auth-terms a { color: var(--text-2); }
+
+    /* ─── Account views ──────────────────────────────────────────── */
+    .account-wrap {
+      max-width: 720px; margin: 0 auto; padding: 40px 24px 80px;
+    }
+    .account-title { font-size: 24px; font-weight: 700; color: var(--ink); margin-bottom: 4px; }
+    .account-sub { font-size: 15px; color: var(--text-2); margin-bottom: 32px; }
+    .account-section {
+      background: var(--surface); border: 1px solid var(--border);
+      border-radius: var(--radius-lg); padding: 24px; margin-bottom: 20px;
+    }
+    .account-section-title {
+      font-size: 15px; font-weight: 700; color: var(--ink);
+      margin-bottom: 20px; padding-bottom: 16px;
+      border-bottom: 1px solid var(--border);
+    }
+    .account-field { margin-bottom: 16px; }
+    .account-field:last-child { margin-bottom: 0; }
+    .account-field label { display: block; font-size: 13px; font-weight: 500; color: var(--text-2); margin-bottom: 6px; }
+    .account-field input, .account-field select {
+      width: 100%; padding: 10px 12px;
+      border: 1.5px solid var(--border-2); border-radius: var(--radius-sm);
+      font-family: inherit; font-size: 14px; color: var(--text);
+      background: var(--surface);
+    }
+    .account-field input:focus, .account-field select:focus { outline: none; border-color: var(--brand); }
+    .account-field-row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+    @media (max-width: 480px) { .account-field-row { grid-template-columns: 1fr; } }
+    .account-save-btn {
+      padding: 10px 24px; background: var(--brand); color: white; border: none;
+      border-radius: var(--radius); font-family: inherit; font-size: 14px; font-weight: 600;
+      cursor: pointer; margin-top: 8px;
+    }
+    .account-save-btn:hover { background: var(--brand-dark); }
+
+    /* Saved traveler cards */
+    .traveler-card {
+      border: 1px solid var(--border); border-radius: var(--radius);
+      padding: 16px 20px; margin-bottom: 12px;
+      display: flex; align-items: center; justify-content: space-between; gap: 16px;
+    }
+    .traveler-card-info { flex: 1; min-width: 0; }
+    .traveler-card-name { font-weight: 600; font-size: 15px; color: var(--ink); }
+    .traveler-card-meta { font-size: 13px; color: var(--text-2); margin-top: 2px; }
+    .traveler-card-actions { display: flex; gap: 8px; flex-shrink: 0; }
+    .traveler-card-btn {
+      padding: 6px 14px; border-radius: 20px; font-family: inherit;
+      font-size: 13px; font-weight: 500; cursor: pointer; border: 1px solid var(--border-2);
+      background: var(--surface); color: var(--text-2);
+    }
+    .traveler-card-btn:hover { border-color: var(--brand); color: var(--brand); }
+    .traveler-card-btn.danger { color: var(--danger); }
+    .traveler-card-btn.danger:hover { border-color: var(--danger); background: var(--danger-soft); }
+    .add-traveler-btn {
+      display: flex; align-items: center; gap: 8px;
+      padding: 12px 16px; border: 1.5px dashed var(--border-2);
+      border-radius: var(--radius); background: none; cursor: pointer;
+      font-family: inherit; font-size: 14px; font-weight: 500; color: var(--text-2);
+      width: 100%;
+    }
+    .add-traveler-btn:hover { border-color: var(--brand); color: var(--brand); background: var(--brand-soft); }
+
+    /* Traveler edit form (inline expand) */
+    .traveler-form {
+      border: 1.5px solid var(--brand); border-radius: var(--radius);
+      padding: 20px; margin-bottom: 12px; background: var(--brand-soft);
+    }
+    .traveler-form-title { font-size: 14px; font-weight: 700; color: var(--ink); margin-bottom: 16px; }
+    .traveler-form .account-field-row { gap: 10px; }
+    .traveler-form-actions { display: flex; gap: 10px; margin-top: 16px; }
+    .ff-row { display: flex; gap: 8px; align-items: center; margin-bottom: 8px; }
+    .ff-row input { flex: 1; padding: 8px 10px; border: 1.5px solid var(--border-2); border-radius: var(--radius-sm); font-family: inherit; font-size: 13px; }
+    .ff-row select { flex: 1; padding: 8px 10px; border: 1.5px solid var(--border-2); border-radius: var(--radius-sm); font-family: inherit; font-size: 13px; }
+    .ff-row button { padding: 7px 10px; border: 1px solid var(--border-2); background: none; border-radius: var(--radius-sm); cursor: pointer; color: var(--danger); font-size: 13px; }
+    .ff-add-btn { font-size: 13px; color: var(--brand); background: none; border: none; cursor: pointer; font-weight: 500; padding: 4px 0; }
+
+    /* My Trips */
+    .trip-card {
+      background: var(--surface); border: 1px solid var(--border);
+      border-radius: var(--radius); padding: 20px 24px; margin-bottom: 12px;
+      display: flex; align-items: center; justify-content: space-between; gap: 16px;
+      cursor: pointer;
+    }
+    .trip-card:hover { border-color: var(--brand); box-shadow: var(--shadow); }
+    .trip-card-left { flex: 1; min-width: 0; }
+    .trip-route { font-size: 16px; font-weight: 700; color: var(--ink); }
+    .trip-meta { font-size: 13px; color: var(--text-2); margin-top: 4px; }
+    .trip-pnr { font-family: var(--mono); font-size: 13px; font-weight: 600;
+      color: var(--text-2); margin-top: 4px; letter-spacing: 1px; }
+    .trip-status-badge {
+      display: inline-flex; align-items: center;
+      padding: 3px 10px; border-radius: 20px;
+      font-size: 12px; font-weight: 600;
+    }
+    .trip-status-badge.booked { background: var(--success-soft); color: var(--success); }
+    .trip-status-badge.pending { background: var(--warning-soft); color: var(--warning); }
+    .trip-card-right { text-align: right; flex-shrink: 0; }
+    .trip-total { font-size: 16px; font-weight: 700; color: var(--ink); }
+    .trip-arrow { color: var(--text-3); font-size: 18px; }
+
+    /* Find booking */
+    .find-booking-wrap { max-width: 480px; margin: 0 auto; padding: 60px 24px 80px; }
+    .find-booking-card {
+      background: var(--surface); border: 1px solid var(--border);
+      border-radius: var(--radius-lg); padding: 32px; box-shadow: var(--shadow);
+    }
+
+    /* ─── Post-booking nudge (on success page) ───────────────────── */
+    .save-booking-nudge {
+      background: var(--brand-soft); border: 1px solid #b8d8fc;
+      border-radius: var(--radius); padding: 16px 20px;
+      display: flex; align-items: center; gap: 16px;
+      margin-top: 20px;
+    }
+    .save-booking-nudge-text { flex: 1; }
+    .save-booking-nudge-text strong { display: block; font-size: 14px; color: var(--ink); margin-bottom: 2px; }
+    .save-booking-nudge-text span { font-size: 13px; color: var(--text-2); }
+    .save-booking-nudge .auth-btn { width: auto; padding: 8px 20px; font-size: 13px; margin-top: 0; }
+
+    /* ─── Loading skeleton for trips ─────────────────────────────── */
+    .skeleton { background: linear-gradient(90deg, var(--border) 25%, var(--bg) 50%, var(--border) 75%);
+      background-size: 200% 100%; animation: shimmer 1.4s infinite;
+      border-radius: 6px; }
+    @keyframes shimmer { 0% { background-position: 200% 0; } 100% { background-position: -200% 0; } }
 
     /* ─────────────────────────────────────────────────────────────
        HERO + SEARCH
@@ -4692,8 +4955,31 @@
         <button id="nav-curr-kes" class="active" onclick="setCurrency('KES')" type="button">KES</button>
         <button id="nav-curr-usd" onclick="setCurrency('USD')" type="button">USD</button>
       </div>
-      <button class="nav-link" onclick="showView('home')">Search</button>
       <a class="nav-link" href="mailto:hello@tumafly.com">Support</a>
+      <button class="nav-link" onclick="showView('find-booking')">Find booking</button>
+      <!-- Signed-out state -->
+      <button class="nav-sign-in hidden" id="nav-sign-in-btn" onclick="openAuthModal()">Sign in</button>
+      <!-- Signed-in state -->
+      <div class="nav-user-btn hidden" id="nav-user-btn" onclick="toggleUserDropdown()">
+        <div class="nav-avatar" id="nav-avatar">?</div>
+        <span id="nav-user-name"></span>
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+          <path d="M6 9l6 6 6-6" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+        </svg>
+        <div class="nav-user-dropdown" id="nav-user-dropdown">
+          <button class="nav-dd-item" onclick="showView('my-trips'); closeUserDropdown()">My trips</button>
+          <button class="nav-dd-item" onclick="showView('profile'); closeUserDropdown()">Account</button>
+          <button class="nav-dd-item danger" onclick="signOut()">Sign out</button>
+        </div>
+      </div>
+      <!-- Mobile: find-booking icon only -->
+      <button class="nav-find-mobile" onclick="showView('find-booking')" title="Find booking" aria-label="Find booking">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+          <rect x="3" y="4" width="18" height="16" rx="2" stroke="currentColor" stroke-width="1.8"/>
+          <path d="M8 4V2M16 4V2M3 9h18" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
+          <path d="M8 14h4M8 17h2" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
+        </svg>
+      </button>
     </div>
   </div>
 </nav>
@@ -5268,8 +5554,208 @@
         Need help? Reply to your confirmation email or message us on WhatsApp.
       </p>
     </div>
-    <div style="text-align:center;">
+    <!-- Post-booking nudge — shown only when user is NOT signed in -->
+    <div class="save-booking-nudge hidden" id="save-booking-nudge" style="max-width:560px;margin:0 auto;">
+      <div class="save-booking-nudge-text">
+        <strong>Save this booking to your account</strong>
+        <span>View it anytime under My Trips — no need to search your email.</span>
+      </div>
+      <button class="auth-btn" onclick="openAuthModal('post-booking')">Sign in</button>
+    </div>
+    <div style="text-align:center;margin-top:20px;">
       <button class="btn btn-secondary" onclick="resetAndGoHome()">Book another trip</button>
+    </div>
+  </div>
+</div>
+
+<!-- ============================================================
+     PROFILE VIEW
+     ============================================================ -->
+<div id="view-profile" class="hidden">
+  <div class="account-wrap">
+    <h1 class="account-title">My account</h1>
+    <p class="account-sub">Manage your profile and saved travelers.</p>
+
+    <div class="account-section">
+      <div class="account-section-title">Account information</div>
+      <div class="account-field-row">
+        <div class="account-field">
+          <label>First name</label>
+          <input type="text" id="profile-first-name" placeholder="First name">
+        </div>
+        <div class="account-field">
+          <label>Last name</label>
+          <input type="text" id="profile-last-name" placeholder="Last name">
+        </div>
+      </div>
+      <div class="account-field">
+        <label>Email</label>
+        <input type="email" id="profile-email" placeholder="Email" readonly style="opacity:0.6;cursor:not-allowed;">
+      </div>
+      <div class="account-field">
+        <label>Phone number</label>
+        <input type="tel" id="profile-phone" placeholder="+254 7XX XXX XXX">
+      </div>
+      <button class="account-save-btn" onclick="saveProfile()">Save changes</button>
+      <div id="profile-msg" style="font-size:13px;margin-top:10px;"></div>
+    </div>
+
+    <div class="account-section">
+      <div class="account-section-title">Saved travelers</div>
+      <div id="travelers-list"></div>
+      <button class="add-traveler-btn" id="add-traveler-btn" onclick="openTravelerForm()">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+          <path d="M12 5v14M5 12h14" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+        </svg>
+        Add new traveler
+      </button>
+      <!-- Inline traveler form — hidden until add/edit clicked -->
+      <div class="traveler-form hidden" id="traveler-form">
+        <div class="traveler-form-title" id="traveler-form-title">New traveler</div>
+        <input type="hidden" id="tf-id">
+        <div class="account-field-row">
+          <div class="account-field"><label>First name *</label><input type="text" id="tf-first" placeholder="First name"></div>
+          <div class="account-field"><label>Middle name</label><input type="text" id="tf-middle" placeholder="Middle name"></div>
+        </div>
+        <div class="account-field"><label>Last name *</label><input type="text" id="tf-last" placeholder="Last name"></div>
+        <div class="account-field-row">
+          <div class="account-field">
+            <label>Date of birth</label>
+            <input type="date" id="tf-dob">
+          </div>
+          <div class="account-field">
+            <label>Gender</label>
+            <select id="tf-gender">
+              <option value="">— select —</option>
+              <option value="m">Male</option>
+              <option value="f">Female</option>
+              <option value="x">Non-binary / other</option>
+            </select>
+          </div>
+        </div>
+        <div class="account-field">
+          <label>Nationality</label>
+          <select id="tf-nationality"></select>
+        </div>
+        <div class="account-field-row">
+          <div class="account-field"><label>Passport number</label><input type="text" id="tf-passport-num" placeholder="A12345678"></div>
+          <div class="account-field"><label>Passport expiry</label><input type="date" id="tf-passport-exp"></div>
+        </div>
+        <div class="account-field">
+          <label>Passport issuing country</label>
+          <select id="tf-passport-country"></select>
+        </div>
+        <div class="account-field">
+          <label>Frequent flyer programs</label>
+          <div id="tf-ff-list"></div>
+          <button class="ff-add-btn" type="button" onclick="addFFRow()">+ Add program</button>
+        </div>
+        <div class="traveler-form-actions">
+          <button class="account-save-btn" onclick="saveTravelerProfile()">Save traveler</button>
+          <button class="btn btn-ghost" onclick="closeTravelerForm()">Cancel</button>
+        </div>
+        <div id="tf-msg" style="font-size:13px;margin-top:10px;"></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ============================================================
+     MY TRIPS VIEW
+     ============================================================ -->
+<div id="view-my-trips" class="hidden">
+  <div class="account-wrap">
+    <h1 class="account-title">My trips</h1>
+    <p class="account-sub">All your bookings in one place.</p>
+    <div id="trips-list">
+      <!-- Populated by JS -->
+    </div>
+  </div>
+</div>
+
+<!-- ============================================================
+     FIND BOOKING VIEW (guests + account holders)
+     ============================================================ -->
+<div id="view-find-booking" class="hidden">
+  <div class="find-booking-wrap">
+    <h1 class="account-title" style="text-align:center;">Find your booking</h1>
+    <p class="account-sub" style="text-align:center;">Enter your booking reference and last name.</p>
+    <div class="find-booking-card">
+      <div class="account-field">
+        <label for="fb-pnr">Booking reference (PNR)</label>
+        <input type="text" id="fb-pnr" class="auth-input" placeholder="e.g. EBNS5L" style="text-transform:uppercase;letter-spacing:2px;font-family:var(--mono);font-size:18px;text-align:center;">
+      </div>
+      <div class="account-field" style="margin-top:16px;">
+        <label for="fb-last-name">Last name of any traveler</label>
+        <input type="text" id="fb-last-name" class="auth-input" placeholder="e.g. Makhubele">
+      </div>
+      <div id="fb-error" class="auth-error hidden"></div>
+      <button class="auth-btn" style="margin-top:20px;" onclick="findBooking()">Find booking</button>
+    </div>
+  </div>
+</div>
+
+<!-- ============================================================
+     AUTH MODAL
+     ============================================================ -->
+<div class="auth-overlay hidden" id="auth-overlay" onclick="handleAuthOverlayClick(event)">
+  <div class="auth-card" onclick="event.stopPropagation()">
+    <button class="auth-close" onclick="closeAuthModal()" aria-label="Close">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none">
+        <path d="M18 6 6 18M6 6l12 12" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+      </svg>
+    </button>
+
+    <!-- Step 1: Choose method -->
+    <div id="auth-step-choose">
+      <h2 class="auth-title">Sign in or register</h2>
+      <p class="auth-sub">New to TumaFly? We'll create your account automatically.</p>
+      <button class="auth-google-btn" onclick="signInWithGoogle()">
+        <svg width="18" height="18" viewBox="0 0 24 24" aria-hidden="true">
+          <path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" fill="#4285F4"/>
+          <path d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" fill="#34A853"/>
+          <path d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l3.66-2.84z" fill="#FBBC05"/>
+          <path d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" fill="#EA4335"/>
+        </svg>
+        Continue with Google
+      </button>
+      <div class="auth-divider">or</div>
+      <label class="auth-label">Phone number</label>
+      <div class="auth-phone-row">
+        <select class="auth-country-sel" id="auth-country-code">
+          <option value="+254">🇰🇪 +254</option>
+          <option value="+255">🇹🇿 +255</option>
+          <option value="+256">🇺🇬 +256</option>
+          <option value="+250">🇷🇼 +250</option>
+          <option value="+251">🇪🇹 +251</option>
+          <option value="+27">🇿🇦 +27</option>
+          <option value="+234">🇳🇬 +234</option>
+          <option value="+233">🇬🇭 +233</option>
+          <option value="+44">🇬🇧 +44</option>
+          <option value="+1">🇺🇸 +1</option>
+        </select>
+        <input type="tel" class="auth-input" id="auth-phone" placeholder="712 345 678" inputmode="numeric">
+      </div>
+      <div id="auth-choose-error" class="auth-error hidden"></div>
+      <button class="auth-btn" id="auth-send-otp-btn" onclick="sendOtp()">Continue</button>
+      <p class="auth-terms">By continuing you agree to our <a href="/legal/terms">Terms</a> and <a href="/legal/privacy">Privacy Policy</a>.</p>
+    </div>
+
+    <!-- Step 2: Enter OTP -->
+    <div id="auth-step-otp" class="hidden">
+      <h2 class="auth-title">Enter your code</h2>
+      <p class="auth-sub" id="auth-otp-sub">We sent a 6-digit code to your number.</p>
+      <div class="auth-otp-row" id="auth-otp-row">
+        <input type="text" maxlength="1" inputmode="numeric" class="otp-digit" data-i="0" oninput="otpInput(this)" onkeydown="otpKeydown(event,this)">
+        <input type="text" maxlength="1" inputmode="numeric" class="otp-digit" data-i="1" oninput="otpInput(this)" onkeydown="otpKeydown(event,this)">
+        <input type="text" maxlength="1" inputmode="numeric" class="otp-digit" data-i="2" oninput="otpInput(this)" onkeydown="otpKeydown(event,this)">
+        <input type="text" maxlength="1" inputmode="numeric" class="otp-digit" data-i="3" oninput="otpInput(this)" onkeydown="otpKeydown(event,this)">
+        <input type="text" maxlength="1" inputmode="numeric" class="otp-digit" data-i="4" oninput="otpInput(this)" onkeydown="otpKeydown(event,this)">
+        <input type="text" maxlength="1" inputmode="numeric" class="otp-digit" data-i="5" oninput="otpInput(this)" onkeydown="otpKeydown(event,this)">
+      </div>
+      <div id="auth-otp-error" class="auth-error hidden"></div>
+      <button class="auth-btn" id="auth-verify-btn" onclick="verifyOtp()">Verify</button>
+      <p class="auth-resend">Didn't get it? <button onclick="resendOtp()" id="auth-resend-btn">Resend code</button></p>
     </div>
   </div>
 </div>
@@ -5817,7 +6303,7 @@
   }
 
   function showView(name, opts = {}) {
-    ['home','results','booking','payment','success'].forEach(n => {
+    ['home','results','booking','payment','success','profile','my-trips','find-booking'].forEach(n => {
       document.getElementById('view-' + n).classList.toggle('hidden', n !== name);
     });
     window.scrollTo({ top: 0, behavior: 'instant' });
@@ -10683,7 +11169,530 @@
     }, 50); // tiny defer so any synchronous init completes first
   });
 
-</script>
+  // ============================================================
+  // PHASE 4.6 — USER ACCOUNTS + AUTH
+  // ============================================================
+
+  // ── Supabase Auth client (uses CDN ESM build) ───────────────
+  // We load supabase-js via dynamic import so it doesn't block initial render.
+  let _supabase = null;
+  async function getSupabase() {
+    if (_supabase) return _supabase;
+    const { createClient } = await import('https://esm.sh/@supabase/supabase-js@2');
+    _supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+    return _supabase;
+  }
+
+  // ── Auth state ───────────────────────────────────────────────
+  let currentUser = null;  // supabase User object or null
+  let authCallback = null; // fn to call after successful sign-in (post-booking nudge)
+  let pendingPhone = '';   // E.164 phone during OTP flow
+
+  // Initialise on load — restore session if browser has one
+  (async () => {
+    try {
+      const sb = await getSupabase();
+      const { data: { session } } = await sb.auth.getSession();
+      if (session?.user) onSignedIn(session.user);
+
+      sb.auth.onAuthStateChange((_event, session) => {
+        if (session?.user) onSignedIn(session.user);
+        else onSignedOut();
+      });
+    } catch (e) {
+      console.warn('[auth] init failed:', e);
+    }
+  })();
+
+  function onSignedIn(user) {
+    currentUser = user;
+    updateNavForUser(user);
+    // If there's a pending post-booking link, attach user_id to booking
+    const nudge = document.getElementById('save-booking-nudge');
+    if (nudge) nudge.classList.add('hidden');
+    if (authCallback) { authCallback(user); authCallback = null; }
+  }
+
+  function onSignedOut() {
+    currentUser = null;
+    updateNavForGuest();
+  }
+
+  function updateNavForUser(user) {
+    const name = user.user_metadata?.full_name || user.user_metadata?.name || user.email?.split('@')[0] || 'Account';
+    const initial = name[0].toUpperCase();
+    document.getElementById('nav-avatar').textContent = initial;
+    document.getElementById('nav-user-name').textContent = name.split(' ')[0];
+    document.getElementById('nav-sign-in-btn').classList.add('hidden');
+    document.getElementById('nav-user-btn').classList.remove('hidden');
+  }
+
+  function updateNavForGuest() {
+    document.getElementById('nav-sign-in-btn').classList.remove('hidden');
+    document.getElementById('nav-user-btn').classList.add('hidden');
+  }
+
+  // Call once on first paint so nav shows correct state even before session resolves
+  updateNavForGuest();
+
+  // ── User dropdown ────────────────────────────────────────────
+  function toggleUserDropdown() {
+    document.getElementById('nav-user-dropdown').classList.toggle('open');
+  }
+  function closeUserDropdown() {
+    document.getElementById('nav-user-dropdown').classList.remove('open');
+  }
+  document.addEventListener('click', (e) => {
+    const btn = document.getElementById('nav-user-btn');
+    if (btn && !btn.contains(e.target)) closeUserDropdown();
+  });
+
+  async function signOut() {
+    closeUserDropdown();
+    const sb = await getSupabase();
+    await sb.auth.signOut();
+    showView('home');
+  }
+
+  // ── Auth modal ───────────────────────────────────────────────
+  function openAuthModal(context) {
+    if (context === 'post-booking') {
+      authCallback = (user) => linkBookingToUser(user);
+    }
+    document.getElementById('auth-overlay').classList.remove('hidden');
+    document.getElementById('auth-step-choose').classList.remove('hidden');
+    document.getElementById('auth-step-otp').classList.add('hidden');
+    document.getElementById('auth-choose-error').classList.add('hidden');
+    document.getElementById('auth-phone').value = '';
+    document.getElementById('auth-phone').focus();
+  }
+  function closeAuthModal() {
+    document.getElementById('auth-overlay').classList.add('hidden');
+    authCallback = null;
+  }
+  function handleAuthOverlayClick(e) {
+    if (e.target === document.getElementById('auth-overlay')) closeAuthModal();
+  }
+
+  // ── Google OAuth ─────────────────────────────────────────────
+  async function signInWithGoogle() {
+    try {
+      const sb = await getSupabase();
+      const { error } = await sb.auth.signInWithOAuth({
+        provider: 'google',
+        options: { redirectTo: window.location.origin }
+      });
+      if (error) showAuthError('auth-choose-error', error.message);
+    } catch (e) {
+      showAuthError('auth-choose-error', 'Something went wrong. Please try again.');
+    }
+  }
+
+  // ── Phone OTP ────────────────────────────────────────────────
+  async function sendOtp() {
+    const countryCode = document.getElementById('auth-country-code').value;
+    const raw = document.getElementById('auth-phone').value.replace(/\D/g, '');
+    if (!raw || raw.length < 6) {
+      showAuthError('auth-choose-error', 'Please enter a valid phone number.');
+      return;
+    }
+    pendingPhone = countryCode + raw;
+
+    const btn = document.getElementById('auth-send-otp-btn');
+    btn.disabled = true; btn.textContent = 'Sending…';
+
+    try {
+      const sb = await getSupabase();
+      const { error } = await sb.auth.signInWithOtp({ phone: pendingPhone });
+      if (error) throw error;
+
+      // Advance to OTP step
+      document.getElementById('auth-step-choose').classList.add('hidden');
+      document.getElementById('auth-step-otp').classList.remove('hidden');
+      document.getElementById('auth-otp-sub').textContent = `We sent a 6-digit code to ${pendingPhone}.`;
+      document.getElementById('auth-otp-error').classList.add('hidden');
+      document.querySelectorAll('.otp-digit').forEach(i => i.value = '');
+      document.querySelector('.otp-digit').focus();
+    } catch (e) {
+      showAuthError('auth-choose-error', e.message || 'Failed to send code. Try again.');
+    } finally {
+      btn.disabled = false; btn.textContent = 'Continue';
+    }
+  }
+
+  async function resendOtp() {
+    document.getElementById('auth-resend-btn').disabled = true;
+    try {
+      const sb = await getSupabase();
+      await sb.auth.signInWithOtp({ phone: pendingPhone });
+      setTimeout(() => { document.getElementById('auth-resend-btn').disabled = false; }, 30000);
+    } catch (e) {
+      showAuthError('auth-otp-error', 'Failed to resend. Please wait a moment.');
+      document.getElementById('auth-resend-btn').disabled = false;
+    }
+  }
+
+  // OTP digit box UX — auto-advance, backspace-back
+  function otpInput(el) {
+    el.value = el.value.replace(/\D/g,'').slice(-1);
+    const i = parseInt(el.dataset.i);
+    if (el.value && i < 5) {
+      document.querySelectorAll('.otp-digit')[i + 1].focus();
+    }
+    // Auto-verify when all 6 filled
+    const digits = [...document.querySelectorAll('.otp-digit')].map(d => d.value);
+    if (digits.every(d => d)) verifyOtp();
+  }
+  function otpKeydown(e, el) {
+    if (e.key === 'Backspace' && !el.value) {
+      const i = parseInt(el.dataset.i);
+      if (i > 0) document.querySelectorAll('.otp-digit')[i - 1].focus();
+    }
+  }
+
+  async function verifyOtp() {
+    const token = [...document.querySelectorAll('.otp-digit')].map(d => d.value).join('');
+    if (token.length < 6) return;
+    const btn = document.getElementById('auth-verify-btn');
+    btn.disabled = true; btn.textContent = 'Verifying…';
+    try {
+      const sb = await getSupabase();
+      const { error } = await sb.auth.verifyOtp({ phone: pendingPhone, token, type: 'sms' });
+      if (error) throw error;
+      closeAuthModal();
+    } catch (e) {
+      showAuthError('auth-otp-error', e.message || 'Invalid code. Try again.');
+      document.querySelectorAll('.otp-digit').forEach(i => i.value = '');
+      document.querySelector('.otp-digit').focus();
+    } finally {
+      btn.disabled = false; btn.textContent = 'Verify';
+    }
+  }
+
+  function showAuthError(elId, msg) {
+    const el = document.getElementById(elId);
+    el.textContent = msg;
+    el.classList.remove('hidden');
+  }
+
+  // ── Post-booking nudge ───────────────────────────────────────
+  // Called when success view is shown
+  function maybeShowBookingNudge() {
+    const nudge = document.getElementById('save-booking-nudge');
+    if (!nudge) return;
+    nudge.classList.toggle('hidden', !!currentUser);
+  }
+
+  async function linkBookingToUser(user) {
+    if (!activeMerchantRef || !user) return;
+    try {
+      await fetch(`${SUPABASE_URL}/functions/v1/link-booking-user`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${SUPABASE_ANON_KEY}` },
+        body: JSON.stringify({ merchant_reference: activeMerchantRef, user_id: user.id })
+      });
+    } catch (e) { console.warn('[auth] linkBookingToUser failed:', e); }
+  }
+
+  // ── Profile page ─────────────────────────────────────────────
+  async function loadProfile() {
+    if (!currentUser) { showView('home'); openAuthModal(); return; }
+    const sb = await getSupabase();
+    const { data } = await sb.from('profiles').select('*').eq('id', currentUser.id).single();
+    if (data) {
+      document.getElementById('profile-first-name').value = data.first_name || '';
+      document.getElementById('profile-last-name').value  = data.last_name  || '';
+      document.getElementById('profile-email').value      = data.email      || currentUser.email || '';
+      document.getElementById('profile-phone').value      = data.phone      || '';
+    }
+    loadSavedTravelers();
+  }
+
+  async function saveProfile() {
+    if (!currentUser) return;
+    const sb = await getSupabase();
+    const updates = {
+      first_name: document.getElementById('profile-first-name').value.trim(),
+      last_name:  document.getElementById('profile-last-name').value.trim(),
+      phone:      document.getElementById('profile-phone').value.trim(),
+      email:      currentUser.email,
+    };
+    const { error } = await sb.from('profiles').upsert({ id: currentUser.id, ...updates });
+    const msg = document.getElementById('profile-msg');
+    if (error) { msg.textContent = 'Save failed: ' + error.message; msg.style.color = 'var(--danger)'; }
+    else { msg.textContent = 'Saved ✓'; msg.style.color = 'var(--success)'; setTimeout(() => msg.textContent = '', 3000); }
+    // Update nav name
+    if (!error && updates.first_name) {
+      document.getElementById('nav-user-name').textContent = updates.first_name;
+      document.getElementById('nav-avatar').textContent = updates.first_name[0].toUpperCase();
+    }
+  }
+
+  // ── Saved travelers ──────────────────────────────────────────
+  let savedTravelersCache = [];
+
+  async function loadSavedTravelers() {
+    if (!currentUser) return;
+    const sb = await getSupabase();
+    const { data } = await sb.from('saved_travelers').select('*').eq('user_id', currentUser.id).order('created_at');
+    savedTravelersCache = data || [];
+    renderTravelerList();
+  }
+
+  function renderTravelerList() {
+    const list = document.getElementById('travelers-list');
+    if (!list) return;
+    if (!savedTravelersCache.length) { list.innerHTML = ''; return; }
+    list.innerHTML = savedTravelersCache.map(t => `
+      <div class="traveler-card">
+        <div class="traveler-card-info">
+          <div class="traveler-card-name">${t.first_name} ${t.middle_name ? t.middle_name + ' ' : ''}${t.last_name}</div>
+          <div class="traveler-card-meta">${t.nationality || ''}${t.passport_number ? ' · Passport: ' + t.passport_number : ''}</div>
+        </div>
+        <div class="traveler-card-actions">
+          <button class="traveler-card-btn" onclick="openTravelerForm('${t.id}')">Edit</button>
+          <button class="traveler-card-btn danger" onclick="deleteTraveler('${t.id}')">Remove</button>
+        </div>
+      </div>
+    `).join('');
+  }
+
+  function openTravelerForm(id) {
+    const form = document.getElementById('traveler-form');
+    const addBtn = document.getElementById('add-traveler-btn');
+    form.classList.remove('hidden');
+    addBtn.classList.add('hidden');
+    // Populate country dropdowns if not yet done
+    populateCountryDropdowns();
+    if (id) {
+      const t = savedTravelersCache.find(x => x.id === id);
+      if (!t) return;
+      document.getElementById('traveler-form-title').textContent = 'Edit traveler';
+      document.getElementById('tf-id').value             = t.id;
+      document.getElementById('tf-first').value          = t.first_name   || '';
+      document.getElementById('tf-middle').value         = t.middle_name  || '';
+      document.getElementById('tf-last').value           = t.last_name    || '';
+      document.getElementById('tf-dob').value            = t.dob          || '';
+      document.getElementById('tf-gender').value         = t.gender       || '';
+      document.getElementById('tf-nationality').value    = t.nationality  || '';
+      document.getElementById('tf-passport-num').value   = t.passport_number  || '';
+      document.getElementById('tf-passport-exp').value   = t.passport_expiry  || '';
+      document.getElementById('tf-passport-country').value = t.passport_country || '';
+      renderFFRows(t.frequent_flyer || []);
+    } else {
+      document.getElementById('traveler-form-title').textContent = 'New traveler';
+      document.getElementById('tf-id').value = '';
+      ['tf-first','tf-middle','tf-last','tf-passport-num'].forEach(id => document.getElementById(id).value = '');
+      document.getElementById('tf-dob').value = '';
+      document.getElementById('tf-gender').value = '';
+      document.getElementById('tf-nationality').value = '';
+      document.getElementById('tf-passport-exp').value = '';
+      document.getElementById('tf-passport-country').value = '';
+      renderFFRows([]);
+    }
+    form.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  }
+
+  function closeTravelerForm() {
+    document.getElementById('traveler-form').classList.add('hidden');
+    document.getElementById('add-traveler-btn').classList.remove('hidden');
+    document.getElementById('tf-msg').textContent = '';
+  }
+
+  async function saveTravelerProfile() {
+    if (!currentUser) return;
+    const first = document.getElementById('tf-first').value.trim();
+    const last  = document.getElementById('tf-last').value.trim();
+    if (!first || !last) {
+      document.getElementById('tf-msg').textContent = 'First and last name are required.';
+      document.getElementById('tf-msg').style.color = 'var(--danger)';
+      return;
+    }
+    const id = document.getElementById('tf-id').value;
+    const payload = {
+      user_id:          currentUser.id,
+      first_name:       first,
+      middle_name:      document.getElementById('tf-middle').value.trim() || null,
+      last_name:        last,
+      dob:              document.getElementById('tf-dob').value || null,
+      gender:           document.getElementById('tf-gender').value || null,
+      nationality:      document.getElementById('tf-nationality').value || null,
+      passport_number:  document.getElementById('tf-passport-num').value.trim() || null,
+      passport_expiry:  document.getElementById('tf-passport-exp').value || null,
+      passport_country: document.getElementById('tf-passport-country').value || null,
+      frequent_flyer:   collectFFRows(),
+    };
+    if (id) payload.id = id;
+
+    const sb = await getSupabase();
+    const { error } = await sb.from('saved_travelers').upsert(payload);
+    const msg = document.getElementById('tf-msg');
+    if (error) { msg.textContent = 'Save failed: ' + error.message; msg.style.color = 'var(--danger)'; }
+    else {
+      msg.textContent = 'Saved ✓'; msg.style.color = 'var(--success)';
+      setTimeout(closeTravelerForm, 800);
+      await loadSavedTravelers();
+    }
+  }
+
+  async function deleteTraveler(id) {
+    if (!confirm('Remove this traveler?')) return;
+    const sb = await getSupabase();
+    await sb.from('saved_travelers').delete().eq('id', id);
+    await loadSavedTravelers();
+  }
+
+  // Frequent flyer rows
+  const AIRLINES_FF = [
+    'Kenya Airways (KQ)','Ethiopian Airlines (ET)','RwandAir (WB)','South African Airways (SA)',
+    'Emirates (EK)','Qatar Airways (QR)','British Airways (BA)','KLM (KL)','Lufthansa (LH)',
+    'Turkish Airlines (TK)','Air France (AF)','Singapore Airlines (SQ)','Other'
+  ];
+  function renderFFRows(rows) {
+    const list = document.getElementById('tf-ff-list');
+    list.innerHTML = rows.map((r, i) => `
+      <div class="ff-row" data-ff="${i}">
+        <select class="ff-airline"><option value="">Airline</option>${AIRLINES_FF.map(a=>`<option value="${a}" ${r.airline===a?'selected':''}>${a}</option>`).join('')}</select>
+        <input type="text" class="ff-number" placeholder="Frequent flyer number" value="${r.ffn || ''}">
+        <button type="button" onclick="this.closest('.ff-row').remove()">✕</button>
+      </div>
+    `).join('');
+  }
+  function addFFRow() { renderFFRows([...collectFFRows(), { airline: '', ffn: '' }]); }
+  function collectFFRows() {
+    return [...document.querySelectorAll('#tf-ff-list .ff-row')].map(row => ({
+      airline: row.querySelector('.ff-airline').value,
+      ffn:     row.querySelector('.ff-number').value.trim(),
+    })).filter(r => r.airline || r.ffn);
+  }
+
+  // Country dropdowns for traveler form
+  function populateCountryDropdowns() {
+    const nSel = document.getElementById('tf-nationality');
+    const pSel = document.getElementById('tf-passport-country');
+    if (nSel.options.length > 1) return; // already populated
+    // Build from existing PHONE_COUNTRIES data (already in scope)
+    const html = '<option value="">— select —</option>' +
+      PHONE_COUNTRIES.map(c => `<option value="${c.code}">${c.flag} ${c.name}</option>`).join('');
+    nSel.innerHTML = html;
+    pSel.innerHTML = html;
+  }
+
+  // Set DOB max = today, passport expiry min = tomorrow
+  document.addEventListener('DOMContentLoaded', () => {
+    const todayStr = new Date().toISOString().split('T')[0];
+    const tomorrowStr = new Date(Date.now() + 86400000).toISOString().split('T')[0];
+    const dobEl = document.getElementById('tf-dob');
+    const expEl = document.getElementById('tf-passport-exp');
+    if (dobEl) dobEl.max = todayStr;
+    if (expEl) expEl.min = tomorrowStr;
+  });
+
+  // ── My Trips ─────────────────────────────────────────────────
+  async function loadMyTrips() {
+    if (!currentUser) { showView('home'); openAuthModal(); return; }
+    const list = document.getElementById('trips-list');
+    list.innerHTML = `
+      <div style="padding:20px 0">
+        <div class="skeleton" style="height:80px;margin-bottom:12px;border-radius:12px;"></div>
+        <div class="skeleton" style="height:80px;margin-bottom:12px;border-radius:12px;"></div>
+      </div>`;
+    try {
+      const { data: { session } } = await (await getSupabase()).auth.getSession();
+      const res = await fetch(`${SUPABASE_URL}/functions/v1/get-user-trips`, {
+        headers: { 'Authorization': `Bearer ${session.access_token}` }
+      });
+      const { trips } = await res.json();
+      renderTripsList(trips || []);
+    } catch (e) {
+      list.innerHTML = `<p style="color:var(--danger);padding:20px 0;">Failed to load trips. Please try again.</p>`;
+    }
+  }
+
+  function renderTripsList(trips) {
+    const list = document.getElementById('trips-list');
+    if (!trips.length) {
+      list.innerHTML = `
+        <div style="text-align:center;padding:60px 0;color:var(--text-2);">
+          <div style="font-size:40px;margin-bottom:16px;">✈️</div>
+          <div style="font-size:18px;font-weight:600;color:var(--ink);margin-bottom:8px;">No trips yet</div>
+          <div style="margin-bottom:24px;">Your bookings will appear here.</div>
+          <button class="btn btn-primary" onclick="showView('home')">Search for a flight</button>
+        </div>`;
+      return;
+    }
+    list.innerHTML = trips.map(t => {
+      const offer = t.offer || t.outboundOffer || {};
+      const slices = offer.slices || [];
+      const origin = slices[0]?.origin?.iata_code || '—';
+      const dest   = slices[slices.length-1]?.destination?.iata_code || '—';
+      const date   = slices[0]?.departing_at ? new Date(slices[0].departing_at).toLocaleDateString('en-GB', {day:'numeric',month:'short',year:'numeric'}) : '';
+      const total  = t.totalKes ? `KES ${Number(t.totalKes).toLocaleString()}` : '';
+      const badge  = t.status === 'booked' ? '<span class="trip-status-badge booked">Confirmed</span>' : '<span class="trip-status-badge pending">Pending</span>';
+      return `
+        <div class="trip-card" onclick="viewTrip('${t.merchantReference || ''}')">
+          <div class="trip-card-left">
+            <div class="trip-route">${origin} → ${dest}</div>
+            <div class="trip-meta">${date}</div>
+            <div class="trip-pnr">${t.pnr || 'PNR pending'}</div>
+          </div>
+          <div class="trip-card-right">
+            ${badge}
+            <div class="trip-total" style="margin-top:8px;">${total}</div>
+            <div class="trip-arrow">›</div>
+          </div>
+        </div>`;
+    }).join('');
+  }
+
+  function viewTrip(merchantRef) {
+    if (!merchantRef) return;
+    activeMerchantRef = merchantRef;
+    showView('success');
+    // Fetch full booking details and populate success view
+    fetch(`${SUPABASE_URL}/functions/v1/payment-status?ref=${encodeURIComponent(merchantRef)}`, {
+      headers: { 'Authorization': `Bearer ${SUPABASE_ANON_KEY}` }
+    }).then(r => r.json()).then(data => {
+      const refSlot = document.getElementById('success-ref');
+      if (data?.booking?.booking_reference && refSlot) refSlot.textContent = data.booking.booking_reference;
+    }).catch(() => {});
+  }
+
+  // ── Find booking (guest + account) ───────────────────────────
+  async function findBooking() {
+    const pnr      = document.getElementById('fb-pnr').value.trim().toUpperCase();
+    const lastName = document.getElementById('fb-last-name').value.trim().toLowerCase();
+    const errEl    = document.getElementById('fb-error');
+    errEl.classList.add('hidden');
+    if (!pnr || !lastName) { errEl.textContent = 'Please enter both fields.'; errEl.classList.remove('hidden'); return; }
+
+    try {
+      const res = await fetch(`${SUPABASE_URL}/functions/v1/payment-status?ref=${encodeURIComponent(pnr)}&last_name=${encodeURIComponent(lastName)}`, {
+        headers: { 'Authorization': `Bearer ${SUPABASE_ANON_KEY}` }
+      });
+      const data = await res.json();
+      if (!res.ok || !data?.booking) throw new Error(data?.error || 'Booking not found');
+      // Navigate to success view
+      activeMerchantRef = pnr;
+      const refSlot = document.getElementById('success-ref');
+      if (refSlot && data.booking.booking_reference) refSlot.textContent = data.booking.booking_reference;
+      showView('success');
+    } catch (e) {
+      errEl.textContent = 'Booking not found. Check your reference and last name.';
+      errEl.classList.remove('hidden');
+    }
+  }
+
+  // ── Hook showView to trigger account page loads ───────────────
+  const _baseShowView = showView;
+  showView = function(name, opts = {}) {
+    _baseShowView(name, opts);
+    if (name === 'profile')    loadProfile();
+    if (name === 'my-trips')   loadMyTrips();
+    if (name === 'success')    maybeShowBookingNudge();
+  };
+
+
 
 <!-- ============================================================
      PHASE A — BOTTOM-SHEET PRIMITIVE
