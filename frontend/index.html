@@ -7699,7 +7699,7 @@
     // EXCEPTION: when running silently from backgroundReValidate (after a stagnant
     // OAuth restore), the user is already looking at populated results/booking page —
     // showing the spinner would create a jarring second loading state. Skip it.
-    if (!window.__tfRestoreInProgress) {
+    if (!window.__tfSilentSearch) {
       showSearchLoading(origin, destination);
     }
     // Bot-protection: get a Turnstile token (no-op if widget isn't loaded yet —
@@ -7821,16 +7821,19 @@
       // or navigate or we'd disturb their view. The stagnant render already
       // showed the cached data; backgroundReValidate handles any necessary
       // updates (price drift toast / offer-gone banner) on its own.
-      if (!window.__tfRestoreInProgress) {
+      // For ALL other callers (home form, results "Update" button, sign-out
+      // on results, legacy OAuth restore on results), we DO want to render
+      // + navigate, so silence only kicks in when the explicit flag is set.
+      if (!window.__tfSilentSearch) {
         renderResults();
         showView('results');
       }
     } catch (e) {
-      if (!window.__tfRestoreInProgress) {
+      if (!window.__tfSilentSearch) {
         showAlert(alertContainer, 'Could not connect. Please check your network and try again.');
       }
     } finally {
-      if (!window.__tfRestoreInProgress) {
+      if (!window.__tfSilentSearch) {
         hideSearchLoading();
       }
       if (fromButton) { fromButton.classList.remove('btn-loading'); fromButton.disabled = false; }
@@ -12238,6 +12241,10 @@
   // - If outbound/inbound disappear: surface an inline banner + revert booking
   // - If price drifted: stash to pendingPriceUpdate, surfaced at Continue-click
   // - If unchanged: no-op (no flicker, no toast)
+  //
+  // Uses __tfSilentSearch flag (separate from __tfRestoreInProgress) so we
+  // suppress JUST the UI side-effects of runSearch (spinner, render, nav)
+  // without affecting the legacy OAuth restore path which sets __tfRestoreInProgress.
   async function backgroundReValidate(snap) {
     // Wait for Turnstile widget — same logic as legacy path but no UI gating
     const tsDeadline = Date.now() + 10000;
@@ -12254,10 +12261,10 @@
       }
     }
 
-    // Run the search WITHOUT navigating (the user is already on the right view,
-    // showing snapshot data). __tfRestoreInProgress=true tells runSearch's
-    // normal flow not to re-route to results. We'll handle re-render below.
-    window.__tfRestoreInProgress = true;
+    // Silent flag — tells runSearch to skip spinner, renderResults, showView,
+    // and hideSearchLoading. The user stays on whatever view they're on, and
+    // we only update internal state (allOffers) so refindOfferInResults works.
+    window.__tfSilentSearch = true;
     try {
       await runSearch({
         origin:      snap.criteria.origin,
@@ -12267,10 +12274,10 @@
       });
     } catch (e) {
       console.warn('[bg-validate] runSearch failed:', e);
-      window.__tfRestoreInProgress = false;
+      window.__tfSilentSearch = false;
       return;
     }
-    window.__tfRestoreInProgress = false;
+    window.__tfSilentSearch = false;
 
     // No selected offers to validate? Just refresh the results view silently.
     if (!snap.selectedOutboundOfferId) {
