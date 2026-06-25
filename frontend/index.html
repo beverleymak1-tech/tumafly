@@ -11512,7 +11512,13 @@
   }
 
   // Restore from auth snapshot. Called from onSignedIn after Supabase resolves session.
+  let _restoreAttempted = false;
   async function restoreAuthSnapshot() {
+    // Guard: onAuthStateChange may fire multiple times (initial session, token refresh).
+    // We only want to run the restore flow once per page load.
+    if (_restoreAttempted) return;
+    _restoreAttempted = true;
+
     let snap;
     try {
       const raw = sessionStorage.getItem('tf_auth_snapshot');
@@ -11532,22 +11538,36 @@
     if (snap.view === 'home' || !snap.criteria) { console.log('[restore] home or no criteria — skipping'); return; }
 
     // For results/booking/payment — need to re-run search
+    console.log('[restore] re-running search...');
     try {
       // Match passengerCount + tripType from snapshot
       if (snap.criteria.passengerCount) passengerCount = snap.criteria.passengerCount;
       if (snap.criteria.tripType) tripType = snap.criteria.tripType;
 
-      // On a fresh page load (which OAuth redirect is), the Turnstile widget is
-      // mid-execute populating its initial token. Calling reset() + execute() now
-      // races with the in-flight execute and we end up with no token (→ 403).
-      // Instead: just WAIT for the existing execute to deliver a token, then proceed.
-      // Poll up to 8s for the initial Turnstile token.
-      const tsDeadline = Date.now() + 8000;
-      while (Date.now() < tsDeadline && !turnstileSearchToken) {
+      // Wait for Turnstile script to load + widget to render. On a fresh page load
+      // (which OAuth redirect is) this can take a few seconds. ensureTurnstileToken
+      // returns empty string immediately if turnstile/widget aren't ready yet, which
+      // leads to a 403 from search-flights. Poll until widget is ready.
+      console.log('[restore] waiting for Turnstile widget...');
+      const tsDeadline = Date.now() + 10000;
+      while (Date.now() < tsDeadline) {
+        if (typeof turnstile !== 'undefined' && turnstileSearchWidgetId != null) break;
         await new Promise(r => setTimeout(r, 100));
       }
+      const tsReady = typeof turnstile !== 'undefined' && turnstileSearchWidgetId != null;
+      console.log('[restore] Turnstile ready:', tsReady);
+      if (tsReady && !turnstileSearchToken) {
+        // Widget rendered but no token yet — trigger execute and poll
+        try { turnstile.execute(turnstileSearchWidgetId); } catch (_) {}
+        const tokDeadline = Date.now() + 6000;
+        while (Date.now() < tokDeadline && !turnstileSearchToken) {
+          await new Promise(r => setTimeout(r, 100));
+        }
+      }
+      console.log('[restore] Turnstile token present:', !!turnstileSearchToken);
 
       window.__tfRestoreInProgress = true;
+      console.log('[restore] calling runSearch with', snap.criteria);
 
       await runSearch({
         origin:      snap.criteria.origin,
@@ -11557,14 +11577,14 @@
       });
 
       window.__tfRestoreInProgress = false;
+      console.log('[restore] runSearch complete, allOffers.length=', allOffers?.length);
     } catch (e) {
       window.__tfRestoreInProgress = false;
-      console.warn('[auth] restore re-search failed', e);
+      console.warn('[restore] re-search failed', e);
       document.getElementById('tf-oauth-skeleton')?.remove();
       showView('home');
       return;
     } finally {
-      // Always remove the skeleton overlay once results are rendered (or failed)
       document.getElementById('tf-oauth-skeleton')?.remove();
     }
 
