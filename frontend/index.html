@@ -19,6 +19,21 @@
     // we just record that it's ready. The body script checks this flag.
     window.__turnstileFiredEarly = false;
     window.onTurnstileLoad = function () { window.__turnstileFiredEarly = true; };
+
+    // EARLY OAuth detection — runs BEFORE body parses.
+    // If we detect an OAuth callback hash AND have a snapshot, mark <html>
+    // so CSS hides home and shows the target view immediately. No flicker.
+    try {
+      if (window.location.hash.includes('access_token=')) {
+        const raw = sessionStorage.getItem('tf_auth_snapshot');
+        if (raw) {
+          const snap = JSON.parse(raw);
+          if (snap?.view && snap.view !== 'home') {
+            document.documentElement.setAttribute('data-restoring-view', snap.view);
+          }
+        }
+      }
+    } catch (_) {}
   </script>
   <script src="https://challenges.cloudflare.com/turnstile/v0/api.js?onload=onTurnstileLoad" defer></script>
   <style>
@@ -78,6 +93,21 @@
     }
     .tabular { font-variant-numeric: tabular-nums; }
     .hidden { display: none !important; }
+
+    /* OAuth restore — runs before body parses, hides home + reveals target view */
+    html[data-restoring-view] #view-home { display: none !important; }
+    html[data-restoring-view="results"] #view-results,
+    html[data-restoring-view="booking"] #view-booking,
+    html[data-restoring-view="payment"] #view-payment,
+    html[data-restoring-view="profile"] #view-profile,
+    html[data-restoring-view="my-trips"] #view-my-trips,
+    html[data-restoring-view="find-booking"] #view-find-booking {
+      display: block !important;
+    }
+    /* The skeleton itself */
+    html[data-restoring-view] .tf-restore-skeleton {
+      padding: 40px 24px; max-width: 1120px; margin: 0 auto; opacity: 0.5;
+    }
 
     /* ─────────────────────────────────────────────────────────────
        NAV
@@ -5854,64 +5884,55 @@
 
 <script>
   // ============================================================
-  // EARLY BOOT — OAuth restore preview
+  // EARLY BOOT — OAuth restore preview (skeleton injection)
   // ============================================================
-  // Runs SYNCHRONOUSLY before any other JS. If we detect an OAuth callback
-  // (hash contains access_token) AND we have a state snapshot in sessionStorage,
-  // we immediately hide the home view and show a skeleton in the target view
-  // so the user never sees a flash of home before the restore completes.
+  // The HEAD script already set html[data-restoring-view] BEFORE body parsed,
+  // so CSS has hidden home and shown the target view. Here we just add a
+  // skeleton overlay into the target view to convey loading.
   (function earlyOAuthBoot() {
     try {
-      const hasOAuthHash = window.location.hash.includes('access_token=');
-      if (!hasOAuthHash) return;
-      const raw = sessionStorage.getItem('tf_auth_snapshot');
-      if (!raw) return;
-      const snap = JSON.parse(raw);
-      const view = snap?.view;
-      if (!view || view === 'home') return;
-      // Hide home, show the target view immediately
-      const homeEl = document.getElementById('view-home');
-      const targetEl = document.getElementById('view-' + view);
-      if (homeEl) homeEl.classList.add('hidden');
-      if (targetEl) {
-        targetEl.classList.remove('hidden');
-        // Inject a lightweight skeleton overlay so user sees motion until
-        // the real search completes. We mark it with a class so restore can remove it.
-        if (view === 'results' || view === 'booking' || view === 'payment') {
-          const overlay = document.createElement('div');
-          overlay.id = 'tf-oauth-skeleton';
-          overlay.style.cssText = 'padding:40px 24px;max-width:1120px;margin:0 auto;opacity:0.5;'; // dimmed — modal is in front;
-          overlay.innerHTML = `
-            <div style="display:grid;grid-template-columns:280px 1fr;gap:20px;">
-              <div>
-                <div class="skeleton" style="height:60px;margin-bottom:12px;border-radius:8px;background:#e5e9ef;"></div>
-                <div class="skeleton" style="height:120px;margin-bottom:12px;border-radius:8px;background:#e5e9ef;"></div>
-                <div class="skeleton" style="height:120px;border-radius:8px;background:#e5e9ef;"></div>
-              </div>
-              <div>
-                <div class="skeleton" style="height:160px;margin-bottom:12px;border-radius:12px;background:#e5e9ef;"></div>
-                <div class="skeleton" style="height:160px;margin-bottom:12px;border-radius:12px;background:#e5e9ef;"></div>
-                <div class="skeleton" style="height:160px;border-radius:12px;background:#e5e9ef;"></div>
-              </div>
+      const view = document.documentElement.getAttribute('data-restoring-view');
+      if (!view) return;
+      console.log('[early-boot] restoring view=', view);
+
+      // Set body data-view so showView logic and other features (currency-hide-on-home)
+      // see the right context.
+      document.body.setAttribute('data-view', view);
+
+      if (view === 'results' || view === 'booking' || view === 'payment') {
+        const targetEl = document.getElementById('view-' + view);
+        if (!targetEl) return;
+        const overlay = document.createElement('div');
+        overlay.id = 'tf-oauth-skeleton';
+        overlay.className = 'tf-restore-skeleton';
+        overlay.innerHTML = `
+          <div style="display:grid;grid-template-columns:280px 1fr;gap:20px;">
+            <div>
+              <div class="skeleton" style="height:60px;margin-bottom:12px;border-radius:8px;background:#e5e9ef;"></div>
+              <div class="skeleton" style="height:120px;margin-bottom:12px;border-radius:8px;background:#e5e9ef;"></div>
+              <div class="skeleton" style="height:120px;border-radius:8px;background:#e5e9ef;"></div>
             </div>
-            <style>
-              #tf-oauth-skeleton .skeleton {
-                background: linear-gradient(90deg, #e5e9ef 25%, #f5f6f8 50%, #e5e9ef 75%) !important;
-                background-size: 200% 100% !important;
-                animation: tfShimmer 1.4s infinite;
-              }
-              @keyframes tfShimmer { 0% { background-position: 200% 0; } 100% { background-position: -200% 0; } }
-              @media (max-width: 900px) {
-                #tf-oauth-skeleton > div:last-child { grid-template-columns: 1fr !important; }
-              }
-            </style>`;
-          targetEl.prepend(overlay);
-        }
-        document.body.setAttribute('data-view', view);
+            <div>
+              <div class="skeleton" style="height:160px;margin-bottom:12px;border-radius:12px;background:#e5e9ef;"></div>
+              <div class="skeleton" style="height:160px;margin-bottom:12px;border-radius:12px;background:#e5e9ef;"></div>
+              <div class="skeleton" style="height:160px;border-radius:12px;background:#e5e9ef;"></div>
+            </div>
+          </div>
+          <style>
+            #tf-oauth-skeleton .skeleton {
+              background: linear-gradient(90deg, #e5e9ef 25%, #f5f6f8 50%, #e5e9ef 75%) !important;
+              background-size: 200% 100% !important;
+              animation: tfShimmer 1.4s infinite;
+            }
+            @keyframes tfShimmer { 0% { background-position: 200% 0; } 100% { background-position: -200% 0; } }
+            @media (max-width: 900px) {
+              #tf-oauth-skeleton > div:first-child { grid-template-columns: 1fr !important; }
+            }
+          </style>`;
+        targetEl.prepend(overlay);
       }
     } catch (e) {
-      // Best-effort — if anything fails, fall through to normal load
-      console.warn('[early-boot] OAuth preview failed:', e);
+      console.warn('[early-boot] failed:', e);
     }
   })();
 
@@ -6641,19 +6662,77 @@
   // ============================================================
   // DATES & TRIP TYPE
   // ============================================================
+  // ─── Global date-input clamp helper ─────────────────────────────────────
+  // Used by all <input type="date"> fields across the site. Truncates 5+ digit
+  // years (e.g. "20260" → "2026"), blanks out garbage, and enforces min/max.
+  function tfClampDateYear(el) {
+    const v = el.value;
+    if (!v) return;
+    const m = v.match(/^(\d+)-(\d{2})-(\d{2})$/);
+    if (!m) return;
+    const year = m[1];
+    if (year.length !== 4) {
+      const yr4 = year.slice(0, 4);
+      if (yr4.length === 4 && parseInt(yr4) >= 1900) {
+        el.value = `${yr4}-${m[2]}-${m[3]}`;
+      } else {
+        el.value = '';
+      }
+    }
+    if (el.value && el.min && el.value < el.min) el.value = el.min;
+    if (el.value && el.max && el.value > el.max) el.value = el.max;
+  }
+
+  // Auto-attach clamp behaviour to any <input type="date"> in the DOM, and
+  // any added later (booking traveler cards, saved-traveler form, etc).
+  function tfAttachDateClamp(el) {
+    if (!el || el.dataset.tfClampHooked) return;
+    el.dataset.tfClampHooked = '1';
+    el.addEventListener('input', () => tfClampDateYear(el));
+    el.addEventListener('blur',  () => tfClampDateYear(el));
+  }
+  function tfAttachDateClampToAll() {
+    document.querySelectorAll('input[type="date"]').forEach(tfAttachDateClamp);
+  }
+  // Initial sweep + observer for dynamically-added inputs
+  document.addEventListener('DOMContentLoaded', tfAttachDateClampToAll);
+  const _tfDateObserver = new MutationObserver(() => tfAttachDateClampToAll());
+  if (document.body) {
+    _tfDateObserver.observe(document.body, { childList: true, subtree: true });
+  }
+
   (function initDates() {
     const tomorrow = new Date();
     tomorrow.setDate(tomorrow.getDate() + 1);
     const min = tomorrow.toISOString().split('T')[0];
-    document.getElementById('date').min = min;
-    document.getElementById('return-date').min = min;
-    document.getElementById('date').addEventListener('change', function() {
+
+    // Max bookable: today + 355 days. Most airlines load schedules ~330 days ahead,
+    // some up to 360. 355 gives a safe ceiling while still allowing far-out planning.
+    const farLimit = new Date();
+    farLimit.setDate(farLimit.getDate() + 355);
+    const max = farLimit.toISOString().split('T')[0];
+
+    const dateEl = document.getElementById('date');
+    const retEl  = document.getElementById('return-date');
+    dateEl.min = min;  dateEl.max = max;
+    retEl.min  = min;  retEl.max  = max;
+    tfAttachDateClamp(dateEl);
+    tfAttachDateClamp(retEl);
+
+    dateEl.addEventListener('change', function() {
       if (!this.value) return;
       const next = new Date(this.value);
       next.setDate(next.getDate() + 1);
-      document.getElementById('return-date').min = next.toISOString().split('T')[0];
-      const ret = document.getElementById('return-date').value;
-      if (ret && ret <= this.value) document.getElementById('return-date').value = '';
+      retEl.min = next.toISOString().split('T')[0];
+      const ret = retEl.value;
+      if (ret && ret <= this.value) retEl.value = '';
+    });
+
+    ['r-date', 'r-return-date', 'es-date', 'es-return-date'].forEach(id => {
+      const el = document.getElementById(id);
+      if (!el) return;
+      el.min = min; el.max = max;
+      tfAttachDateClamp(el);
     });
   })();
 
@@ -11586,10 +11665,12 @@
       window.__tfRestoreInProgress = false;
       console.warn('[restore] re-search failed', e);
       document.getElementById('tf-oauth-skeleton')?.remove();
+      document.documentElement.removeAttribute('data-restoring-view');
       showView('home');
       return;
     } finally {
       document.getElementById('tf-oauth-skeleton')?.remove();
+      document.documentElement.removeAttribute('data-restoring-view');
     }
 
     // Search complete — runSearch already navigated to results view
