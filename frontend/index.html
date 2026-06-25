@@ -185,10 +185,26 @@
         width: 18px; height: 18px;
         background: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='white' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><circle cx='12' cy='8' r='4'/><path d='M4 21v-1a8 8 0 0116 0v1'/></svg>") center/contain no-repeat;
       }
+      /* Signed-in user button — invert: white background with brand-color border + initial */
+      .nav-user-btn {
+        padding: 0 !important;
+        width: 36px; height: 36px;
+        border-radius: 50% !important;
+        border: 1.5px solid var(--brand) !important;
+        background: var(--surface) !important;
+        display: flex !important;
+        align-items: center; justify-content: center;
+        position: relative;
+      }
       .nav-user-btn span { display: none; }
-      .nav-user-btn { padding: 4px; }
-      .nav-user-btn svg { display: none; }
-      .nav-avatar { width: 30px; height: 30px; font-size: 12px; }
+      .nav-user-btn > svg { display: none; }
+      .nav-avatar {
+        width: 100%; height: 100%;
+        background: transparent !important;
+        color: var(--brand) !important;
+        font-size: 14px;
+        font-weight: 700;
+      }
       /* Show Find Bookings icon only on mobile */
       .nav-find-mobile { display: flex !important; }
     }
@@ -242,6 +258,9 @@
       border-radius: var(--radius); box-shadow: var(--shadow-lg);
       min-width: 180px; z-index: 200; overflow: hidden;
       display: none;
+    }
+    @media (max-width: 640px) {
+      .nav-user-dropdown { right: 0; min-width: 170px; }
     }
     .nav-user-dropdown.open { display: block; }
     .nav-dd-item {
@@ -349,21 +368,26 @@
     .account-field { margin-bottom: 16px; }
     .account-field:last-child { margin-bottom: 0; }
     .account-field label { display: block; font-size: 13px; font-weight: 500; color: var(--text-2); margin-bottom: 6px; }
-    .account-field input, .account-field select {
+    .account-field input:not(.phone-num), .account-field select {
       width: 100%; padding: 10px 12px;
       border: 1.5px solid var(--border-2); border-radius: var(--radius-sm);
       font-family: inherit; font-size: 14px; color: var(--text);
       background: var(--surface);
     }
-    .account-field input:focus, .account-field select:focus { outline: none; border-color: var(--brand); }
+    .account-field input:not(.phone-num):focus, .account-field select:focus { outline: none; border-color: var(--brand); }
     .account-field-row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
     @media (max-width: 480px) { .account-field-row { grid-template-columns: 1fr; } }
     .account-save-btn {
       padding: 10px 24px; background: var(--brand); color: white; border: none;
       border-radius: var(--radius); font-family: inherit; font-size: 14px; font-weight: 600;
       cursor: pointer; margin-top: 8px;
+      transition: background 0.15s, opacity 0.15s;
     }
-    .account-save-btn:hover { background: var(--brand-dark); }
+    .account-save-btn:hover:not(:disabled) { background: var(--brand-dark); }
+    .account-save-btn:disabled {
+      background: var(--border-2); color: var(--text-3);
+      cursor: not-allowed; opacity: 0.7;
+    }
 
     /* Saved traveler cards */
     .traveler-card {
@@ -4976,6 +5000,14 @@
       </div>
       <a class="nav-link" href="mailto:hello@tumafly.com">Support</a>
       <button class="nav-link" onclick="showView('find-booking')">Find booking</button>
+      <!-- Mobile-only: find-booking calendar icon (hidden on desktop) -->
+      <button class="nav-find-mobile" onclick="showView('find-booking')" title="Find booking" aria-label="Find booking">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+          <rect x="3" y="4" width="18" height="16" rx="2" stroke="currentColor" stroke-width="1.8"/>
+          <path d="M8 4V2M16 4V2M3 9h18" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
+          <path d="M8 14h4M8 17h2" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
+        </svg>
+      </button>
       <!-- Signed-out state -->
       <button class="nav-sign-in hidden" id="nav-sign-in-btn" onclick="openAuthModal()">Sign in</button>
       <!-- Signed-in state -->
@@ -4991,14 +5023,6 @@
           <button class="nav-dd-item danger" onclick="signOut()">Sign out</button>
         </div>
       </div>
-      <!-- Mobile: find-booking icon only -->
-      <button class="nav-find-mobile" onclick="showView('find-booking')" title="Find booking" aria-label="Find booking">
-        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-          <rect x="3" y="4" width="18" height="16" rx="2" stroke="currentColor" stroke-width="1.8"/>
-          <path d="M8 4V2M16 4V2M3 9h18" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
-          <path d="M8 14h4M8 17h2" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
-        </svg>
-      </button>
     </div>
   </div>
 </nav>
@@ -5622,7 +5646,7 @@
           <input id="profile-phone" type="tel" class="phone-num" placeholder="712 345 678" inputmode="tel" autocomplete="tel-national">
         </div>
       </div>
-      <button class="account-save-btn" onclick="saveProfile()">Save changes</button>
+      <button class="account-save-btn" id="profile-save-btn" onclick="saveProfile()" disabled>Save changes</button>
       <div id="profile-msg" style="font-size:13px;margin-top:10px;"></div>
     </div>
 
@@ -11288,26 +11312,10 @@
     if (window.location.hash.includes('access_token=')) {
       try { history.replaceState({ view: 'home' }, '', window.location.pathname); } catch (_) {}
     }
-    // Restore the view the user was on before sign-in (if any)
-    try {
-      const preAuthView = sessionStorage.getItem('tf_pre_auth_view');
-      if (preAuthView && preAuthView !== 'home' && document.body.getAttribute('data-view') === 'home') {
-        // Only restore if we'd otherwise be on home AND the saved view was non-home
-        // AND that view's data is still available (e.g. search results still loaded)
-        const targetEl = document.getElementById('view-' + preAuthView);
-        if (targetEl) {
-          // Only restore results/booking/payment if they have content; otherwise stay home
-          const restorable = ['results', 'booking', 'payment', 'profile', 'my-trips', 'find-booking'];
-          if (restorable.includes(preAuthView)) {
-            // For results/booking/payment, only restore if state still present
-            if (preAuthView === 'results' && (allOffers?.length > 0)) showView('results');
-            else if (preAuthView === 'booking' && selectedOutbound) showView('booking');
-            else if (['profile','my-trips','find-booking'].includes(preAuthView)) showView(preAuthView);
-          }
-        }
-      }
-      sessionStorage.removeItem('tf_pre_auth_view');
-    } catch (_) {}
+    // Try to restore pre-auth state (search criteria, selected offers, view)
+    // Async — but we don't await; let nav update happen immediately.
+    restoreAuthSnapshot().catch(e => console.warn('[auth] restore failed', e));
+
     // If there's a pending post-booking link, attach user_id to booking
     const nudge = document.getElementById('save-booking-nudge');
     if (nudge) nudge.classList.add('hidden');
@@ -11380,11 +11388,27 @@
   // ── Google OAuth ─────────────────────────────────────────────
   async function signInWithGoogle() {
     try {
-      // Remember which view the user is currently on so we can return them there
+      // Snapshot full state before redirect so we can restore search + selection
+      // after OAuth round-trip. Re-run the search on restore (offers expire) and
+      // re-match the user's selection by offer_id.
       try {
-        const currentView = document.body.getAttribute('data-view') || 'home';
-        sessionStorage.setItem('tf_pre_auth_view', currentView);
-      } catch (_) {}
+        const view = document.body.getAttribute('data-view') || 'home';
+        const snapshot = {
+          view,
+          criteria: lastSearchParams ? {
+            ...lastSearchParams,
+            passengerCount,
+            tripType,
+          } : null,
+          selectedOutboundOfferId: selectedOutbound?.cabinPricing?.offer_id || null,
+          selectedOutboundOfferKes: selectedOutbound?.cabinPricing?.price_kes || null,
+          selectedInboundOfferId: selectedInbound?.cabinPricing?.offer_id || null,
+          selectedInboundOfferKes: selectedInbound?.cabinPricing?.price_kes || null,
+          cabin: selectedOutbound?.cabin || null,
+          ts: Date.now(),
+        };
+        sessionStorage.setItem('tf_auth_snapshot', JSON.stringify(snapshot));
+      } catch (e) { console.warn('[auth] snapshot failed', e); }
       const sb = await getSupabase();
       const { error } = await sb.auth.signInWithOAuth({
         provider: 'google',
@@ -11394,6 +11418,141 @@
     } catch (e) {
       showAuthError('auth-choose-error', 'Something went wrong. Please try again.');
     }
+  }
+
+  // Helper: re-find a selection in fresh search results by offer_id.
+  // Returns { selection, priceChanged: bool, oldKes, newKes } or null if not found.
+  function refindOfferInResults(offerId, oldKes) {
+    if (!offerId) return null;
+    for (const ob of allOffers) {
+      const cabins = ob.cabinPricings || ob.cabin_pricings || [];
+      for (const cp of cabins) {
+        if (cp.offer_id === offerId) {
+          return {
+            selection: { offer: ob, cabin: cp.cabin, cabinPricing: cp },
+            priceChanged: oldKes && cp.price_kes !== oldKes,
+            oldKes: oldKes || null,
+            newKes: cp.price_kes,
+          };
+        }
+      }
+    }
+    return null;
+  }
+
+  // Restore from auth snapshot. Called from onSignedIn after Supabase resolves session.
+  async function restoreAuthSnapshot() {
+    let snap;
+    try {
+      const raw = sessionStorage.getItem('tf_auth_snapshot');
+      if (!raw) return;
+      snap = JSON.parse(raw);
+      sessionStorage.removeItem('tf_auth_snapshot');
+    } catch (_) { return; }
+
+    // Stale snapshot — older than 30 min, skip
+    if (!snap || (Date.now() - snap.ts) > 30 * 60 * 1000) return;
+
+    // Account/trip views — just route there
+    if (['profile', 'my-trips', 'find-booking'].includes(snap.view)) {
+      showView(snap.view);
+      return;
+    }
+
+    // Home — nothing to restore
+    if (snap.view === 'home' || !snap.criteria) return;
+
+    // For results/booking/payment — need to re-run search
+    try {
+      // Match passengerCount + tripType from snapshot
+      if (snap.criteria.passengerCount) passengerCount = snap.criteria.passengerCount;
+      if (snap.criteria.tripType) tripType = snap.criteria.tripType;
+
+      // Re-run the search silently (uses the standard loading modal)
+      await runSearch({
+        origin:      snap.criteria.origin,
+        destination: snap.criteria.destination,
+        date:        snap.criteria.date,
+        returnDate:  snap.criteria.returnDate,
+      });
+    } catch (e) {
+      console.warn('[auth] restore re-search failed', e);
+      showView('home');
+      return;
+    }
+
+    // Search complete — runSearch already navigated to results view
+    if (snap.view === 'results' || !snap.selectedOutboundOfferId) {
+      // User was just on results — stay there
+      return;
+    }
+
+    // User was on booking/payment — try to re-match their selection
+    const outboundMatch = refindOfferInResults(snap.selectedOutboundOfferId, snap.selectedOutboundOfferKes);
+    if (!outboundMatch) {
+      // Selected flight no longer in results — stay on results with warning banner
+      showRestoreBanner(`Your flight is no longer available at that fare. Please pick again.`, 'warn');
+      return;
+    }
+
+    selectedOutbound = outboundMatch.selection;
+    let inboundMatch = null;
+    if (snap.selectedInboundOfferId) {
+      inboundMatch = refindOfferInResults(snap.selectedInboundOfferId, snap.selectedInboundOfferKes);
+      if (!inboundMatch) {
+        // Inbound dropped — go to results
+        selectedOutbound = null;
+        showRestoreBanner(`Your return flight is no longer available. Please pick again.`, 'warn');
+        return;
+      }
+      selectedInbound = inboundMatch.selection;
+      selectedOffer = selectedOutbound;
+    } else {
+      selectedOffer = selectedOutbound;
+      selectedInbound = null;
+    }
+
+    // Check for price drift on either leg
+    const priceChanged =
+      outboundMatch.priceChanged ||
+      (inboundMatch && inboundMatch.priceChanged);
+    if (priceChanged) {
+      const oldTotal = (outboundMatch.oldKes || 0) + (inboundMatch?.oldKes || 0);
+      const newTotal = (outboundMatch.newKes || 0) + (inboundMatch?.newKes || 0);
+      const delta = newTotal - oldTotal;
+      const direction = delta > 0 ? 'higher' : 'lower';
+      showRestoreBanner(
+        `Prices may have moved since you signed in — your fare is now KES ${Math.abs(delta).toLocaleString()} ${direction}. Please review before continuing.`,
+        'info'
+      );
+    }
+
+    // Navigate to original view
+    if (snap.view === 'booking' || snap.view === 'payment') {
+      // payment view requires an active merchantRef — fall back to booking
+      proceedToBooking();
+    }
+  }
+
+  // Compact non-blocking banner shown at top of results/booking after restore
+  function showRestoreBanner(message, kind) {
+    // Remove any existing
+    document.getElementById('restore-banner')?.remove();
+    const div = document.createElement('div');
+    div.id = 'restore-banner';
+    const bg = kind === 'warn' ? 'var(--warning-soft)' : 'var(--brand-soft)';
+    const fg = kind === 'warn' ? 'var(--warning)' : 'var(--brand-dark)';
+    div.style.cssText = `
+      position: fixed; top: 72px; left: 50%; transform: translateX(-50%);
+      background: ${bg}; color: ${fg}; padding: 10px 18px; border-radius: 24px;
+      font-size: 13px; font-weight: 500; box-shadow: var(--shadow);
+      z-index: 100; max-width: calc(100vw - 32px); text-align: center;
+      animation: slideDown 0.3s ease;
+    `;
+    div.textContent = message;
+    document.body.appendChild(div);
+    setTimeout(() => { div.style.opacity = '0'; div.style.transition = 'opacity 0.4s'; }, 8000);
+    setTimeout(() => div.remove(), 8500);
   }
 
   // ── Phone OTP ────────────────────────────────────────────────
@@ -11536,6 +11695,27 @@
     try { initCountryPicker('profile', defaultDial); } catch (_) {}
     document.getElementById('profile-phone').value = localNum;
 
+    // Dirty tracking — save button disabled until something changes
+    const saveBtn = document.getElementById('profile-save-btn');
+    if (saveBtn) {
+      saveBtn.disabled = true;
+      const fields = ['profile-first-name','profile-last-name','profile-phone'];
+      const onEdit = () => { saveBtn.disabled = false; };
+      fields.forEach(id => {
+        const el = document.getElementById(id);
+        if (el && !el.dataset.dirtyHooked) {
+          el.addEventListener('input', onEdit);
+          el.dataset.dirtyHooked = '1';
+        }
+      });
+      // Country picker change should also enable save
+      const ccBtn = document.getElementById('profile-phone-cc-btn');
+      if (ccBtn && !ccBtn.dataset.dirtyHooked) {
+        ccBtn.addEventListener('click', () => setTimeout(onEdit, 100));
+        ccBtn.dataset.dirtyHooked = '1';
+      }
+    }
+
     loadSavedTravelers();
   }
 
@@ -11554,8 +11734,13 @@
     };
     const { error } = await sb.from('profiles').upsert({ id: currentUser.id, ...updates });
     const msg = document.getElementById('profile-msg');
+    const saveBtn = document.getElementById('profile-save-btn');
     if (error) { msg.textContent = 'Save failed: ' + error.message; msg.style.color = 'var(--danger)'; }
-    else { msg.textContent = 'Saved ✓'; msg.style.color = 'var(--success)'; setTimeout(() => msg.textContent = '', 3000); }
+    else {
+      msg.textContent = 'Saved ✓'; msg.style.color = 'var(--success)';
+      setTimeout(() => msg.textContent = '', 3000);
+      if (saveBtn) saveBtn.disabled = true;
+    }
     if (!error && updates.first_name) {
       document.getElementById('nav-user-name').textContent = updates.first_name;
       document.getElementById('nav-avatar').textContent = updates.first_name[0].toUpperCase();
