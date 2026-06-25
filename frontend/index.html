@@ -21,8 +21,9 @@
     window.onTurnstileLoad = function () { window.__turnstileFiredEarly = true; };
 
     // EARLY OAuth detection — runs BEFORE body parses.
-    // If we detect an OAuth callback hash AND have a snapshot, mark <html>
-    // so CSS hides home and shows the target view immediately. No flicker.
+    // Marks <html> so CSS hides home and shows the target view immediately.
+    // Then DOMContentLoaded populates the real search bar inputs from the
+    // snapshot, so the user sees their actual route — not blurred placeholders.
     try {
       if (window.location.hash.includes('access_token=')) {
         const raw = sessionStorage.getItem('tf_auth_snapshot');
@@ -30,10 +31,35 @@
           const snap = JSON.parse(raw);
           if (snap?.view && snap.view !== 'home') {
             document.documentElement.setAttribute('data-restoring-view', snap.view);
+            // Stash snapshot for later population (body script clears it after restore)
+            window.__tfBootSnapshot = snap;
           }
         }
       }
     } catch (_) {}
+
+    // Once DOM is ready, populate the real summary bar inputs from the snapshot.
+    // The inputs already exist in the HTML (just empty), so this is a fast
+    // direct-value-set — no skeleton, real fields visible.
+    document.addEventListener('DOMContentLoaded', function() {
+      const snap = window.__tfBootSnapshot;
+      if (!snap || !snap.criteria) return;
+      const c = snap.criteria;
+      const setIfExists = (id, val) => {
+        const el = document.getElementById(id);
+        if (el && val) el.value = val;
+      };
+      // Results-page summary bar
+      setIfExists('r-origin', c.origin);
+      setIfExists('r-destination', c.destination);
+      setIfExists('r-date', c.date);
+      setIfExists('r-return-date', c.returnDate);
+      // Home form (kept in sync in case view falls back)
+      setIfExists('origin', c.origin);
+      setIfExists('destination', c.destination);
+      setIfExists('date', c.date);
+      setIfExists('return-date', c.returnDate);
+    });
   </script>
   <script src="https://challenges.cloudflare.com/turnstile/v0/api.js?onload=onTurnstileLoad" defer></script>
   <style>
@@ -103,10 +129,6 @@
     html[data-restoring-view="my-trips"] #view-my-trips,
     html[data-restoring-view="find-booking"] #view-find-booking {
       display: block !important;
-    }
-    /* The skeleton itself */
-    html[data-restoring-view] .tf-restore-skeleton {
-      padding: 40px 24px; max-width: 1120px; margin: 0 auto; opacity: 0.5;
     }
 
     /* ─────────────────────────────────────────────────────────────
@@ -5902,34 +5924,74 @@
       if (view === 'results' || view === 'booking' || view === 'payment') {
         const targetEl = document.getElementById('view-' + view);
         if (!targetEl) return;
+        // Find the results-layout container so we replace just the flight-card area,
+        // not the whole view (the summary bar at the top is real, already populated).
+        const layout = targetEl.querySelector('.results-layout');
         const overlay = document.createElement('div');
         overlay.id = 'tf-oauth-skeleton';
         overlay.className = 'tf-restore-skeleton';
-        overlay.innerHTML = `
-          <div style="display:grid;grid-template-columns:280px 1fr;gap:20px;">
-            <div>
-              <div class="skeleton" style="height:60px;margin-bottom:12px;border-radius:8px;background:#e5e9ef;"></div>
-              <div class="skeleton" style="height:120px;margin-bottom:12px;border-radius:8px;background:#e5e9ef;"></div>
-              <div class="skeleton" style="height:120px;border-radius:8px;background:#e5e9ef;"></div>
+        // Ghost cards that roughly match real flight-card height (~140px)
+        const cardHtml = `
+          <div class="skeleton tf-ghost-card">
+            <div style="display:flex;justify-content:space-between;align-items:center;padding:18px 20px;">
+              <div style="flex:1;">
+                <div class="skeleton-row" style="width:30%;height:14px;margin-bottom:10px;"></div>
+                <div class="skeleton-row" style="width:65%;height:22px;margin-bottom:8px;"></div>
+                <div class="skeleton-row" style="width:45%;height:12px;"></div>
+              </div>
+              <div style="text-align:right;">
+                <div class="skeleton-row" style="width:90px;height:24px;margin-bottom:6px;margin-left:auto;"></div>
+                <div class="skeleton-row" style="width:60px;height:12px;margin-left:auto;"></div>
+              </div>
             </div>
-            <div>
-              <div class="skeleton" style="height:160px;margin-bottom:12px;border-radius:12px;background:#e5e9ef;"></div>
-              <div class="skeleton" style="height:160px;margin-bottom:12px;border-radius:12px;background:#e5e9ef;"></div>
-              <div class="skeleton" style="height:160px;border-radius:12px;background:#e5e9ef;"></div>
+          </div>`;
+        overlay.innerHTML = `
+          <div class="tf-skel-grid">
+            <aside class="tf-skel-sidebar">
+              <div class="skeleton-row" style="width:50%;height:14px;margin-bottom:14px;"></div>
+              <div class="skeleton-row" style="width:100%;height:34px;margin-bottom:8px;"></div>
+              <div class="skeleton-row" style="width:100%;height:34px;margin-bottom:24px;"></div>
+              <div class="skeleton-row" style="width:60%;height:14px;margin-bottom:14px;"></div>
+              <div class="skeleton-row" style="width:100%;height:34px;margin-bottom:8px;"></div>
+              <div class="skeleton-row" style="width:100%;height:34px;"></div>
+            </aside>
+            <div class="tf-skel-results">
+              ${cardHtml}${cardHtml}${cardHtml}${cardHtml}
             </div>
           </div>
           <style>
-            #tf-oauth-skeleton .skeleton {
-              background: linear-gradient(90deg, #e5e9ef 25%, #f5f6f8 50%, #e5e9ef 75%) !important;
-              background-size: 200% 100% !important;
-              animation: tfShimmer 1.4s infinite;
-            }
+            .tf-restore-skeleton { max-width: 1120px; margin: 0 auto; padding: 24px; opacity: 0.55; pointer-events: none; }
+            .tf-skel-grid { display: grid; grid-template-columns: 260px 1fr; gap: 24px; }
+            .tf-skel-sidebar { background: var(--surface, #fff); border: 1px solid var(--border, #e5e9ef); border-radius: 12px; padding: 20px; }
+            .tf-skel-results > * + * { margin-top: 12px; }
+            .tf-ghost-card { background: var(--surface, #fff); border: 1px solid var(--border, #e5e9ef); border-radius: 12px; }
+            .skeleton-row { background: #e5e9ef; border-radius: 6px;
+              background-image: linear-gradient(90deg, #e5e9ef 25%, #f5f6f8 50%, #e5e9ef 75%);
+              background-size: 200% 100%;
+              animation: tfShimmer 1.4s infinite; }
             @keyframes tfShimmer { 0% { background-position: 200% 0; } 100% { background-position: -200% 0; } }
-            @media (max-width: 900px) {
-              #tf-oauth-skeleton > div:first-child { grid-template-columns: 1fr !important; }
+            @media (max-width: 768px) {
+              .tf-skel-grid { grid-template-columns: 1fr; }
+              .tf-skel-sidebar { display: none; }
             }
           </style>`;
-        targetEl.prepend(overlay);
+        // If we have the results-layout container, replace its contents.
+        // Otherwise inject at the top of the view (booking/payment).
+        if (view === 'results' && layout) {
+          layout.style.position = 'relative';
+          layout.appendChild(overlay);
+        } else {
+          targetEl.prepend(overlay);
+        }
+
+        // Show the search loading modal immediately — same UX as a normal search.
+        // showSearchLoading lives later in the script; check before calling.
+        try {
+          const snap = window.__tfBootSnapshot;
+          if (typeof showSearchLoading === 'function' && snap?.criteria) {
+            showSearchLoading(snap.criteria.origin, snap.criteria.destination);
+          }
+        } catch (_) {}
       }
     } catch (e) {
       console.warn('[early-boot] failed:', e);
@@ -6663,33 +6725,29 @@
   // DATES & TRIP TYPE
   // ============================================================
   // ─── Global date-input clamp helper ─────────────────────────────────────
-  // Used by all <input type="date"> fields across the site. Truncates 5+ digit
-  // years (e.g. "20260" → "2026"), blanks out garbage, and enforces min/max.
+  // Only fires on BLUR (not on every keystroke). Truncates years with MORE than
+  // 4 digits (e.g. "20260" → "2026"). Never touches partial inputs like "2" or "20"
+  // — those are valid mid-typing states the browser handles natively.
   function tfClampDateYear(el) {
     const v = el.value;
     if (!v) return;
     const m = v.match(/^(\d+)-(\d{2})-(\d{2})$/);
     if (!m) return;
     const year = m[1];
-    if (year.length !== 4) {
-      const yr4 = year.slice(0, 4);
-      if (yr4.length === 4 && parseInt(yr4) >= 1900) {
-        el.value = `${yr4}-${m[2]}-${m[3]}`;
-      } else {
-        el.value = '';
-      }
+    // Only act on 5+ digit years — the bug we're fixing. Leave 1-4 digit years alone.
+    if (year.length > 4) {
+      el.value = `${year.slice(0, 4)}-${m[2]}-${m[3]}`;
     }
+    // Enforce min/max only on blur (don't fight the user mid-typing)
     if (el.value && el.min && el.value < el.min) el.value = el.min;
     if (el.value && el.max && el.value > el.max) el.value = el.max;
   }
 
-  // Auto-attach clamp behaviour to any <input type="date"> in the DOM, and
-  // any added later (booking traveler cards, saved-traveler form, etc).
   function tfAttachDateClamp(el) {
     if (!el || el.dataset.tfClampHooked) return;
     el.dataset.tfClampHooked = '1';
-    el.addEventListener('input', () => tfClampDateYear(el));
-    el.addEventListener('blur',  () => tfClampDateYear(el));
+    // BLUR ONLY — input event was too aggressive and reformatted mid-typing.
+    el.addEventListener('blur', () => tfClampDateYear(el));
   }
   function tfAttachDateClampToAll() {
     document.querySelectorAll('input[type="date"]').forEach(tfAttachDateClamp);
