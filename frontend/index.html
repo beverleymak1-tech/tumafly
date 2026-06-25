@@ -11173,14 +11173,35 @@
   // PHASE 4.6 — USER ACCOUNTS + AUTH
   // ============================================================
 
-  // ── Supabase Auth client (uses CDN ESM build) ───────────────
-  // We load supabase-js via dynamic import so it doesn't block initial render.
+  // ── Supabase Auth client (eagerly initialized on page load) ──
+  // Must be eager (not lazy) because supabase-js needs to read the OAuth
+  // hash params from the URL on the same page load that received the redirect.
+  // If we init lazily, the hash might already be cleared by then.
   let _supabase = null;
+  let _supabaseReady = null; // promise resolved when client is ready
+
+  function initSupabase() {
+    if (_supabaseReady) return _supabaseReady;
+    _supabaseReady = (async () => {
+      const { createClient } = await import('https://esm.sh/@supabase/supabase-js@2');
+      _supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
+        auth: {
+          persistSession: true,
+          autoRefreshToken: true,
+          detectSessionInUrl: true,
+          flowType: 'implicit',
+        }
+      });
+      return _supabase;
+    })();
+    return _supabaseReady;
+  }
+  // Kick off init immediately, don't await
+  initSupabase();
+
   async function getSupabase() {
     if (_supabase) return _supabase;
-    const { createClient } = await import('https://esm.sh/@supabase/supabase-js@2');
-    _supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
-    return _supabase;
+    return await initSupabase();
   }
 
   // ── Auth state ───────────────────────────────────────────────
