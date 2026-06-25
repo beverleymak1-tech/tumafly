@@ -5998,36 +5998,47 @@
         // Instead, inject the modal HTML directly with the same #search-loading-root
         // id. When the real function later runs, its hideSearchLoading() tears this
         // down and replaces it with the message-cycling version — seamless handoff.
-        try {
-          if (!document.getElementById('search-loading-root')) {
-            const snap = window.__tfBootSnapshot;
-            const origin = snap?.criteria?.origin || '';
-            const destination = snap?.criteria?.destination || '';
-            const esc = (s) => String(s).replace(/[&<>"']/g, c => ({
-              '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'
-            })[c]);
-            const root = document.createElement('div');
-            root.id = 'search-loading-root';
-            root.className = 'search-loading-backdrop';
-            root.innerHTML = `
-              <div class="search-loading-card">
-                <div class="search-loading-spinner">
-                  <svg viewBox="0 0 56 56" fill="none" aria-hidden="true">
-                    <circle cx="28" cy="28" r="22" stroke="currentColor" stroke-width="3" stroke-opacity="0.15"/>
-                    <path d="M28 6 a22 22 0 0 1 22 22" stroke="currentColor" stroke-width="3" stroke-linecap="round"/>
-                  </svg>
+        //
+        // SKIP only when restoring to booking/payment with full snapshot data:
+        // restoreAuthSnapshot will render the cached booking UI within ~200ms.
+        // For results view, we always show the modal — the legacy "await search"
+        // flow guarantees the user sees fresh results, not stale cached ones.
+        const earlySnap = window.__tfBootSnapshot;
+        const hasFullData = !!(
+          (earlySnap?.view === 'booking' || earlySnap?.view === 'payment') &&
+          earlySnap?.selectedOutboundFull
+        );
+        if (!hasFullData) {
+          try {
+            if (!document.getElementById('search-loading-root')) {
+              const origin = earlySnap?.criteria?.origin || '';
+              const destination = earlySnap?.criteria?.destination || '';
+              const esc = (s) => String(s).replace(/[&<>"']/g, c => ({
+                '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'
+              })[c]);
+              const root = document.createElement('div');
+              root.id = 'search-loading-root';
+              root.className = 'search-loading-backdrop';
+              root.innerHTML = `
+                <div class="search-loading-card">
+                  <div class="search-loading-spinner">
+                    <svg viewBox="0 0 56 56" fill="none" aria-hidden="true">
+                      <circle cx="28" cy="28" r="22" stroke="currentColor" stroke-width="3" stroke-opacity="0.15"/>
+                      <path d="M28 6 a22 22 0 0 1 22 22" stroke="currentColor" stroke-width="3" stroke-linecap="round"/>
+                    </svg>
+                  </div>
+                  ${origin && destination
+                    ? `<div class="search-loading-route">${esc(origin)} <span class="arrow">→</span> ${esc(destination)}</div>`
+                    : ''}
+                  <div class="search-loading-message" id="search-loading-msg">Searching across airlines…</div>
+                  <div class="search-loading-progress"><div class="search-loading-bar"></div></div>
                 </div>
-                ${origin && destination
-                  ? `<div class="search-loading-route">${esc(origin)} <span class="arrow">→</span> ${esc(destination)}</div>`
-                  : ''}
-                <div class="search-loading-message" id="search-loading-msg">Searching across airlines…</div>
-                <div class="search-loading-progress"><div class="search-loading-bar"></div></div>
-              </div>
-            `;
-            document.body.appendChild(root);
+              `;
+              document.body.appendChild(root);
+            }
+          } catch (e) {
+            console.warn('[early-boot] modal inject failed:', e);
           }
-        } catch (e) {
-          console.warn('[early-boot] modal inject failed:', e);
         }
       }
     } catch (e) {
@@ -7685,7 +7696,12 @@
     if (fromButton) { fromButton.classList.add('btn-loading'); fromButton.disabled = true; }
     // Show the branded loading modal — gives the user a sense of motion during the
     // 3-6s that parallel cabin lookups take. Hidden in `finally` below.
-    showSearchLoading(origin, destination);
+    // EXCEPTION: when running silently from backgroundReValidate (after a stagnant
+    // OAuth restore), the user is already looking at populated results/booking page —
+    // showing the spinner would create a jarring second loading state. Skip it.
+    if (!window.__tfRestoreInProgress) {
+      showSearchLoading(origin, destination);
+    }
     // Bot-protection: get a Turnstile token (no-op if widget isn't loaded yet —
     // backend fails open when TURNSTILE_SECRET isn't configured).
     const turnstileToken = await ensureTurnstileToken('search');
@@ -7800,12 +7816,23 @@
       recomputeRangeBounds();
 
       syncResultsSummaryBar(origin, destination, date, returnDate);
-      renderResults();
-      showView('results');
+      // When running silently in the background after a stagnant OAuth restore,
+      // the user is already on results/booking/payment — we must NOT re-render
+      // or navigate or we'd disturb their view. The stagnant render already
+      // showed the cached data; backgroundReValidate handles any necessary
+      // updates (price drift toast / offer-gone banner) on its own.
+      if (!window.__tfRestoreInProgress) {
+        renderResults();
+        showView('results');
+      }
     } catch (e) {
-      showAlert(alertContainer, 'Could not connect. Please check your network and try again.');
+      if (!window.__tfRestoreInProgress) {
+        showAlert(alertContainer, 'Could not connect. Please check your network and try again.');
+      }
     } finally {
-      hideSearchLoading();
+      if (!window.__tfRestoreInProgress) {
+        hideSearchLoading();
+      }
       if (fromButton) { fromButton.classList.remove('btn-loading'); fromButton.disabled = false; }
     }
   }
@@ -11890,26 +11917,49 @@
 
   async function signOut() {
     closeUserDropdown();
-    // Determine where the user is BEFORE signing out so we know whether to
-    // redirect or stay put. Auth-gated views (profile, my-trips, find-booking)
-    // must kick to home — they require a session. Everything else stays put.
+    // Determine where the user is BEFORE signing out so we know which path to take.
+    // Auth-gated views (profile, my-trips) MUST kick to home — they require a
+    // session. Results refreshes (fresh data, no drift). Booking/payment stay
+    // put but silently re-validate against drift.
     const currentView = document.body.getAttribute('data-view') || 'home';
     const authGatedViews = ['profile', 'my-trips'];
     const sb = await getSupabase();
     await sb.auth.signOut();
+
     if (authGatedViews.includes(currentView)) {
       showView('home');
       return;
     }
-    // Stay on current view. Show a contextual toast on booking so the user
-    // understands they can keep going as a guest — they didn't lose anything.
-    if (currentView === 'booking') {
-      showSignedOutToast('Signed out. You can continue booking as a guest.');
-    } else if (currentView === 'payment') {
+
+    if (currentView === 'results' && lastSearchParams) {
+      // Same UX as sign-in on results: fresh data is essential. runSearch shows
+      // the loading modal over existing content, then replaces with new offers.
       showSignedOutToast('Signed out.');
-    } else if (currentView === 'results') {
-      showSignedOutToast('Signed out.');
+      runSearch(lastSearchParams).catch(e => console.warn('[signOut] runSearch failed:', e));
+      return;
     }
+
+    if ((currentView === 'booking' || currentView === 'payment') && selectedOutbound) {
+      // Stay on view. Silent background re-validation — same drift protection
+      // as sign-in stagnant: if the price moved during the session, it's stashed
+      // in pendingPriceUpdate and surfaced at "Continue to payment" click.
+      // User can keep filling in passengers and proceed as guest.
+      showSignedOutToast('Signed out. You can continue booking as a guest.');
+      if (lastSearchParams) {
+        const syntheticSnap = {
+          view: currentView,
+          criteria: lastSearchParams,
+          selectedOutboundOfferId: selectedOutbound?.cabinPricing?.offer_id || null,
+          selectedOutboundOfferKes: selectedOutbound?.cabinPricing?.price_kes || null,
+          selectedInboundOfferId: selectedInbound?.cabinPricing?.offer_id || null,
+          selectedInboundOfferKes: selectedInbound?.cabinPricing?.price_kes || null,
+        };
+        backgroundReValidate(syntheticSnap).catch(e => console.warn('[signOut] bg validate failed:', e));
+      }
+      return;
+    }
+
+    // Other views (home, success): nav update via onSignedOut is enough.
   }
 
   // ── Auth modal ───────────────────────────────────────────────
@@ -11945,17 +11995,12 @@
       // "Continue to payment" click, never mid-form.
       try {
         const view = document.body.getAttribute('data-view') || 'home';
-        // Deep-clone helpers — we want a JSON-safe copy so JSON.stringify works
+        // Deep-clone helper — we want a JSON-safe copy so JSON.stringify works
         const cloneOffer = (sel) => sel ? JSON.parse(JSON.stringify({
           offer: sel.offer,
           cabin: sel.cabin,
           cabinPricing: sel.cabinPricing,
         })) : null;
-        // Only snapshot allOffers for the results view — saves sessionStorage
-        // space when we don't need it. Booking view only needs selected offers.
-        const snapAllOffers = (view === 'results' && Array.isArray(allOffers) && allOffers.length)
-          ? JSON.parse(JSON.stringify(allOffers))
-          : null;
         const snapshot = {
           view,
           criteria: lastSearchParams ? {
@@ -11969,10 +12014,11 @@
           selectedInboundOfferId: selectedInbound?.cabinPricing?.offer_id || null,
           selectedInboundOfferKes: selectedInbound?.cabinPricing?.price_kes || null,
           cabin: selectedOutbound?.cabin || null,
-          // NEW: full offer data for stagnant restore
+          // Full offer data for stagnant restore — ONLY for booking/payment views.
+          // Results view uses the legacy "await search, show ghosts + spinner,
+          // then render" flow so the user never sees stale results.
           selectedOutboundFull: cloneOffer(selectedOutbound),
           selectedInboundFull:  cloneOffer(selectedInbound),
-          allOffersFull: snapAllOffers,
           ts: Date.now(),
         };
         sessionStorage.setItem('tf_auth_snapshot', JSON.stringify(snapshot));
@@ -12072,18 +12118,17 @@
     };
 
     const hasFullSnapshot = !!(
-      (snap.view === 'results' && Array.isArray(snap.allOffersFull) && snap.allOffersFull.length) ||
-      ((snap.view === 'booking' || snap.view === 'payment') && snap.selectedOutboundFull)
+      (snap.view === 'booking' || snap.view === 'payment') && snap.selectedOutboundFull
     );
 
     if (hasFullSnapshot) {
-      // ── STAGNANT PATH — render from snapshot, validate in background ─────
-      console.log('[restore] stagnant path: rendering from snapshot');
+      // ── STAGNANT PATH (booking/payment only) ─────────────────────────────
+      // Results view never takes this path — fresh data matters there, and a
+      // silent swap of search results would be confusing UX. Only booking and
+      // payment get stagnant rendering, where the user has already picked a
+      // specific offer and we just need to silently re-validate the price.
+      console.log('[restore] stagnant path: rendering booking from snapshot');
       try {
-        // Restore JS state from snapshot
-        if (snap.view === 'results' && snap.allOffersFull) {
-          allOffers = snap.allOffersFull;
-        }
         if (snap.selectedOutboundFull) {
           selectedOutbound = snap.selectedOutboundFull;
         }
@@ -12098,25 +12143,15 @@
         // Clear OAuth-restore visuals BEFORE rendering real content
         clearOAuthBootArtifacts();
 
-        // Render the appropriate view directly — no waiting
-        if (snap.view === 'results') {
-          // Populate search bar inputs (HEAD script did this for r-* fields,
-          // but renderResults needs allOffers to be set, which it is)
-          if (typeof renderResults === 'function') renderResults();
-          showView('results');
-        } else if (snap.view === 'booking' || snap.view === 'payment') {
-          // proceedToBooking renders the booking view from selectedOutbound/Inbound
-          proceedToBooking();
-        }
+        // Render the booking view directly — no waiting on a search round-trip
+        proceedToBooking();
       } catch (e) {
         console.warn('[restore] stagnant render failed:', e);
         clearOAuthBootArtifacts();
         // Fall through to legacy path
       }
 
-      // ── Background validation (don't block UI) ──────────────────────────
-      // Wait briefly for Turnstile to be ready, then re-search. If offers
-      // changed materially we surface via pendingPriceUpdate / toast.
+      // Background validation — silent re-search + price-drift detection
       backgroundReValidate(snap).catch(e => console.warn('[restore] bg validate failed:', e));
       return;
     }
