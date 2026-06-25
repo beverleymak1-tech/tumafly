@@ -5990,17 +5990,44 @@
           }
         }
 
-        // ── Foreground spinner: call showSearchLoading() immediately ─────────
-        // It's a function declaration further down this same <script>, so it's
-        // hoisted and callable from here. snap may be missing (race or fresh
-        // sign-in), so pass undefined-safe params — the function null-checks.
+        // ── Foreground spinner: inject modal DOM directly ────────────────
+        // We can't call showSearchLoading() yet — it reads from SEARCH_LOADING_MESSAGES,
+        // a `const` declared later in the script and still in the temporal dead zone.
+        // Function declarations hoist but lexical `const`/`let` do not, so the call
+        // would throw ReferenceError and the try/catch would swallow it silently.
+        // Instead, inject the modal HTML directly with the same #search-loading-root
+        // id. When the real function later runs, its hideSearchLoading() tears this
+        // down and replaces it with the message-cycling version — seamless handoff.
         try {
-          const snap = window.__tfBootSnapshot;
-          if (typeof showSearchLoading === 'function') {
-            showSearchLoading(snap?.criteria?.origin, snap?.criteria?.destination);
+          if (!document.getElementById('search-loading-root')) {
+            const snap = window.__tfBootSnapshot;
+            const origin = snap?.criteria?.origin || '';
+            const destination = snap?.criteria?.destination || '';
+            const esc = (s) => String(s).replace(/[&<>"']/g, c => ({
+              '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'
+            })[c]);
+            const root = document.createElement('div');
+            root.id = 'search-loading-root';
+            root.className = 'search-loading-backdrop';
+            root.innerHTML = `
+              <div class="search-loading-card">
+                <div class="search-loading-spinner">
+                  <svg viewBox="0 0 56 56" fill="none" aria-hidden="true">
+                    <circle cx="28" cy="28" r="22" stroke="currentColor" stroke-width="3" stroke-opacity="0.15"/>
+                    <path d="M28 6 a22 22 0 0 1 22 22" stroke="currentColor" stroke-width="3" stroke-linecap="round"/>
+                  </svg>
+                </div>
+                ${origin && destination
+                  ? `<div class="search-loading-route">${esc(origin)} <span class="arrow">→</span> ${esc(destination)}</div>`
+                  : ''}
+                <div class="search-loading-message" id="search-loading-msg">Searching across airlines…</div>
+                <div class="search-loading-progress"><div class="search-loading-bar"></div></div>
+              </div>
+            `;
+            document.body.appendChild(root);
           }
         } catch (e) {
-          console.warn('[early-boot] showSearchLoading failed:', e);
+          console.warn('[early-boot] modal inject failed:', e);
         }
       }
     } catch (e) {
@@ -6528,6 +6555,32 @@
   // Stashed by runSearch so the fare-timer's "Search again" CTA can re-run the
   // same query when an offer expires mid-checkout.
   let lastSearchParams = null;
+
+  // After OAuth restore, runSearch is fired silently in the background to
+  // re-validate the cached offer. If the price changed, we DON'T disrupt the
+  // user mid-form — we stash the delta here and surface a confirmation dialog
+  // only when they click "Continue to payment". If the offer disappeared entirely,
+  // we replace the booking UI with an error inline (different code path).
+  // Shape: { outboundOld, outboundNew, inboundOld, inboundNew, totalDelta }
+  let pendingPriceUpdate = null;
+
+  // Helper: tear down OAuth-restore visual artifacts (ghost cards + early modal).
+  // Safe to call multiple times. Called when restoreAuthSnapshot decides to do
+  // an immediate snapshot render (no detour through the loading state).
+  function clearOAuthBootArtifacts() {
+    try {
+      // Remove early-injected modal (we'll be rendering real content instead)
+      const root = document.getElementById('search-loading-root');
+      if (root && !window.__tfRestoreInProgress) root.remove();
+      // Clear ghost-card skeleton if it's still in #results-list
+      const list = document.getElementById('results-list');
+      if (list && list.dataset.tfSkeletonDone === '1' && list.querySelector('.tf-ghost-card')) {
+        list.innerHTML = '';
+        delete list.dataset.tfSkeletonDone;
+      }
+      document.documentElement.removeAttribute('data-restoring-view');
+    } catch (_) {}
+  }
 
   // Fare-timer state. Single interval shared between booking + payment views.
   // expiresAtMs: the earlier of selectedOutbound/selectedInbound offer expires_at.
@@ -10530,8 +10583,98 @@
   // ============================================================
   // PAYMENT
   // ============================================================
+  // Surfaced when goToPayment() is called with a pendingPriceUpdate set by
+  // the background re-validation. User accepts → swap selectedOutbound/Inbound
+  // to the fresh selections + retry goToPayment. User cancels → stay on the
+  // booking page (do nothing).
+  function showPriceUpdateModal(update) {
+    // Remove any prior instance
+    document.getElementById('price-update-modal')?.remove();
+    const delta = update.totalDelta;
+    const direction = delta > 0 ? 'increased' : 'decreased';
+    const oldTotal = (update.outboundOld || 0) + (update.inboundOld || 0);
+    const newTotal = (update.outboundNew || 0) + (update.inboundNew || 0);
+    const fmt = (n) => 'KES ' + Math.round(n).toLocaleString();
+    const modal = document.createElement('div');
+    modal.id = 'price-update-modal';
+    modal.style.cssText = `
+      position: fixed; inset: 0; background: rgba(15,25,35,0.5); z-index: 9999;
+      display: flex; align-items: center; justify-content: center; padding: 16px;
+      animation: fadeIn 0.2s ease;
+    `;
+    modal.innerHTML = `
+      <div style="background:var(--surface,#fff);border-radius:16px;padding:28px;max-width:420px;width:100%;box-shadow:0 20px 60px rgba(0,0,0,0.25);">
+        <div style="display:flex;align-items:center;gap:12px;margin-bottom:14px;">
+          <div style="width:40px;height:40px;border-radius:50%;background:var(--warning-soft,#FEF6E7);display:flex;align-items:center;justify-content:center;flex-shrink:0;">
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+              <path d="M12 8v4M12 16h.01" stroke="var(--warning,#B45309)" stroke-width="2.5" stroke-linecap="round"/>
+              <circle cx="12" cy="12" r="10" stroke="var(--warning,#B45309)" stroke-width="2"/>
+            </svg>
+          </div>
+          <h3 style="margin:0;font-size:18px;font-weight:600;color:var(--ink,#0F1923);">Price updated</h3>
+        </div>
+        <p style="margin:0 0 18px;color:var(--text-2,#4A5568);font-size:14px;line-height:1.5;">
+          The fare for your selected flight ${direction} by <strong>${fmt(Math.abs(delta))}</strong> since you signed in.
+        </p>
+        <div style="background:var(--bg,#FAFBFC);border-radius:10px;padding:14px;margin-bottom:18px;font-size:14px;">
+          <div style="display:flex;justify-content:space-between;color:var(--text-3,#8A96A3);margin-bottom:6px;">
+            <span>Previous total</span><span style="text-decoration:line-through;">${fmt(oldTotal)}</span>
+          </div>
+          <div style="display:flex;justify-content:space-between;font-weight:600;color:var(--ink,#0F1923);">
+            <span>New total</span><span>${fmt(newTotal)}</span>
+          </div>
+        </div>
+        <div style="display:flex;gap:10px;">
+          <button onclick="cancelPriceUpdate()" style="flex:1;padding:12px 16px;border-radius:10px;border:1px solid var(--border,#E5E9EF);background:var(--surface,#fff);color:var(--text,#1A202C);font-weight:500;cursor:pointer;font-size:14px;">
+            Go back
+          </button>
+          <button onclick="acceptPriceUpdate()" style="flex:1.4;padding:12px 16px;border-radius:10px;border:none;background:var(--brand,#3D95F5);color:#fff;font-weight:600;cursor:pointer;font-size:14px;">
+            Continue at new price
+          </button>
+        </div>
+      </div>
+    `;
+    document.body.appendChild(modal);
+  }
+
+  function cancelPriceUpdate() {
+    document.getElementById('price-update-modal')?.remove();
+    // pendingPriceUpdate stays set — they can try again later or change flight
+  }
+
+  function acceptPriceUpdate() {
+    if (!pendingPriceUpdate) {
+      document.getElementById('price-update-modal')?.remove();
+      return;
+    }
+    // Swap to fresh selections so goToPayment uses the new offer/price
+    if (pendingPriceUpdate.outboundSelection) {
+      selectedOutbound = pendingPriceUpdate.outboundSelection;
+    }
+    if (pendingPriceUpdate.inboundSelection) {
+      selectedInbound = pendingPriceUpdate.inboundSelection;
+      selectedOffer = selectedOutbound;
+    } else {
+      selectedOffer = selectedOutbound;
+    }
+    pendingPriceUpdate = null;
+    document.getElementById('price-update-modal')?.remove();
+    // Re-render the price panel so the user sees the new total reflected
+    if (typeof renderBookingSummary === 'function') renderBookingSummary();
+    // Now re-enter goToPayment with the updated state
+    goToPayment();
+  }
+
   function goToPayment() {
     clearAlert('booking-alert');
+    // If a background re-validation found price drift, intercept here and
+    // show a confirmation modal BEFORE doing anything else. User must accept
+    // the new price (or cancel) before we proceed. This is the only moment
+    // we surface price drift — never mid-form.
+    if (pendingPriceUpdate) {
+      showPriceUpdateModal(pendingPriceUpdate);
+      return;
+    }
     const r = collectPassengers();
     if (r.error) {
       // Find the first unsaved traveler and surface its errors visually
@@ -11689,6 +11832,31 @@
   function onSignedOut() {
     currentUser = null;
     updateNavForGuest();
+    // Sign-out doesn't redirect — the user stays on whatever view they're on.
+    // For auth-gated views (profile, my-trips), the signOut() caller kicks
+    // back to home before this fires. For results/booking/payment, the view
+    // remains intact (JS state isn't tied to auth — selected offers, passenger
+    // forms, contact info all survive). This matches the "wrong account"
+    // recovery flow: user signs out, fixes account choice, comes back without
+    // losing their work.
+  }
+
+  function showSignedOutToast(message) {
+    document.getElementById('signed-out-toast')?.remove();
+    const div = document.createElement('div');
+    div.id = 'signed-out-toast';
+    div.style.cssText = `
+      position: fixed; top: 72px; left: 50%; transform: translateX(-50%);
+      background: var(--ink,#0F1923); color: #fff; padding: 10px 18px;
+      border-radius: 24px; font-size: 13px; font-weight: 500;
+      box-shadow: var(--shadow); z-index: 200;
+      max-width: calc(100vw - 32px); text-align: center;
+      animation: slideDown 0.3s ease;
+    `;
+    div.textContent = message;
+    document.body.appendChild(div);
+    setTimeout(() => { div.style.opacity = '0'; div.style.transition = 'opacity 0.4s'; }, 4000);
+    setTimeout(() => div.remove(), 4500);
   }
 
   function updateNavForUser(user) {
@@ -11722,9 +11890,26 @@
 
   async function signOut() {
     closeUserDropdown();
+    // Determine where the user is BEFORE signing out so we know whether to
+    // redirect or stay put. Auth-gated views (profile, my-trips, find-booking)
+    // must kick to home — they require a session. Everything else stays put.
+    const currentView = document.body.getAttribute('data-view') || 'home';
+    const authGatedViews = ['profile', 'my-trips'];
     const sb = await getSupabase();
     await sb.auth.signOut();
-    showView('home');
+    if (authGatedViews.includes(currentView)) {
+      showView('home');
+      return;
+    }
+    // Stay on current view. Show a contextual toast on booking so the user
+    // understands they can keep going as a guest — they didn't lose anything.
+    if (currentView === 'booking') {
+      showSignedOutToast('Signed out. You can continue booking as a guest.');
+    } else if (currentView === 'payment') {
+      showSignedOutToast('Signed out.');
+    } else if (currentView === 'results') {
+      showSignedOutToast('Signed out.');
+    }
   }
 
   // ── Auth modal ───────────────────────────────────────────────
@@ -11752,11 +11937,25 @@
   // ── Google OAuth ─────────────────────────────────────────────
   async function signInWithGoogle() {
     try {
-      // Snapshot full state before redirect so we can restore search + selection
-      // after OAuth round-trip. Re-run the search on restore (offers expire) and
-      // re-match the user's selection by offer_id.
+      // Snapshot full state before redirect so we can restore the view INSTANTLY
+      // on return (Trip.com-style "stagnant" UI). We snapshot the full offer
+      // objects so the booking page can render immediately without waiting for
+      // a re-search. A background runSearch then validates silently — price
+      // drift is stashed in pendingPriceUpdate and only surfaced at the
+      // "Continue to payment" click, never mid-form.
       try {
         const view = document.body.getAttribute('data-view') || 'home';
+        // Deep-clone helpers — we want a JSON-safe copy so JSON.stringify works
+        const cloneOffer = (sel) => sel ? JSON.parse(JSON.stringify({
+          offer: sel.offer,
+          cabin: sel.cabin,
+          cabinPricing: sel.cabinPricing,
+        })) : null;
+        // Only snapshot allOffers for the results view — saves sessionStorage
+        // space when we don't need it. Booking view only needs selected offers.
+        const snapAllOffers = (view === 'results' && Array.isArray(allOffers) && allOffers.length)
+          ? JSON.parse(JSON.stringify(allOffers))
+          : null;
         const snapshot = {
           view,
           criteria: lastSearchParams ? {
@@ -11764,11 +11963,16 @@
             passengerCount,
             tripType,
           } : null,
+          // Legacy shallow fields (kept for backward compat if old snapshot lands)
           selectedOutboundOfferId: selectedOutbound?.cabinPricing?.offer_id || null,
           selectedOutboundOfferKes: selectedOutbound?.cabinPricing?.price_kes || null,
           selectedInboundOfferId: selectedInbound?.cabinPricing?.offer_id || null,
           selectedInboundOfferKes: selectedInbound?.cabinPricing?.price_kes || null,
           cabin: selectedOutbound?.cabin || null,
+          // NEW: full offer data for stagnant restore
+          selectedOutboundFull: cloneOffer(selectedOutbound),
+          selectedInboundFull:  cloneOffer(selectedInbound),
+          allOffersFull: snapAllOffers,
           ts: Date.now(),
         };
         sessionStorage.setItem('tf_auth_snapshot', JSON.stringify(snapshot));
@@ -11810,10 +12014,21 @@
   }
 
   // Restore from auth snapshot. Called from onSignedIn after Supabase resolves session.
+  //
+  // New "stagnant" flow (Trip.com style):
+  //   1. Parse snapshot; if it has full offer data → render the target view
+  //      IMMEDIATELY from snapshot (no waiting on Turnstile + search)
+  //   2. Kick off runSearch SILENTLY in the background to re-validate offers
+  //   3. If the validation finds the offer gone → swap UI to an error inline
+  //      If price drifted → stash in pendingPriceUpdate, surface at "Continue
+  //      to payment" click (NEVER mid-form)
+  //      If unchanged → do nothing visible
+  //
+  // Legacy fallback: if the snapshot lacks full offer data (older format), we
+  // fall back to the previous await-runSearch-then-navigate flow.
   let _restoreAttempted = false;
   async function restoreAuthSnapshot() {
     // Guard: onAuthStateChange may fire multiple times (initial session, token refresh).
-    // We only want to run the restore flow once per page load.
     if (_restoreAttempted) return;
     _restoreAttempted = true;
 
@@ -11826,26 +12041,89 @@
       console.log('[restore] snapshot found:', snap);
     } catch (e) { console.warn('[restore] snapshot parse failed', e); return; }
 
-    if (!snap || (Date.now() - snap.ts) > 30 * 60 * 1000) { console.log('[restore] stale snapshot'); return; }
+    if (!snap || (Date.now() - snap.ts) > 30 * 60 * 1000) {
+      console.log('[restore] stale snapshot — cleaning up early-boot artifacts');
+      clearOAuthBootArtifacts();
+      return;
+    }
 
     if (['profile', 'my-trips', 'find-booking'].includes(snap.view)) {
+      clearOAuthBootArtifacts();
       showView(snap.view);
       return;
     }
 
-    if (snap.view === 'home' || !snap.criteria) { console.log('[restore] home or no criteria — skipping'); return; }
+    if (snap.view === 'home' || !snap.criteria) {
+      console.log('[restore] home or no criteria — skipping');
+      clearOAuthBootArtifacts();
+      return;
+    }
 
-    // For results/booking/payment — need to re-run search
-    console.log('[restore] re-running search...');
+    // Match passengerCount + tripType from snapshot before render
+    if (snap.criteria.passengerCount) passengerCount = snap.criteria.passengerCount;
+    if (snap.criteria.tripType) tripType = snap.criteria.tripType;
+
+    // Stash criteria for later re-search and for the fare-timer's "Search again"
+    lastSearchParams = {
+      origin:      snap.criteria.origin,
+      destination: snap.criteria.destination,
+      date:        snap.criteria.date,
+      returnDate:  snap.criteria.returnDate,
+    };
+
+    const hasFullSnapshot = !!(
+      (snap.view === 'results' && Array.isArray(snap.allOffersFull) && snap.allOffersFull.length) ||
+      ((snap.view === 'booking' || snap.view === 'payment') && snap.selectedOutboundFull)
+    );
+
+    if (hasFullSnapshot) {
+      // ── STAGNANT PATH — render from snapshot, validate in background ─────
+      console.log('[restore] stagnant path: rendering from snapshot');
+      try {
+        // Restore JS state from snapshot
+        if (snap.view === 'results' && snap.allOffersFull) {
+          allOffers = snap.allOffersFull;
+        }
+        if (snap.selectedOutboundFull) {
+          selectedOutbound = snap.selectedOutboundFull;
+        }
+        if (snap.selectedInboundFull) {
+          selectedInbound = snap.selectedInboundFull;
+          selectedOffer = selectedOutbound;
+        } else if (selectedOutbound) {
+          selectedOffer = selectedOutbound;
+          selectedInbound = null;
+        }
+
+        // Clear OAuth-restore visuals BEFORE rendering real content
+        clearOAuthBootArtifacts();
+
+        // Render the appropriate view directly — no waiting
+        if (snap.view === 'results') {
+          // Populate search bar inputs (HEAD script did this for r-* fields,
+          // but renderResults needs allOffers to be set, which it is)
+          if (typeof renderResults === 'function') renderResults();
+          showView('results');
+        } else if (snap.view === 'booking' || snap.view === 'payment') {
+          // proceedToBooking renders the booking view from selectedOutbound/Inbound
+          proceedToBooking();
+        }
+      } catch (e) {
+        console.warn('[restore] stagnant render failed:', e);
+        clearOAuthBootArtifacts();
+        // Fall through to legacy path
+      }
+
+      // ── Background validation (don't block UI) ──────────────────────────
+      // Wait briefly for Turnstile to be ready, then re-search. If offers
+      // changed materially we surface via pendingPriceUpdate / toast.
+      backgroundReValidate(snap).catch(e => console.warn('[restore] bg validate failed:', e));
+      return;
+    }
+
+    // ── LEGACY PATH — snapshot lacks full data, fall back to await-search ──
+    console.log('[restore] legacy path: awaiting runSearch');
     try {
-      // Match passengerCount + tripType from snapshot
-      if (snap.criteria.passengerCount) passengerCount = snap.criteria.passengerCount;
-      if (snap.criteria.tripType) tripType = snap.criteria.tripType;
-
-      // Wait for Turnstile script to load + widget to render. On a fresh page load
-      // (which OAuth redirect is) this can take a few seconds. ensureTurnstileToken
-      // returns empty string immediately if turnstile/widget aren't ready yet, which
-      // leads to a 403 from search-flights. Poll until widget is ready.
       console.log('[restore] waiting for Turnstile widget...');
       const tsDeadline = Date.now() + 10000;
       while (Date.now() < tsDeadline) {
@@ -11853,64 +12131,46 @@
         await new Promise(r => setTimeout(r, 100));
       }
       const tsReady = typeof turnstile !== 'undefined' && turnstileSearchWidgetId != null;
-      console.log('[restore] Turnstile ready:', tsReady);
       if (tsReady && !turnstileSearchToken) {
-        // Widget rendered but no token yet — trigger execute and poll
         try { turnstile.execute(turnstileSearchWidgetId); } catch (_) {}
         const tokDeadline = Date.now() + 6000;
         while (Date.now() < tokDeadline && !turnstileSearchToken) {
           await new Promise(r => setTimeout(r, 100));
         }
       }
-      console.log('[restore] Turnstile token present:', !!turnstileSearchToken);
 
       window.__tfRestoreInProgress = true;
-      console.log('[restore] calling runSearch with', snap.criteria);
-
       await runSearch({
         origin:      snap.criteria.origin,
         destination: snap.criteria.destination,
         date:        snap.criteria.date,
         returnDate:  snap.criteria.returnDate,
       });
-
       window.__tfRestoreInProgress = false;
-      console.log('[restore] runSearch complete, allOffers.length=', allOffers?.length);
-      console.log('[restore] body data-view AFTER runSearch:', document.body.getAttribute('data-view'));
-      console.log('[restore] view-home hidden?', document.getElementById('view-home').classList.contains('hidden'));
-      console.log('[restore] view-results hidden?', document.getElementById('view-results').classList.contains('hidden'));
     } catch (e) {
       window.__tfRestoreInProgress = false;
       console.warn('[restore] re-search failed', e);
-      document.getElementById('tf-oauth-skeleton')?.remove();
-      document.documentElement.removeAttribute('data-restoring-view');
+      clearOAuthBootArtifacts();
       showView('home');
       return;
     } finally {
-      document.getElementById('tf-oauth-skeleton')?.remove();
-      document.documentElement.removeAttribute('data-restoring-view');
+      clearOAuthBootArtifacts();
     }
 
-    // Search complete — runSearch already navigated to results view
     if (snap.view === 'results' || !snap.selectedOutboundOfferId) {
-      // User was just on results — stay there
       return;
     }
 
-    // User was on booking/payment — try to re-match their selection
     const outboundMatch = refindOfferInResults(snap.selectedOutboundOfferId, snap.selectedOutboundOfferKes);
     if (!outboundMatch) {
-      // Selected flight no longer in results — stay on results with warning banner
       showRestoreBanner(`Your flight is no longer available at that fare. Please pick again.`, 'warn');
       return;
     }
-
     selectedOutbound = outboundMatch.selection;
     let inboundMatch = null;
     if (snap.selectedInboundOfferId) {
       inboundMatch = refindOfferInResults(snap.selectedInboundOfferId, snap.selectedInboundOfferKes);
       if (!inboundMatch) {
-        // Inbound dropped — go to results
         selectedOutbound = null;
         showRestoreBanner(`Your return flight is no longer available. Please pick again.`, 'warn');
         return;
@@ -11922,10 +12182,7 @@
       selectedInbound = null;
     }
 
-    // Check for price drift on either leg
-    const priceChanged =
-      outboundMatch.priceChanged ||
-      (inboundMatch && inboundMatch.priceChanged);
+    const priceChanged = outboundMatch.priceChanged || (inboundMatch && inboundMatch.priceChanged);
     if (priceChanged) {
       const oldTotal = (outboundMatch.oldKes || 0) + (inboundMatch?.oldKes || 0);
       const newTotal = (outboundMatch.newKes || 0) + (inboundMatch?.newKes || 0);
@@ -11937,11 +12194,92 @@
       );
     }
 
-    // Navigate to original view
     if (snap.view === 'booking' || snap.view === 'payment') {
-      // payment view requires an active merchantRef — fall back to booking
       proceedToBooking();
     }
+  }
+
+  // Silently re-validates the snapshot offers against a fresh runSearch.
+  // - If outbound/inbound disappear: surface an inline banner + revert booking
+  // - If price drifted: stash to pendingPriceUpdate, surfaced at Continue-click
+  // - If unchanged: no-op (no flicker, no toast)
+  async function backgroundReValidate(snap) {
+    // Wait for Turnstile widget — same logic as legacy path but no UI gating
+    const tsDeadline = Date.now() + 10000;
+    while (Date.now() < tsDeadline) {
+      if (typeof turnstile !== 'undefined' && turnstileSearchWidgetId != null) break;
+      await new Promise(r => setTimeout(r, 100));
+    }
+    const tsReady = typeof turnstile !== 'undefined' && turnstileSearchWidgetId != null;
+    if (tsReady && !turnstileSearchToken) {
+      try { turnstile.execute(turnstileSearchWidgetId); } catch (_) {}
+      const tokDeadline = Date.now() + 6000;
+      while (Date.now() < tokDeadline && !turnstileSearchToken) {
+        await new Promise(r => setTimeout(r, 100));
+      }
+    }
+
+    // Run the search WITHOUT navigating (the user is already on the right view,
+    // showing snapshot data). __tfRestoreInProgress=true tells runSearch's
+    // normal flow not to re-route to results. We'll handle re-render below.
+    window.__tfRestoreInProgress = true;
+    try {
+      await runSearch({
+        origin:      snap.criteria.origin,
+        destination: snap.criteria.destination,
+        date:        snap.criteria.date,
+        returnDate:  snap.criteria.returnDate,
+      });
+    } catch (e) {
+      console.warn('[bg-validate] runSearch failed:', e);
+      window.__tfRestoreInProgress = false;
+      return;
+    }
+    window.__tfRestoreInProgress = false;
+
+    // No selected offers to validate? Just refresh the results view silently.
+    if (!snap.selectedOutboundOfferId) {
+      if (snap.view === 'results' && typeof renderResults === 'function') {
+        renderResults();
+      }
+      return;
+    }
+
+    // Re-find selections against fresh data
+    const outboundMatch = refindOfferInResults(snap.selectedOutboundOfferId, snap.selectedOutboundOfferKes);
+    if (!outboundMatch) {
+      // Offer is gone — show a non-blocking error and tell them to pick again
+      showRestoreBanner(`Your selected flight is no longer available. Please pick again.`, 'warn');
+      // Don't auto-clear selection — user can read the message; clicking back-to-results clears
+      return;
+    }
+
+    let inboundMatch = null;
+    if (snap.selectedInboundOfferId) {
+      inboundMatch = refindOfferInResults(snap.selectedInboundOfferId, snap.selectedInboundOfferKes);
+      if (!inboundMatch) {
+        showRestoreBanner(`Your return flight is no longer available. Please pick again.`, 'warn');
+        return;
+      }
+    }
+
+    // Compare prices — but DON'T update the UI. Stash for Continue-click.
+    const priceChanged = outboundMatch.priceChanged || (inboundMatch && inboundMatch.priceChanged);
+    if (priceChanged) {
+      const oldTotal = (outboundMatch.oldKes || 0) + (inboundMatch?.oldKes || 0);
+      const newTotal = (outboundMatch.newKes || 0) + (inboundMatch?.newKes || 0);
+      pendingPriceUpdate = {
+        outboundOld: outboundMatch.oldKes,
+        outboundNew: outboundMatch.newKes,
+        inboundOld:  inboundMatch?.oldKes || 0,
+        inboundNew:  inboundMatch?.newKes || 0,
+        totalDelta:  newTotal - oldTotal,
+        outboundSelection: outboundMatch.selection,
+        inboundSelection:  inboundMatch?.selection || null,
+      };
+      console.log('[bg-validate] price drift stashed:', pendingPriceUpdate);
+    }
+    // If unchanged, do absolutely nothing — user shouldn't perceive the validation
   }
 
   // Compact non-blocking banner shown at top of results/booking after restore
