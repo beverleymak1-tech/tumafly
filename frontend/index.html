@@ -5514,6 +5514,7 @@
                 <span class="phone-cc-prefix" id="contact-phone-cc-prefix">+254</span>
                 <input id="contact-phone" type="tel" class="phone-num" placeholder="712 345 678" inputmode="tel" autocomplete="tel-national">
               </div>
+              <p id="contact-phone-hint" style="display:none;margin:4px 0 0;font-size:12px;color:var(--danger);"></p>
             </div>
           </div>
         </div>
@@ -6247,6 +6248,79 @@
     ['PW', 'Palau', '+680'],
     ['TV', 'Tuvalu', '+688'],
   ];
+
+  // Per-ISO2 expected local digit count [min, max] after stripping dial code + leading zeros.
+  // Countries not in this map fall back to [5, 12] (permissive — catches obvious garbage).
+  const PHONE_DIGIT_COUNTS = {
+    // East Africa
+    KE:[9,9], UG:[9,9], TZ:[9,9], RW:[9,9], ET:[9,9], SS:[9,9],
+    BI:[8,8], DJ:[8,8], ER:[7,7], SO:[9,9], SD:[9,9],
+    // West / Central Africa
+    NG:[10,10], GH:[9,9], CI:[10,10], SN:[9,9], CM:[9,9], CD:[9,9],
+    CG:[9,9], GA:[8,8], CF:[8,8], GQ:[9,9], ML:[8,8], BF:[8,8],
+    NE:[8,8], TD:[8,8], MR:[8,8], GM:[7,7], GN:[9,9], GW:[7,7],
+    SL:[8,8], LR:[8,8], TG:[8,8], BJ:[8,8], ST:[7,7], CV:[7,7],
+    // Southern Africa
+    ZA:[9,9], ZM:[9,9], ZW:[9,9], BW:[8,8], NA:[9,9], MZ:[9,9],
+    MW:[9,9], AO:[9,9], MG:[9,9], MU:[8,8], LS:[8,8], SZ:[8,8],
+    SC:[7,7], KM:[7,7],
+    // North Africa
+    EG:[10,10], MA:[9,9], DZ:[9,9], TN:[8,8], LY:[9,9], EH:[9,9],
+    // Middle East
+    AE:[9,9], QA:[8,8], SA:[9,9], KW:[8,8], BH:[8,8], OM:[8,8],
+    JO:[9,9], LB:[8,8], IL:[9,9], PS:[9,9], IQ:[10,10],
+    SY:[9,9], YE:[9,9], IR:[10,10], TR:[10,10],
+    // Europe
+    GB:[10,10], IE:[9,9], FR:[9,9], DE:[9,11], ES:[9,9], IT:[9,10],
+    PT:[9,9], NL:[9,9], BE:[9,9], LU:[9,10], CH:[9,9], AT:[10,11],
+    DK:[8,8], SE:[8,10], NO:[8,8], FI:[9,10], IS:[7,7], PL:[9,9],
+    CZ:[9,9], SK:[9,9], HU:[9,9], RO:[9,9], BG:[9,9], GR:[10,10],
+    CY:[8,8], MT:[8,8], RS:[9,9], HR:[8,9], SI:[8,8], BA:[8,8],
+    ME:[8,8], MK:[8,8], AL:[9,9], XK:[8,8], EE:[7,8], LV:[8,8],
+    LT:[8,8], BY:[9,9], UA:[9,9], MD:[8,8], RU:[10,10],
+    GE:[9,9], AM:[8,8], AZ:[9,9],
+    // Americas
+    US:[10,10], CA:[10,10], MX:[10,10], BR:[10,11], AR:[10,10],
+    CL:[9,9], CO:[10,10], PE:[9,9], VE:[10,10], EC:[9,9], BO:[8,8],
+    PY:[9,9], UY:[8,9], GY:[7,7], SR:[7,7], CR:[8,8], PA:[8,8],
+    GT:[8,8], HN:[8,8], SV:[8,8], NI:[8,8], BZ:[7,7], CU:[8,8],
+    DO:[10,10], HT:[8,8], JM:[10,10], TT:[10,10], BS:[10,10],
+    BB:[10,10], PR:[10,10],
+    // Asia
+    CN:[11,11], HK:[8,8], MO:[8,8], TW:[9,9], JP:[10,11], KR:[10,11],
+    IN:[10,10], PK:[10,10], BD:[10,10], LK:[9,9], MV:[7,7], NP:[10,10],
+    BT:[8,8], AF:[9,9], TH:[9,9], VN:[9,10], LA:[9,9], KH:[8,9],
+    MM:[9,10], MY:[9,10], SG:[8,8], ID:[9,12], PH:[10,10], BN:[7,7],
+    KZ:[10,10], UZ:[9,9], KG:[9,9], TJ:[9,9], TM:[8,8],
+    // Oceania
+    AU:[9,9], NZ:[8,9], FJ:[7,7], PG:[8,8], WS:[7,7], TO:[7,7],
+  };
+
+  // Returns null if phone is valid, or a human-readable error string.
+  // iso: ISO-2 from countryPickerState; localDigits: digits after stripping dial code + leading zeros.
+  function validatePhoneLocal(iso, localDigits) {
+    if (!localDigits) return 'Please enter a phone number.';
+    const range = PHONE_DIGIT_COUNTS[iso] || [5, 12];
+    const n = localDigits.length;
+    if (n < range[0] || n > range[1]) return 'Invalid phone number.';
+    return null;
+  }
+
+  // Shows or clears the inline hint beneath a phone-input-group.
+  function showPhoneHint(hintId, grpId, msg) {
+    const hint = document.getElementById(hintId);
+    const grp  = document.getElementById(grpId);
+    if (!hint) return;
+    if (msg) {
+      hint.textContent = msg;
+      hint.style.display = 'block';
+      if (grp) grp.classList.add('pax-input-err');
+    } else {
+      hint.textContent = '';
+      hint.style.display = 'none';
+      if (grp) grp.classList.remove('pax-input-err');
+    }
+  }
 
   // Convert ISO-2 to a regional-indicator flag emoji ("KE" → "🇰🇪").
   function isoToFlag(iso2) {
@@ -8665,6 +8739,21 @@
     // Initialise the contact phone country picker (idempotent — sets the default
     // dial code + flag if not yet set, otherwise preserves whatever the user picked).
     initCountryPicker('contact', '+254');
+    // Wire real-time digit-count validation on the contact phone field.
+    // Attach only once per page load (guarded by data attribute).
+    const contactPhoneEl = document.getElementById('contact-phone');
+    if (contactPhoneEl && !contactPhoneEl.dataset.phoneValidHooked) {
+      contactPhoneEl.dataset.phoneValidHooked = '1';
+      let phoneBlurred = false;
+      const runContactPhoneValidation = () => {
+        const iso = countryPickerState.contact?.iso || 'KE';
+        const local = contactPhoneEl.value.replace(/\D/g, '').replace(/^0+/, '');
+        const err = validatePhoneLocal(iso, local);
+        showPhoneHint('contact-phone-hint', 'contact-phone-group', err);
+      };
+      contactPhoneEl.addEventListener('blur', () => { phoneBlurred = true; runContactPhoneValidation(); });
+      contactPhoneEl.addEventListener('input', () => { if (phoneBlurred) runContactPhoneValidation(); });
+    }
     // Kick off baggage options fetch in the background — when it arrives, the
     // Baggage card swaps from the static fallback to the active picker.
     loadBaggageForBookingOffer().then(() => {
@@ -10461,14 +10550,16 @@
       return;
     }
     document.getElementById('contact-email')?.classList.remove('pax-input-err');
-    if (!phoneLocal) {
+    const phoneIso = countryPickerState.contact?.iso || 'KE';
+    const phoneErr = validatePhoneLocal(phoneIso, phoneLocal);
+    if (phoneErr) {
+      showPhoneHint('contact-phone-hint', 'contact-phone-group', phoneErr);
+      showAlert('booking-alert', phoneErr);
       const grp = document.getElementById('contact-phone-group');
-      if (grp) grp.classList.add('pax-input-err');
-      showAlert('booking-alert', 'Please enter a phone number.');
       setTimeout(() => grp?.scrollIntoView({ behavior: 'smooth', block: 'center' }), 50);
       return;
     }
-    document.getElementById('contact-phone-group')?.classList.remove('pax-input-err');
+    showPhoneHint('contact-phone-hint', 'contact-phone-group', null);
 
     passengerData = r.passengers;
     contactData = { email, phone_number: phone };
@@ -12008,9 +12099,20 @@
 
   async function saveProfile() {
     if (!currentUser) return;
-    const sel = countryPickerState['profile'] || { dial: '+254' };
-    const phoneLocal = document.getElementById('profile-phone').value.replace(/\D/g, '');
-    const fullPhone = phoneLocal ? sel.dial + phoneLocal : null;
+    const sel = countryPickerState['profile'] || { iso: 'KE', dial: '+254' };
+    const phoneLocalRaw = document.getElementById('profile-phone').value.replace(/\D/g, '').replace(/^0+/, '');
+    // Validate digit count before saving — prevents storing an unusable number
+    if (phoneLocalRaw) {
+      const profilePhoneErr = validatePhoneLocal(sel.iso || 'KE', phoneLocalRaw);
+      if (profilePhoneErr) {
+        const msg = document.getElementById('profile-msg');
+        if (msg) { msg.textContent = profilePhoneErr; msg.style.color = 'var(--danger)'; }
+        document.getElementById('profile-phone-group')?.classList.add('pax-input-err');
+        return;
+      }
+    }
+    document.getElementById('profile-phone-group')?.classList.remove('pax-input-err');
+    const fullPhone = phoneLocalRaw ? sel.dial + phoneLocalRaw : null;
 
     const sb = await getSupabase();
     const updates = {
