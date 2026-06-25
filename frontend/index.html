@@ -11478,7 +11478,12 @@
       const sb = await getSupabase();
       const { error } = await sb.auth.signInWithOAuth({
         provider: 'google',
-        options: { redirectTo: window.location.origin }
+        options: {
+          redirectTo: window.location.origin,
+          // Force Google to always show the account chooser — prevents auto-signin
+          // with a previously-used account on shared devices and lets users switch.
+          queryParams: { prompt: 'select_account' },
+        }
       });
       if (error) showAuthError('auth-choose-error', error.message);
     } catch (e) {
@@ -11511,22 +11516,20 @@
     let snap;
     try {
       const raw = sessionStorage.getItem('tf_auth_snapshot');
-      if (!raw) return;
+      if (!raw) { console.log('[restore] no snapshot'); return; }
       snap = JSON.parse(raw);
       sessionStorage.removeItem('tf_auth_snapshot');
-    } catch (_) { return; }
+      console.log('[restore] snapshot found:', snap);
+    } catch (e) { console.warn('[restore] snapshot parse failed', e); return; }
 
-    // Stale snapshot — older than 30 min, skip
-    if (!snap || (Date.now() - snap.ts) > 30 * 60 * 1000) return;
+    if (!snap || (Date.now() - snap.ts) > 30 * 60 * 1000) { console.log('[restore] stale snapshot'); return; }
 
-    // Account/trip views — just route there
     if (['profile', 'my-trips', 'find-booking'].includes(snap.view)) {
       showView(snap.view);
       return;
     }
 
-    // Home — nothing to restore
-    if (snap.view === 'home' || !snap.criteria) return;
+    if (snap.view === 'home' || !snap.criteria) { console.log('[restore] home or no criteria — skipping'); return; }
 
     // For results/booking/payment — need to re-run search
     try {
@@ -11534,12 +11537,16 @@
       if (snap.criteria.passengerCount) passengerCount = snap.criteria.passengerCount;
       if (snap.criteria.tripType) tripType = snap.criteria.tripType;
 
-      // Reset Turnstile widget so a fresh token gets generated for the re-search.
-      try { resetTurnstile('search'); } catch (_) {}
-      await new Promise(r => setTimeout(r, 200));
+      // On a fresh page load (which OAuth redirect is), the Turnstile widget is
+      // mid-execute populating its initial token. Calling reset() + execute() now
+      // races with the in-flight execute and we end up with no token (→ 403).
+      // Instead: just WAIT for the existing execute to deliver a token, then proceed.
+      // Poll up to 8s for the initial Turnstile token.
+      const tsDeadline = Date.now() + 8000;
+      while (Date.now() < tsDeadline && !turnstileSearchToken) {
+        await new Promise(r => setTimeout(r, 100));
+      }
 
-      // Mark restore-in-progress so runSearch skips the modal — we already
-      // have a skeleton + welcome banner from earlyOAuthBoot.
       window.__tfRestoreInProgress = true;
 
       await runSearch({
