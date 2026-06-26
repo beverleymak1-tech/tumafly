@@ -5722,6 +5722,7 @@
           <span class="phone-cc-prefix" id="profile-phone-cc-prefix">+254</span>
           <input id="profile-phone" type="tel" class="phone-num" placeholder="712 345 678" inputmode="tel" autocomplete="tel-national">
         </div>
+        <p id="profile-phone-hint" style="display:none;margin:4px 0 0;font-size:12px;color:var(--danger);"></p>
       </div>
       <button class="account-save-btn" id="profile-save-btn" onclick="saveProfile()" disabled>Save changes</button>
       <div id="profile-msg" style="font-size:13px;margin-top:10px;"></div>
@@ -12169,31 +12170,56 @@
 
   // Helper: re-find a selection in fresh search results by offer_id.
   // Returns { selection, priceChanged: bool, oldKes, newKes } or null if not found.
-  // Builds a stable identity for a flight — same airline + flight number +
-  // departure time across all segments yields the same string. Resilient to
-  // Duffel offer_id rotation, which happens frequently (offers regenerate
-  // every ~20-30min even when the underlying flight is unchanged).
+  // Builds a stable identity for a flight — same airline + same flight number
+  // on the same DATE + same route = same flight. Date-only (not full timestamp)
+  // avoids ISO format mismatches between snapshot (serialized at sign-in) and
+  // fresh search (deserialized fresh from Duffel) — these can differ in
+  // timezone formatting (`Z` vs `+00:00`), millisecond precision, etc.
+  //
+  // Includes slice origin/destination as belt-and-suspenders in case two
+  // unrelated flights ever share carrier+flight#+date (shouldn't happen in
+  // the real world, but defensive coding is cheap here).
   function buildFlightSignature(offer) {
     if (!offer || !offer.slices) return '';
     try {
-      return offer.slices.map(sl =>
-        (sl.segments || []).map(s => {
-          const carrier = s.marketing_carrier?.iata_code || s.operating_carrier?.iata_code || '';
-          const flight  = s.marketing_carrier_flight_number || s.operating_carrier_flight_number || '';
-          const dep     = s.departing_at || '';
-          return `${carrier}${flight}@${dep}`;
-        }).join('|')
-      ).join('||');
-    } catch (_) { return ''; }
+      return offer.slices.map(sl => {
+        const orig = sl.origin?.iata_code || (typeof sl.origin === 'string' ? sl.origin : '');
+        const dest = sl.destination?.iata_code || (typeof sl.destination === 'string' ? sl.destination : '');
+        const segSigs = (sl.segments || []).map(s => {
+          const carrier = s.marketing_carrier?.iata_code
+            || (typeof s.marketing_carrier === 'string' ? s.marketing_carrier : '')
+            || s.operating_carrier?.iata_code
+            || (typeof s.operating_carrier === 'string' ? s.operating_carrier : '')
+            || '';
+          const flight  = s.marketing_carrier_flight_number
+            || s.operating_carrier_flight_number
+            || '';
+          // Strip down to YYYY-MM-DD — avoids timezone/precision mismatches
+          let depDate = '';
+          if (s.departing_at) {
+            const m = String(s.departing_at).match(/^(\d{4}-\d{2}-\d{2})/);
+            if (m) depDate = m[1];
+          }
+          return `${carrier}${flight}@${depDate}`;
+        }).join('|');
+        return `${orig}-${dest}:${segSigs}`;
+      }).join('||');
+    } catch (e) {
+      console.warn('[signature] build failed:', e);
+      return '';
+    }
   }
 
   // Two-pass lookup:
   //   1. Strict offer_id match — fast, exact, used when Duffel didn't rotate the id
   //   2. Itinerary signature + cabin match — fallback when the id rotated but
-  //      the flight (same airline/flight#/departure) is still bookable
+  //      the flight (same airline/flight#/date/route) is still bookable
   //
   // snapshotSelection (optional) is the full {offer, cabin, cabinPricing} from
   // the snapshot. When passed, pass-2 can run; otherwise we're limited to pass-1.
+  //
+  // On a complete miss, logs diagnostic info so we can see why matching failed
+  // (target signature vs what was available in fresh results).
   function refindOfferInResults(offerId, oldKes, snapshotSelection) {
     // PASS 1 — exact offer_id match
     if (offerId) {
@@ -12216,8 +12242,11 @@
       const targetSig   = buildFlightSignature(snapshotSelection.offer);
       const targetCabin = snapshotSelection.cabin;
       if (targetSig) {
+        const availSigs = []; // diagnostic only
         for (const ob of allOffers) {
-          if (buildFlightSignature(ob) !== targetSig) continue;
+          const obSig = buildFlightSignature(ob);
+          availSigs.push({ sig: obSig, cabins: (ob.cabinPricings || ob.cabin_pricings || []).map(c => c.cabin) });
+          if (obSig !== targetSig) continue;
           const cabins = ob.cabinPricings || ob.cabin_pricings || [];
           for (const cp of cabins) {
             if (cp.cabin !== targetCabin) continue;
@@ -12230,6 +12259,11 @@
             };
           }
         }
+        // No match — log so we can debug what actually came back
+        console.warn('[refind] signature MISS — target:', targetSig, '| cabin:', targetCabin);
+        console.warn('[refind] available offers (first 5):', availSigs.slice(0, 5));
+      } else {
+        console.warn('[refind] could not build target signature; snapshot offer shape:', snapshotSelection.offer);
       }
     }
     return null;
@@ -12677,11 +12711,9 @@
     document.getElementById('profile-phone').value = localNum;
 
     // Live validation on profile phone field — matches the booking-page pattern.
-    // Stays quiet while typing the first time (blur-first), then validates live
-    // so the user gets immediate feedback as they correct it. Uses the same
-    // showPhoneHint helper as the booking-page contact phone, except profile
-    // has no separate inline hint element — we surface errors via profile-msg
-    // and mark the field red via the existing .pax-input-err class.
+    // Inline hint sits directly under the phone input (not under the Save button)
+    // so the user knows immediately which field has the issue. The Save success
+    // message ("Saved!") stays under the button via profile-msg.
     const profPhoneEl = document.getElementById('profile-phone');
     if (profPhoneEl && !profPhoneEl.dataset.phoneValidHooked) {
       profPhoneEl.dataset.phoneValidHooked = '1';
@@ -12689,26 +12721,9 @@
       const runProfilePhoneValidation = () => {
         const iso = countryPickerState.profile?.iso || 'KE';
         const local = profPhoneEl.value.replace(/\D/g, '').replace(/^0+/, '');
-        const msgEl = document.getElementById('profile-msg');
-        const grp   = document.getElementById('profile-phone-group');
-        if (!local) {
-          // Empty is allowed on profile (phone is optional); just clear any error
-          if (msgEl && msgEl.textContent && msgEl.style.color === 'var(--danger)') {
-            msgEl.textContent = '';
-          }
-          grp?.classList.remove('pax-input-err');
-          return;
-        }
-        const err = validatePhoneLocal(iso, local);
-        if (err) {
-          if (msgEl) { msgEl.textContent = err; msgEl.style.color = 'var(--danger)'; }
-          grp?.classList.add('pax-input-err');
-        } else {
-          if (msgEl && msgEl.style.color === 'var(--danger)') {
-            msgEl.textContent = '';
-          }
-          grp?.classList.remove('pax-input-err');
-        }
+        // Empty is allowed on profile (phone is optional)
+        const err = local ? validatePhoneLocal(iso, local) : null;
+        showPhoneHint('profile-phone-hint', 'profile-phone-group', err);
       };
       profPhoneEl.addEventListener('blur',  () => { profPhoneBlurred = true; runProfilePhoneValidation(); });
       profPhoneEl.addEventListener('input', () => { if (profPhoneBlurred) runProfilePhoneValidation(); });
@@ -12742,17 +12757,17 @@
     if (!currentUser) return;
     const sel = countryPickerState['profile'] || { iso: 'KE', dial: '+254' };
     const phoneLocalRaw = document.getElementById('profile-phone').value.replace(/\D/g, '').replace(/^0+/, '');
-    // Validate digit count before saving — prevents storing an unusable number
+    // Validate digit count before saving — prevents storing an unusable number.
+    // Show error via the inline hint under the phone field (same place as the
+    // live validator), not under the Save button.
     if (phoneLocalRaw) {
       const profilePhoneErr = validatePhoneLocal(sel.iso || 'KE', phoneLocalRaw);
       if (profilePhoneErr) {
-        const msg = document.getElementById('profile-msg');
-        if (msg) { msg.textContent = profilePhoneErr; msg.style.color = 'var(--danger)'; }
-        document.getElementById('profile-phone-group')?.classList.add('pax-input-err');
+        showPhoneHint('profile-phone-hint', 'profile-phone-group', profilePhoneErr);
         return;
       }
     }
-    document.getElementById('profile-phone-group')?.classList.remove('pax-input-err');
+    showPhoneHint('profile-phone-hint', 'profile-phone-group', null);
     const fullPhone = phoneLocalRaw ? sel.dial + phoneLocalRaw : null;
 
     const sb = await getSupabase();
