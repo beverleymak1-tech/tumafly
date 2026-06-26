@@ -12201,7 +12201,9 @@
     }
   }
 
-  // Two-pass lookup:
+  // Two-pass lookup against the actual offer.cabins dict structure (NOT an array):
+  //   offer.cabins = { economy: {offer_id, price_kes, ...}, premium: {...}, business: {...}, first: {...} }
+  //
   //   1. Strict offer_id match — fast, exact, used when Duffel didn't rotate the id
   //   2. Itinerary signature + cabin match — fallback when the id rotated but
   //      the flight (same airline/flight#/date/route) is still bookable
@@ -12209,17 +12211,17 @@
   // snapshotSelection (optional) is the full {offer, cabin, cabinPricing} from
   // the snapshot. When passed, pass-2 can run; otherwise we're limited to pass-1.
   //
-  // On a complete miss, logs diagnostic info so we can see why matching failed
-  // (target signature vs what was available in fresh results).
+  // On a complete miss, logs diagnostic info so we can see why matching failed.
   function refindOfferInResults(offerId, oldKes, snapshotSelection) {
     // PASS 1 — exact offer_id match
     if (offerId) {
       for (const ob of allOffers) {
-        const cabins = ob.cabinPricings || ob.cabin_pricings || [];
-        for (const cp of cabins) {
-          if (cp.offer_id === offerId) {
+        const cabins = ob.cabins || {};
+        for (const cabinKey of Object.keys(cabins)) {
+          const cp = cabins[cabinKey];
+          if (cp?.offer_id === offerId) {
             return {
-              selection: { offer: ob, cabin: cp.cabin, cabinPricing: cp },
+              selection: { offer: ob, cabin: cabinKey, cabinPricing: cp },
               priceChanged: oldKes && cp.price_kes !== oldKes,
               oldKes: oldKes || null,
               newKes: cp.price_kes,
@@ -12236,14 +12238,14 @@
         const availSigs = []; // diagnostic only
         for (const ob of allOffers) {
           const obSig = buildFlightSignature(ob);
-          availSigs.push({ sig: obSig, cabins: (ob.cabinPricings || ob.cabin_pricings || []).map(c => c.cabin) });
+          const cabins = ob.cabins || {};
+          availSigs.push({ sig: obSig, cabins: Object.keys(cabins) });
           if (obSig !== targetSig) continue;
-          const cabins = ob.cabinPricings || ob.cabin_pricings || [];
-          for (const cp of cabins) {
-            if (cp.cabin !== targetCabin) continue;
+          const cp = cabins[targetCabin];
+          if (cp) {
             console.log('[refind] matched by signature (offer_id rotated):', offerId, '→', cp.offer_id);
             return {
-              selection: { offer: ob, cabin: cp.cabin, cabinPricing: cp },
+              selection: { offer: ob, cabin: targetCabin, cabinPricing: cp },
               priceChanged: oldKes && cp.price_kes !== oldKes,
               oldKes: oldKes || null,
               newKes: cp.price_kes,
