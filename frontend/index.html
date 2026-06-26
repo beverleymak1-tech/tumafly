@@ -5945,6 +5945,23 @@
       <div id="auth-profile-error" class="auth-error hidden"></div>
       <button class="auth-btn" id="auth-profile-continue-btn" onclick="completeProfile()" style="margin-top:14px;">Continue</button>
     </div>
+
+    <!-- Step 4: Phone change verification (when adding/changing phone on an existing account) -->
+    <div id="auth-step-phone-change" class="hidden">
+      <h2 class="auth-title">Verify your phone</h2>
+      <p class="auth-sub" id="auth-pc-sub">We sent a 6-digit code to your number.</p>
+      <div class="auth-otp-row" id="auth-pc-row">
+        <input type="text" maxlength="1" inputmode="numeric" class="pc-digit" data-i="0" oninput="pcInput(this)" onkeydown="pcKeydown(event,this)">
+        <input type="text" maxlength="1" inputmode="numeric" class="pc-digit" data-i="1" oninput="pcInput(this)" onkeydown="pcKeydown(event,this)">
+        <input type="text" maxlength="1" inputmode="numeric" class="pc-digit" data-i="2" oninput="pcInput(this)" onkeydown="pcKeydown(event,this)">
+        <input type="text" maxlength="1" inputmode="numeric" class="pc-digit" data-i="3" oninput="pcInput(this)" onkeydown="pcKeydown(event,this)">
+        <input type="text" maxlength="1" inputmode="numeric" class="pc-digit" data-i="4" oninput="pcInput(this)" onkeydown="pcKeydown(event,this)">
+        <input type="text" maxlength="1" inputmode="numeric" class="pc-digit" data-i="5" oninput="pcInput(this)" onkeydown="pcKeydown(event,this)">
+      </div>
+      <div id="auth-pc-error" class="auth-error hidden"></div>
+      <button class="auth-btn" id="auth-pc-verify-btn" onclick="verifyPhoneChange()">Verify</button>
+      <p class="auth-resend">Didn't get it? <button onclick="resendPhoneChange()" id="auth-pc-resend-btn">Resend code</button></p>
+    </div>
   </div>
 </div>
 
@@ -12180,6 +12197,7 @@
     document.getElementById('auth-step-choose').classList.remove('hidden');
     document.getElementById('auth-step-otp').classList.add('hidden');
     document.getElementById('auth-step-profile').classList.add('hidden');
+    document.getElementById('auth-step-phone-change').classList.add('hidden');
     document.getElementById('auth-choose-error').classList.add('hidden');
     document.getElementById('auth-phone').value = '';
     // Initialise the country picker (defaults to +254 KE)
@@ -12836,6 +12854,10 @@
         id: user.id,
         first_name: first,
         last_name: last,
+        // pendingPhone was just verified by Supabase via verifyOtp — auth.users.phone
+        // is now set. We mirror it to profiles.phone so app queries don't need to
+        // hit auth.users (which requires service_role).
+        phone: pendingPhone || user.phone || null,
         ...(email ? { email } : {}),
       };
       const { error: profileErr } = await sb.from('profiles').upsert(profileUpdates);
@@ -12975,8 +12997,6 @@
     const sel = countryPickerState['profile'] || { iso: 'KE', dial: '+254' };
     const phoneLocalRaw = document.getElementById('profile-phone').value.replace(/\D/g, '').replace(/^0+/, '');
     // Validate digit count before saving — prevents storing an unusable number.
-    // Show error via the inline hint under the phone field (same place as the
-    // live validator), not under the Save button.
     if (phoneLocalRaw) {
       const profilePhoneErr = validatePhoneLocal(sel.iso || 'KE', phoneLocalRaw);
       if (profilePhoneErr) {
@@ -12985,13 +13005,38 @@
       }
     }
     showPhoneHint('profile-phone-hint', 'profile-phone-group', null);
-    const fullPhone = phoneLocalRaw ? sel.dial + phoneLocalRaw : null;
+    const newPhone = phoneLocalRaw ? sel.dial + phoneLocalRaw : null;
 
+    // ── Phone-change branch ─────────────────────────────────────
+    // If the user is adding or changing a phone, we MUST verify it via OTP
+    // before writing to profiles.phone — otherwise auth.users.phone stays
+    // empty and the next phone-OTP signin would create a duplicate account.
+    // Identity preservation: once auth.users.phone is set, OTP'ing that
+    // number signs the user back into THIS same account, not a new one.
+    const currentVerifiedPhone = currentUser.phone || null;
+    const phoneChanged = newPhone && newPhone !== currentVerifiedPhone;
+    if (phoneChanged) {
+      // Save the name fields first (immediate, no OTP needed) so the user
+      // doesn't lose those edits if the phone-OTP step is cancelled
+      const sb = await getSupabase();
+      const nameUpdates = {
+        id: currentUser.id,
+        first_name: document.getElementById('profile-first-name').value.trim(),
+        last_name:  document.getElementById('profile-last-name').value.trim(),
+        email:      currentUser.email,
+      };
+      await sb.from('profiles').upsert(nameUpdates);
+      // Kick off the phone-change OTP flow
+      startPhoneChange(newPhone);
+      return;
+    }
+
+    // ── Name/email only branch (no phone change) ────────────────
     const sb = await getSupabase();
     const updates = {
       first_name: document.getElementById('profile-first-name').value.trim(),
       last_name:  document.getElementById('profile-last-name').value.trim(),
-      phone:      fullPhone,
+      phone:      currentVerifiedPhone,   // keep existing verified phone
       email:      currentUser.email,
     };
     const { error } = await sb.from('profiles').upsert({ id: currentUser.id, ...updates });
@@ -13006,6 +13051,136 @@
     if (!error && updates.first_name) {
       document.getElementById('nav-user-name').textContent = updates.first_name;
       document.getElementById('nav-avatar').textContent = updates.first_name[0].toUpperCase();
+    }
+  }
+
+  // ── Phone-change OTP flow (for Account page) ─────────────────
+  // CRITICAL: This uses sb.auth.updateUser({ phone }) which writes to
+  // auth.users.phone — THE source of truth Supabase uses to match
+  // future phone-OTP signins. After verify, OTP'ing this number signs
+  // the user back into THIS account, preserving identity across methods.
+  let pendingPhoneChange = null;   // E.164 phone string awaiting verification
+
+  async function startPhoneChange(newPhone) {
+    pendingPhoneChange = newPhone;
+    try {
+      const sb = await getSupabase();
+      // Supabase sends an SMS OTP to the new phone. auth.users.phone is NOT
+      // updated yet — that only happens on successful verifyOtp(phone_change).
+      const { error } = await sb.auth.updateUser({ phone: newPhone });
+      if (error) {
+        // Common case: phone already belongs to another auth user. Friendly
+        // message rather than the raw Supabase string.
+        const msg = (error.message || '').toLowerCase().includes('already')
+          ? 'This phone is already linked to another account. If it\'s yours, sign out and sign in with that number.'
+          : (error.message || 'Could not start phone verification. Please try again.');
+        const profMsg = document.getElementById('profile-msg');
+        profMsg.textContent = msg; profMsg.style.color = 'var(--danger)';
+        pendingPhoneChange = null;
+        return;
+      }
+      // Open the auth modal at the phone-change step
+      document.getElementById('auth-overlay').classList.remove('hidden');
+      document.getElementById('auth-step-choose').classList.add('hidden');
+      document.getElementById('auth-step-otp').classList.add('hidden');
+      document.getElementById('auth-step-profile').classList.add('hidden');
+      document.getElementById('auth-step-phone-change').classList.remove('hidden');
+      document.getElementById('auth-pc-sub').textContent = `We sent a 6-digit code to ${newPhone}.`;
+      document.getElementById('auth-pc-error').classList.add('hidden');
+      document.querySelectorAll('.pc-digit').forEach(i => {
+        i.value = '';
+        i.classList.remove('filled');
+      });
+      document.querySelector('.pc-digit').focus();
+    } catch (e) {
+      const profMsg = document.getElementById('profile-msg');
+      profMsg.textContent = e.message || 'Could not start phone verification.';
+      profMsg.style.color = 'var(--danger)';
+      pendingPhoneChange = null;
+    }
+  }
+
+  function pcInput(el) {
+    el.value = el.value.replace(/\D/g,'').slice(-1);
+    if (el.value) el.classList.add('filled'); else el.classList.remove('filled');
+    const i = parseInt(el.dataset.i);
+    if (el.value && i < 5) document.querySelectorAll('.pc-digit')[i + 1].focus();
+    const digits = [...document.querySelectorAll('.pc-digit')].map(d => d.value);
+    if (digits.every(d => d)) verifyPhoneChange();
+  }
+  function pcKeydown(e, el) {
+    if (e.key === 'Backspace' && !el.value) {
+      const i = parseInt(el.dataset.i);
+      if (i > 0) document.querySelectorAll('.pc-digit')[i - 1].focus();
+    }
+  }
+
+  async function verifyPhoneChange() {
+    if (!pendingPhoneChange) return;
+    const token = [...document.querySelectorAll('.pc-digit')].map(d => d.value).join('');
+    if (token.length < 6) return;
+    const btn = document.getElementById('auth-pc-verify-btn');
+    btn.disabled = true; btn.textContent = 'Verifying…';
+    try {
+      const sb = await getSupabase();
+      // type:'phone_change' is the Supabase-defined value for verifying a
+      // phone update initiated via auth.updateUser({ phone }).
+      const { error } = await sb.auth.verifyOtp({
+        phone: pendingPhoneChange,
+        token,
+        type: 'phone_change',
+      });
+      if (error) throw error;
+
+      // ✅ auth.users.phone is now updated. Mirror to profiles.phone so
+      // app queries reflect it without needing service_role.
+      const newPhone = pendingPhoneChange;
+      await sb.from('profiles').upsert({
+        id: currentUser.id,
+        phone: newPhone,
+      });
+
+      // Refresh currentUser so subsequent saves see the new phone
+      try {
+        const { data: { user: refreshed } } = await sb.auth.getUser();
+        if (refreshed) currentUser = refreshed;
+      } catch (_) {}
+
+      pendingPhoneChange = null;
+      closeAuthModal();
+
+      // Toast on the Account page
+      const profMsg = document.getElementById('profile-msg');
+      if (profMsg) {
+        profMsg.textContent = 'Phone verified and saved ✓';
+        profMsg.style.color = 'var(--success)';
+        setTimeout(() => { profMsg.textContent = ''; }, 4000);
+      }
+      const saveBtn = document.getElementById('profile-save-btn');
+      if (saveBtn) saveBtn.disabled = true;
+    } catch (e) {
+      showAuthError('auth-pc-error', e.message || 'Invalid code. Try again.');
+      document.querySelectorAll('.pc-digit').forEach(i => {
+        i.value = '';
+        i.classList.remove('filled');
+      });
+      document.querySelector('.pc-digit').focus();
+    } finally {
+      btn.disabled = false; btn.textContent = 'Verify';
+    }
+  }
+
+  async function resendPhoneChange() {
+    if (!pendingPhoneChange) return;
+    const btn = document.getElementById('auth-pc-resend-btn');
+    btn.disabled = true;
+    try {
+      const sb = await getSupabase();
+      await sb.auth.updateUser({ phone: pendingPhoneChange });
+      setTimeout(() => { btn.disabled = false; }, 30000);
+    } catch (e) {
+      showAuthError('auth-pc-error', 'Failed to resend. Please wait a moment.');
+      btn.disabled = false;
     }
   }
 
