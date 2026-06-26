@@ -12084,6 +12084,11 @@
   // Uses Google Identity Services One Tap / FedCM popup.
   // JS state (selected offers, passenger forms, everything) survives intact —
   // no snapshot, no restore, no ghost cards needed.
+  //
+  // Nonce handling: GSI auto-includes a nonce in the ID token. Supabase
+  // requires the raw nonce to match what we passed to GSI's initialize().
+  // We generate a random nonce, SHA-256 hash it for GSI, and pass the raw
+  // value to signInWithIdToken — Supabase hashes its side and compares.
   async function signInWithGoogle() {
     const btn = document.querySelector('.auth-google-btn');
     const setLoading = (on) => {
@@ -12092,54 +12097,62 @@
       btn.style.opacity = on ? '0.6' : '';
     };
 
+    // Generate a random nonce (raw + SHA-256 hex)
+    async function makeNonce() {
+      const bytes = new Uint8Array(32);
+      crypto.getRandomValues(bytes);
+      const raw = Array.from(bytes).map(b => b.toString(16).padStart(2, '0')).join('');
+      const hashBuf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(raw));
+      const hashHex = Array.from(new Uint8Array(hashBuf))
+        .map(b => b.toString(16).padStart(2, '0')).join('');
+      return { raw, hashed: hashHex };
+    }
+
     try {
       // Ensure GSI library is ready (it loads async)
       await waitForGSI();
 
       setLoading(true);
+      const nonce = await makeNonce();
 
       await new Promise((resolve, reject) => {
-        // Track whether the callback already fired to avoid double-resolution
         let settled = false;
         const settle = (fn, val) => { if (!settled) { settled = true; fn(val); } };
 
         google.accounts.id.initialize({
           client_id: TUMAFLY_GOOGLE_CLIENT_ID,
-          // Callback fires when user selects an account from the GSI popup
+          // Hashed nonce goes into the ID token Google issues
+          nonce: nonce.hashed,
+          use_fedcm_for_prompt: true,    // future-proofs against FedCM-mandatory deprecation
+          auto_select: false,            // always show account chooser
+          cancel_on_tap_outside: true,
+          itp_support: true,             // ITP-friendly on Safari
           callback: async (response) => {
             try {
               const sb = await getSupabase();
               const { error } = await sb.auth.signInWithIdToken({
                 provider: 'google',
                 token: response.credential,
+                // Raw nonce — Supabase hashes it server-side to compare against the token
+                nonce: nonce.raw,
               });
               if (error) settle(reject, error);
               else settle(resolve);
             } catch (e) { settle(reject, e); }
           },
-          auto_select: false,        // always show account chooser
-          cancel_on_tap_outside: true,
-          itp_support: true,         // ITP-friendly on Safari
         });
 
-        google.accounts.id.prompt((notification) => {
-          if (notification.isNotDisplayed()) {
-            // GSI throttles the prompt if the user dismissed it too recently.
-            // Most common on desktop Chrome; FedCM on Chrome bypasses this.
-            const reason = notification.getNotDisplayedReason();
-            const msg = (reason === 'suppressed_by_user' || reason === 'opt_out_or_no_session')
-              ? 'Google sign-in is temporarily paused by your browser. Please use your phone number instead, or try again later.'
-              : 'Google sign-in could not be displayed. Please use your phone number instead.';
-            settle(reject, new Error(msg));
-          }
-          if (notification.isDismissedMoment()) {
-            const reason = notification.getDismissedReason();
-            // 'credential_returned' means the callback will fire — don't settle yet
-            if (reason !== 'credential_returned') {
-              settle(reject, new Error('__cancelled__'));
-            }
-          }
-        });
+        // With use_fedcm_for_prompt:true, prompt() returns a PromptMomentNotification
+        // but the status methods (isNotDisplayed / isDismissedMoment) are deprecated.
+        // We use the simpler pattern: if the callback fires, we resolve. Otherwise
+        // a timeout catches the "user closed without picking" case.
+        google.accounts.id.prompt();
+
+        // Timeout fallback: 60s should be more than enough for the picker UI.
+        // If no callback by then, treat as cancelled (user closed the popup).
+        setTimeout(() => {
+          settle(reject, new Error('__cancelled__'));
+        }, 60000);
       });
 
       // ✅ Sign-in succeeded — onAuthStateChange fires → onSignedIn → nav updates.
@@ -12150,9 +12163,10 @@
     } catch (e) {
       setLoading(false);
       if (e.message !== '__cancelled__') {
-        showAuthError('auth-choose-error', e.message || 'Something went wrong. Please try again.');
+        const msg = e.message || 'Something went wrong. Please try again.';
+        showAuthError('auth-choose-error', msg);
+        console.warn('[gsi] sign-in failed:', e);
       }
-      // If cancelled: modal stays open, no error shown — user just didn't pick an account
     }
   }
 
