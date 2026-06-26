@@ -11895,7 +11895,11 @@
   // ── Phone OTP ────────────────────────────────────────────────
   async function sendOtp() {
     const sel = countryPickerState['auth'] || { dial: '+254' };
-    const raw = document.getElementById('auth-phone').value.replace(/\D/g, '');
+    // Normalize identically to saveProfile: strip non-digits, then strip leading
+    // zero(s) — the national trunk prefix that's never part of E.164. Without
+    // this, "0703…" becomes "+2540703…" (wrong, 11 digits) and "703…" becomes
+    // "+254703…" (correct, 9 digits) — the same person would hit two accounts.
+    const raw = document.getElementById('auth-phone').value.replace(/\D/g, '').replace(/^0+/, '');
     if (!raw || raw.length < 6) {
       showAuthError('auth-choose-error', 'Please enter a valid phone number.');
       return;
