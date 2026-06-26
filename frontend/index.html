@@ -353,14 +353,63 @@
     }
     .auth-btn:hover { background: var(--brand-dark); }
     .auth-btn:disabled { opacity: 0.6; cursor: not-allowed; }
-    .auth-otp-row { display: flex; gap: 8px; margin-bottom: 16px; }
-    .auth-otp-row input {
-      flex: 1; text-align: center; font-size: 22px; font-weight: 700;
-      padding: 12px 4px; border: 1.5px solid var(--border-2);
-      border-radius: var(--radius-sm); font-family: var(--mono);
-      color: var(--ink); background: var(--surface);
+    .auth-otp-row {
+      display: flex; gap: 10px; margin-bottom: 16px;
+      justify-content: center;
     }
-    .auth-otp-row input:focus { outline: none; border-color: var(--brand); }
+    .auth-otp-row input {
+      width: 44px; height: 56px;
+      text-align: center; font-size: 24px; font-weight: 600;
+      border: 1.5px solid var(--border-2);
+      border-radius: 10px;
+      font-family: var(--mono);
+      color: var(--ink); background: var(--surface);
+      transition: border-color 0.12s ease, box-shadow 0.12s ease, background 0.12s ease;
+      padding: 0;
+    }
+    .auth-otp-row input:focus {
+      outline: none;
+      border-color: var(--brand);
+      box-shadow: 0 0 0 3px var(--brand-soft, rgba(61,149,245,0.18));
+    }
+    .auth-otp-row input.filled {
+      border-color: var(--brand);
+      background: var(--brand-soft, rgba(61,149,245,0.06));
+    }
+    @media (max-width: 380px) {
+      .auth-otp-row { gap: 6px; }
+      .auth-otp-row input { width: 40px; height: 52px; font-size: 22px; }
+    }
+    /* ── Profile capture step ───────────────────────────────── */
+    .auth-verified-phone {
+      display: flex; align-items: center; gap: 10px;
+      padding: 11px 13px;
+      background: rgba(34,197,94,0.08);
+      border: 1px solid rgba(34,197,94,0.28);
+      border-radius: var(--radius-sm);
+      margin-bottom: 18px;
+      font-size: 14px; color: var(--ink); font-weight: 500;
+    }
+    .auth-verified-phone .auth-verified-badge {
+      margin-left: auto;
+      color: #16A34A;
+      font-size: 13px; font-weight: 600;
+      white-space: nowrap;
+    }
+    .auth-optional-pill {
+      display: inline-block;
+      margin-left: 6px;
+      padding: 1px 8px;
+      background: var(--border);
+      border-radius: 999px;
+      font-size: 11px; font-weight: 600;
+      color: var(--text-3);
+      vertical-align: middle;
+    }
+    .auth-hint {
+      font-size: 12px; color: var(--text-3);
+      margin-top: 5px; margin-bottom: 4px; line-height: 1.4;
+    }
     .auth-resend { font-size: 13px; color: var(--text-2); text-align: center; margin-top: 12px; }
     .auth-resend button { background: none; border: none; color: var(--brand); cursor: pointer; font-weight: 600; font-size: 13px; }
     .auth-error { font-size: 13px; color: var(--danger); margin-top: 8px; text-align: center; }
@@ -5872,6 +5921,30 @@
       <button class="auth-btn" id="auth-verify-btn" onclick="verifyOtp()">Verify</button>
       <p class="auth-resend">Didn't get it? <button onclick="resendOtp()" id="auth-resend-btn">Resend code</button></p>
     </div>
+
+    <!-- Step 3: Complete profile (first-time phone signup only) -->
+    <div id="auth-step-profile" class="hidden">
+      <h2 class="auth-title">Almost there!</h2>
+      <p class="auth-sub">Tell us a bit about yourself.</p>
+      <label class="auth-label">Verified phone number</label>
+      <div class="auth-verified-phone">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+          <circle cx="12" cy="12" r="10" fill="#16A34A"/>
+          <path d="M8 12.5l2.8 2.8 5.2-5.6" stroke="#fff" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>
+        </svg>
+        <span id="auth-verified-phone-display"></span>
+        <span class="auth-verified-badge">Verified</span>
+      </div>
+      <label class="auth-label">First name</label>
+      <input id="auth-profile-first" type="text" class="auth-input" autocomplete="given-name" placeholder="Your first name" style="margin-bottom:12px;">
+      <label class="auth-label">Last name</label>
+      <input id="auth-profile-last" type="text" class="auth-input" autocomplete="family-name" placeholder="Your last name" style="margin-bottom:12px;">
+      <label class="auth-label">Email <span class="auth-optional-pill">Optional</span></label>
+      <input id="auth-profile-email" type="email" class="auth-input" autocomplete="email" placeholder="your@email.com" inputmode="email">
+      <p class="auth-hint">Used for booking receipts and account recovery.</p>
+      <div id="auth-profile-error" class="auth-error hidden"></div>
+      <button class="auth-btn" id="auth-profile-continue-btn" onclick="completeProfile()" style="margin-top:14px;">Continue</button>
+    </div>
   </div>
 </div>
 
@@ -6723,6 +6796,8 @@
     // Hide both bars so they don't briefly flash on re-entry
     document.getElementById('booking-fare-timer')?.classList.add('hidden');
     document.getElementById('payment-fare-timer')?.classList.add('hidden');
+    // Remove the expired modal if it's still up (e.g. user used nav menu instead of Refresh)
+    document.getElementById('search-expired-modal')?.remove();
   }
 
   function tickFareTimer() {
@@ -6749,18 +6824,13 @@
 
     if (expired) {
       fareTimerExpired = true;
-      bar.classList.add('expired');
-      bar.innerHTML = `
-        <div class="ft-label">
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-            <circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="1.8"/>
-            <path d="M12 7v6M12 16.5v.5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
-          </svg>
-          <span><strong>Your selected fare expired.</strong> Run the search again to see current options.</span>
-        </div>
-        <button type="button" class="ft-search-again" onclick="rerunSearchFromExpiry()">Search again</button>
-      `;
+      // Hide the timer bars — the modal replaces them. No need to mutate
+      // the banner to an expired state because the modal interrupts the user
+      // immediately and the Refresh CTA re-runs the search.
+      document.getElementById('booking-fare-timer')?.classList.add('hidden');
+      document.getElementById('payment-fare-timer')?.classList.add('hidden');
       disablePaymentActions();
+      showSearchExpiredModal();
       // Stop the interval — nothing more to tick.
       if (fareTimerHandle) {
         clearInterval(fareTimerHandle);
@@ -10587,6 +10657,49 @@
   // can't proceed at all — the offer is gone. Sitting them mid-form filling
   // in passengers for a flight they can no longer book is worse UX than
   // pulling them out to find another.
+
+  // ── Search-expired modal (fare-timer expiry) ─────────────────
+  // Fires when the fare-timer hits zero on booking/payment views. Duffel
+  // offers have a hard server-side expiry; once past it any payment attempt
+  // would 422 — so we interrupt the user with a modal rather than let them
+  // submit a doomed form. Refresh CTA re-runs the search with the same
+  // criteria and lands them on fresh results. Same visual language as
+  // showOfferGoneModal for consistency.
+  function showSearchExpiredModal() {
+    if (document.getElementById('search-expired-modal')) return;
+
+    const modal = document.createElement('div');
+    modal.id = 'search-expired-modal';
+    modal.className = 'search-loading-backdrop';
+    modal.innerHTML = `
+      <div class="search-loading-card" style="max-width:400px;text-align:center;">
+        <div style="display:flex;justify-content:center;margin-bottom:14px;">
+          <div style="width:48px;height:48px;border-radius:50%;background:var(--warning-soft,#FEF6E7);display:flex;align-items:center;justify-content:center;">
+            <svg width="26" height="26" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+              <path d="M6 3h12M6 21h12M7 3v3.5c0 2 1.2 3.8 3 4.6L12 12l2-.9c1.8-.8 3-2.6 3-4.6V3M7 21v-3.5c0-2 1.2-3.8 3-4.6L12 12l2 .9c1.8.8 3 2.6 3 4.6V21"
+                stroke="var(--warning,#B45309)" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+            </svg>
+          </div>
+        </div>
+        <div style="font-size:18px;font-weight:600;color:var(--ink,#0F1923);margin-bottom:8px;">
+          Search results have expired
+        </div>
+        <div style="font-size:14px;color:var(--text-2,#4A5568);margin-bottom:20px;line-height:1.5;">
+          Prices and availability can change quickly. Refresh your search for the latest options.
+        </div>
+        <button type="button" id="search-expired-refresh" style="width:100%;padding:12px 16px;border-radius:10px;border:none;background:var(--brand,#3D95F5);color:#fff;font-weight:600;cursor:pointer;font-size:14px;">
+          Refresh
+        </button>
+      </div>
+    `;
+    document.body.appendChild(modal);
+
+    document.getElementById('search-expired-refresh').addEventListener('click', () => {
+      modal.remove();
+      rerunSearchFromExpiry();
+    });
+  }
+
   function showOfferGoneModal(opts) {
     opts = opts || {};
     document.getElementById('offer-gone-modal')?.remove();
@@ -12066,6 +12179,7 @@
     document.getElementById('auth-overlay').classList.remove('hidden');
     document.getElementById('auth-step-choose').classList.remove('hidden');
     document.getElementById('auth-step-otp').classList.add('hidden');
+    document.getElementById('auth-step-profile').classList.add('hidden');
     document.getElementById('auth-choose-error').classList.add('hidden');
     document.getElementById('auth-phone').value = '';
     // Initialise the country picker (defaults to +254 KE)
@@ -12591,7 +12705,10 @@
       document.getElementById('auth-step-otp').classList.remove('hidden');
       document.getElementById('auth-otp-sub').textContent = `We sent a 6-digit code to ${pendingPhone}.`;
       document.getElementById('auth-otp-error').classList.add('hidden');
-      document.querySelectorAll('.otp-digit').forEach(i => i.value = '');
+      document.querySelectorAll('.otp-digit').forEach(i => {
+        i.value = '';
+        i.classList.remove('filled');
+      });
       document.querySelector('.otp-digit').focus();
     } catch (e) {
       showAuthError('auth-choose-error', e.message || 'Failed to send code. Try again.');
@@ -12615,6 +12732,9 @@
   // OTP digit box UX — auto-advance, backspace-back
   function otpInput(el) {
     el.value = el.value.replace(/\D/g,'').slice(-1);
+    // Manage filled-state styling
+    if (el.value) el.classList.add('filled');
+    else el.classList.remove('filled');
     const i = parseInt(el.dataset.i);
     if (el.value && i < 5) {
       document.querySelectorAll('.otp-digit')[i + 1].focus();
@@ -12639,13 +12759,112 @@
       const sb = await getSupabase();
       const { error } = await sb.auth.verifyOtp({ phone: pendingPhone, token, type: 'sms' });
       if (error) throw error;
-      closeAuthModal();
+      // Branch: first-time phone signup → profile capture; returning → close
+      await maybeShowProfileStepOrClose();
     } catch (e) {
       showAuthError('auth-otp-error', e.message || 'Invalid code. Try again.');
-      document.querySelectorAll('.otp-digit').forEach(i => i.value = '');
+      document.querySelectorAll('.otp-digit').forEach(i => {
+        i.value = '';
+        i.classList.remove('filled');
+      });
       document.querySelector('.otp-digit').focus();
     } finally {
       btn.disabled = false; btn.textContent = 'Verify';
+    }
+  }
+
+  // After successful phone OTP verification, check if this is a first-time
+  // signup (no name anywhere). If so, show profile capture step. Otherwise
+  // just close the modal — returning user, nothing more to ask.
+  // Google sign-in never reaches here (it has its own flow + always provides name).
+  async function maybeShowProfileStepOrClose() {
+    try {
+      const sb = await getSupabase();
+      const { data: { user } } = await sb.auth.getUser();
+      if (!user) { closeAuthModal(); return; }
+
+      const { data: profile } = await sb.from('profiles')
+        .select('first_name, last_name, email')
+        .eq('id', user.id)
+        .maybeSingle();
+
+      const hasName = (profile?.first_name && profile.first_name.trim())
+        || user.user_metadata?.first_name
+        || user.user_metadata?.full_name;
+
+      if (hasName) { closeAuthModal(); return; }
+
+      // First-time phone signup: show profile capture step
+      document.getElementById('auth-step-otp').classList.add('hidden');
+      document.getElementById('auth-step-profile').classList.remove('hidden');
+      document.getElementById('auth-verified-phone-display').textContent = pendingPhone;
+      document.getElementById('auth-profile-first').value  = '';
+      document.getElementById('auth-profile-last').value   = '';
+      document.getElementById('auth-profile-email').value  = profile?.email || user.email || '';
+      document.getElementById('auth-profile-error').classList.add('hidden');
+      document.getElementById('auth-profile-first').focus();
+    } catch (e) {
+      console.warn('[auth] profile-step check failed:', e);
+      closeAuthModal();
+    }
+  }
+
+  // Save profile from the post-OTP capture step.
+  // Upserts profiles row + updates user_metadata so the nav reflects the name.
+  async function completeProfile() {
+    const first = document.getElementById('auth-profile-first').value.trim();
+    const last  = document.getElementById('auth-profile-last').value.trim();
+    const email = document.getElementById('auth-profile-email').value.trim();
+
+    if (!first) { showAuthError('auth-profile-error', 'Please enter your first name.'); return; }
+    if (!last)  { showAuthError('auth-profile-error', 'Please enter your last name.'); return; }
+    if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      showAuthError('auth-profile-error', 'Please enter a valid email or leave it blank.');
+      return;
+    }
+
+    const btn = document.getElementById('auth-profile-continue-btn');
+    btn.disabled = true; btn.textContent = 'Saving…';
+
+    try {
+      const sb = await getSupabase();
+      const { data: { user } } = await sb.auth.getUser();
+      if (!user) throw new Error('Session expired. Please sign in again.');
+
+      const fullName = `${first} ${last}`.trim();
+      const profileUpdates = {
+        id: user.id,
+        first_name: first,
+        last_name: last,
+        ...(email ? { email } : {}),
+      };
+      const { error: profileErr } = await sb.from('profiles').upsert(profileUpdates);
+      if (profileErr) throw profileErr;
+
+      // Mirror to user_metadata so nav + greetings reflect the name immediately,
+      // without needing a profiles fetch on every page load.
+      const { error: metaErr } = await sb.auth.updateUser({
+        data: {
+          first_name: first,
+          last_name: last,
+          full_name: fullName,
+          ...(email ? { email } : {}),
+        },
+      });
+      if (metaErr) console.warn('[profile] meta update failed:', metaErr);
+
+      // Refresh nav with the new name
+      try {
+        const refreshed = { ...user, user_metadata: { ...(user.user_metadata||{}), first_name: first, last_name: last, full_name: fullName } };
+        updateNavForUser(refreshed);
+        currentUser = refreshed;
+      } catch (_) {}
+
+      closeAuthModal();
+    } catch (e) {
+      showAuthError('auth-profile-error', e.message || 'Failed to save. Please try again.');
+    } finally {
+      btn.disabled = false; btn.textContent = 'Continue';
     }
   }
 
