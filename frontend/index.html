@@ -12082,6 +12082,20 @@
           selectedOutboundOfferKes: selectedOutbound?.cabinPricing?.price_kes || null,
           selectedInboundOfferId: selectedInbound?.cabinPricing?.offer_id || null,
           selectedInboundOfferKes: selectedInbound?.cabinPricing?.price_kes || null,
+          // Critical: pass full selection objects so refindOfferInResults can
+          // fall back to signature matching when Duffel rotates the offer_id.
+          // Without these, sign-out triggers false "sold out" modals just like
+          // sign-in did before we fixed it the first time.
+          selectedOutboundFull: selectedOutbound ? {
+            offer: selectedOutbound.offer,
+            cabin: selectedOutbound.cabin,
+            cabinPricing: selectedOutbound.cabinPricing,
+          } : null,
+          selectedInboundFull: selectedInbound ? {
+            offer: selectedInbound.offer,
+            cabin: selectedInbound.cabin,
+            cabinPricing: selectedInbound.cabinPricing,
+          } : null,
         };
         backgroundReValidate(syntheticSnap).catch(e => console.warn('[signOut] bg validate failed:', e));
       }
