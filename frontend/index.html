@@ -19,49 +19,10 @@
     // we just record that it's ready. The body script checks this flag.
     window.__turnstileFiredEarly = false;
     window.onTurnstileLoad = function () { window.__turnstileFiredEarly = true; };
-
-    // EARLY OAuth detection — runs BEFORE body parses.
-    // Marks <html> so CSS hides home and shows the target view immediately.
-    // Then DOMContentLoaded populates the real search bar inputs from the
-    // snapshot, so the user sees their actual route — not blurred placeholders.
-    try {
-      if (window.location.hash.includes('access_token=')) {
-        const raw = sessionStorage.getItem('tf_auth_snapshot');
-        if (raw) {
-          const snap = JSON.parse(raw);
-          if (snap?.view && snap.view !== 'home') {
-            document.documentElement.setAttribute('data-restoring-view', snap.view);
-            // Stash snapshot for later population (body script clears it after restore)
-            window.__tfBootSnapshot = snap;
-          }
-        }
-      }
-    } catch (_) {}
-
-    // Once DOM is ready, populate the real summary bar inputs from the snapshot.
-    // The inputs already exist in the HTML (just empty), so this is a fast
-    // direct-value-set — no skeleton, real fields visible.
-    document.addEventListener('DOMContentLoaded', function() {
-      const snap = window.__tfBootSnapshot;
-      if (!snap || !snap.criteria) return;
-      const c = snap.criteria;
-      const setIfExists = (id, val) => {
-        const el = document.getElementById(id);
-        if (el && val) el.value = val;
-      };
-      // Results-page summary bar
-      setIfExists('r-origin', c.origin);
-      setIfExists('r-destination', c.destination);
-      setIfExists('r-date', c.date);
-      setIfExists('r-return-date', c.returnDate);
-      // Home form (kept in sync in case view falls back)
-      setIfExists('origin', c.origin);
-      setIfExists('destination', c.destination);
-      setIfExists('date', c.date);
-      setIfExists('return-date', c.returnDate);
-    });
   </script>
   <script src="https://challenges.cloudflare.com/turnstile/v0/api.js?onload=onTurnstileLoad" defer></script>
+  <!-- Google Identity Services — popup sign-in, no page redirect -->
+  <script src="https://accounts.google.com/gsi/client" async></script>
   <style>
     :root {
       --brand: #3D95F5;
@@ -11946,6 +11907,25 @@
     return await initSupabase();
   }
 
+  // ── Google Identity Services config ──────────────────────────
+  // GSI popup flow — no page redirect, JS state survives sign-in.
+  // Client ID must match the one configured in Supabase Auth → Google provider.
+  const TUMAFLY_GOOGLE_CLIENT_ID = '736237077957-sjk1ka0h6qj1dvj3l1inveqbogils1nb.apps.googleusercontent.com';
+
+  // Wait for GSI library to load (it's async — usually ready by first user interaction).
+  function waitForGSI(timeoutMs = 5000) {
+    if (window.google?.accounts?.id) return Promise.resolve();
+    return new Promise((resolve, reject) => {
+      const start = Date.now();
+      const check = () => {
+        if (window.google?.accounts?.id) resolve();
+        else if (Date.now() - start > timeoutMs) reject(new Error('Google sign-in is not available. Please use your phone number instead.'));
+        else setTimeout(check, 100);
+      };
+      check();
+    });
+  }
+
   // ── Auth state ───────────────────────────────────────────────
   let currentUser = null;  // supabase User object or null
   let authCallback = null; // fn to call after successful sign-in (post-booking nudge)
@@ -11971,18 +11951,17 @@
     console.log('[auth] onSignedIn called, current view:', document.body.getAttribute('data-view'));
     currentUser = user;
     updateNavForUser(user);
-    // Clean OAuth tokens out of the URL after sign-in completes
+    // Clean any stale OAuth tokens from URL (shouldn't appear with GSI but defensive)
     if (window.location.hash.includes('access_token=')) {
       try { history.replaceState({ view: 'home' }, '', window.location.pathname); } catch (_) {}
     }
-    // Try to restore pre-auth state (search criteria, selected offers, view)
-    // Async — but we don't await; let nav update happen immediately.
-    restoreAuthSnapshot().catch(e => console.warn('[auth] restore failed', e));
+    // GSI: no redirect → no snapshot restore needed. JS state (selected offers,
+    // passenger forms, etc.) survives sign-in intact. Just update nav + callbacks.
+    if (authCallback) { authCallback(user); authCallback = null; }
 
-    // If there's a pending post-booking link, attach user_id to booking
+    // If there's a pending post-booking link, hide the nudge banner
     const nudge = document.getElementById('save-booking-nudge');
     if (nudge) nudge.classList.add('hidden');
-    if (authCallback) { authCallback(user); authCallback = null; }
   }
 
   function onSignedOut() {
@@ -12069,36 +12048,10 @@
     }
 
     if ((currentView === 'booking' || currentView === 'payment') && selectedOutbound) {
-      // Stay on view. Silent background re-validation — same drift protection
-      // as sign-in stagnant: if the price moved during the session, it's stashed
-      // in pendingPriceUpdate and surfaced at "Continue to payment" click.
-      // User can keep filling in passengers and proceed as guest.
+      // Stay on view. JS state (selected offers, passenger forms, contact info) is
+      // unaffected — sign-out with GSI doesn't reload the page. User continues as guest.
+      // Fare-timer handles offer expiry independently.
       showSignedOutToast('Signed out. You can continue booking as a guest.');
-      if (lastSearchParams) {
-        const syntheticSnap = {
-          view: currentView,
-          criteria: lastSearchParams,
-          selectedOutboundOfferId: selectedOutbound?.cabinPricing?.offer_id || null,
-          selectedOutboundOfferKes: selectedOutbound?.cabinPricing?.price_kes || null,
-          selectedInboundOfferId: selectedInbound?.cabinPricing?.offer_id || null,
-          selectedInboundOfferKes: selectedInbound?.cabinPricing?.price_kes || null,
-          // Critical: pass full selection objects so refindOfferInResults can
-          // fall back to signature matching when Duffel rotates the offer_id.
-          // Without these, sign-out triggers false "sold out" modals just like
-          // sign-in did before we fixed it the first time.
-          selectedOutboundFull: selectedOutbound ? {
-            offer: selectedOutbound.offer,
-            cabin: selectedOutbound.cabin,
-            cabinPricing: selectedOutbound.cabinPricing,
-          } : null,
-          selectedInboundFull: selectedInbound ? {
-            offer: selectedInbound.offer,
-            cabin: selectedInbound.cabin,
-            cabinPricing: selectedInbound.cabinPricing,
-          } : null,
-        };
-        backgroundReValidate(syntheticSnap).catch(e => console.warn('[signOut] bg validate failed:', e));
-      }
       return;
     }
 
@@ -12127,58 +12080,79 @@
     if (e.target === document.getElementById('auth-overlay')) closeAuthModal();
   }
 
-  // ── Google OAuth ─────────────────────────────────────────────
+  // ── Google Sign-In (GSI popup — no page redirect) ────────────
+  // Uses Google Identity Services One Tap / FedCM popup.
+  // JS state (selected offers, passenger forms, everything) survives intact —
+  // no snapshot, no restore, no ghost cards needed.
   async function signInWithGoogle() {
+    const btn = document.querySelector('.auth-google-btn');
+    const setLoading = (on) => {
+      if (!btn) return;
+      btn.disabled = on;
+      btn.style.opacity = on ? '0.6' : '';
+    };
+
     try {
-      // Snapshot full state before redirect so we can restore the view INSTANTLY
-      // on return (Trip.com-style "stagnant" UI). We snapshot the full offer
-      // objects so the booking page can render immediately without waiting for
-      // a re-search. A background runSearch then validates silently — price
-      // drift is stashed in pendingPriceUpdate and only surfaced at the
-      // "Continue to payment" click, never mid-form.
-      try {
-        const view = document.body.getAttribute('data-view') || 'home';
-        // Deep-clone helper — we want a JSON-safe copy so JSON.stringify works
-        const cloneOffer = (sel) => sel ? JSON.parse(JSON.stringify({
-          offer: sel.offer,
-          cabin: sel.cabin,
-          cabinPricing: sel.cabinPricing,
-        })) : null;
-        const snapshot = {
-          view,
-          criteria: lastSearchParams ? {
-            ...lastSearchParams,
-            passengerCount,
-            tripType,
-          } : null,
-          // Legacy shallow fields (kept for backward compat if old snapshot lands)
-          selectedOutboundOfferId: selectedOutbound?.cabinPricing?.offer_id || null,
-          selectedOutboundOfferKes: selectedOutbound?.cabinPricing?.price_kes || null,
-          selectedInboundOfferId: selectedInbound?.cabinPricing?.offer_id || null,
-          selectedInboundOfferKes: selectedInbound?.cabinPricing?.price_kes || null,
-          cabin: selectedOutbound?.cabin || null,
-          // Full offer data for stagnant restore — ONLY for booking/payment views.
-          // Results view uses the legacy "await search, show ghosts + spinner,
-          // then render" flow so the user never sees stale results.
-          selectedOutboundFull: cloneOffer(selectedOutbound),
-          selectedInboundFull:  cloneOffer(selectedInbound),
-          ts: Date.now(),
-        };
-        sessionStorage.setItem('tf_auth_snapshot', JSON.stringify(snapshot));
-      } catch (e) { console.warn('[auth] snapshot failed', e); }
-      const sb = await getSupabase();
-      const { error } = await sb.auth.signInWithOAuth({
-        provider: 'google',
-        options: {
-          redirectTo: window.location.origin,
-          // Force Google to always show the account chooser — prevents auto-signin
-          // with a previously-used account on shared devices and lets users switch.
-          queryParams: { prompt: 'select_account' },
-        }
+      // Ensure GSI library is ready (it loads async)
+      await waitForGSI();
+
+      setLoading(true);
+
+      await new Promise((resolve, reject) => {
+        // Track whether the callback already fired to avoid double-resolution
+        let settled = false;
+        const settle = (fn, val) => { if (!settled) { settled = true; fn(val); } };
+
+        google.accounts.id.initialize({
+          client_id: TUMAFLY_GOOGLE_CLIENT_ID,
+          // Callback fires when user selects an account from the GSI popup
+          callback: async (response) => {
+            try {
+              const sb = await getSupabase();
+              const { error } = await sb.auth.signInWithIdToken({
+                provider: 'google',
+                token: response.credential,
+              });
+              if (error) settle(reject, error);
+              else settle(resolve);
+            } catch (e) { settle(reject, e); }
+          },
+          auto_select: false,        // always show account chooser
+          cancel_on_tap_outside: true,
+          itp_support: true,         // ITP-friendly on Safari
+        });
+
+        google.accounts.id.prompt((notification) => {
+          if (notification.isNotDisplayed()) {
+            // GSI throttles the prompt if the user dismissed it too recently.
+            // Most common on desktop Chrome; FedCM on Chrome bypasses this.
+            const reason = notification.getNotDisplayedReason();
+            const msg = (reason === 'suppressed_by_user' || reason === 'opt_out_or_no_session')
+              ? 'Google sign-in is temporarily paused by your browser. Please use your phone number instead, or try again later.'
+              : 'Google sign-in could not be displayed. Please use your phone number instead.';
+            settle(reject, new Error(msg));
+          }
+          if (notification.isDismissedMoment()) {
+            const reason = notification.getDismissedReason();
+            // 'credential_returned' means the callback will fire — don't settle yet
+            if (reason !== 'credential_returned') {
+              settle(reject, new Error('__cancelled__'));
+            }
+          }
+        });
       });
-      if (error) showAuthError('auth-choose-error', error.message);
+
+      // ✅ Sign-in succeeded — onAuthStateChange fires → onSignedIn → nav updates.
+      // JS state is fully intact (no redirect happened). Close modal.
+      setLoading(false);
+      closeAuthModal();
+
     } catch (e) {
-      showAuthError('auth-choose-error', 'Something went wrong. Please try again.');
+      setLoading(false);
+      if (e.message !== '__cancelled__') {
+        showAuthError('auth-choose-error', e.message || 'Something went wrong. Please try again.');
+      }
+      // If cancelled: modal stays open, no error shown — user just didn't pick an account
     }
   }
 
