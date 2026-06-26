@@ -12171,39 +12171,30 @@
   // Helper: re-find a selection in fresh search results by offer_id.
   // Returns { selection, priceChanged: bool, oldKes, newKes } or null if not found.
   // Builds a stable identity for a flight — same airline + same flight number
-  // on the same DATE + same route = same flight. Date-only (not full timestamp)
-  // avoids ISO format mismatches between snapshot (serialized at sign-in) and
-  // fresh search (deserialized fresh from Duffel) — these can differ in
-  // timezone formatting (`Z` vs `+00:00`), millisecond precision, etc.
-  //
-  // Includes slice origin/destination as belt-and-suspenders in case two
-  // unrelated flights ever share carrier+flight#+date (shouldn't happen in
-  // the real world, but defensive coding is cheap here).
+  // on the same DATE + same route = same flight. Uses the flattened segment
+  // shape produced by the search-flights EF: `airline` (name string),
+  // `flight_number`, `departure` (ISO timestamp), `origin`/`destination` (IATA).
+  // Date-only on departure avoids timezone format mismatches between snapshot
+  // (serialized at sign-in) and fresh search (deserialized fresh from Duffel).
   function buildFlightSignature(offer) {
     if (!offer || !offer.slices) return '';
     try {
       return offer.slices.map(sl => {
-        const orig = sl.origin?.iata_code || (typeof sl.origin === 'string' ? sl.origin : '');
-        const dest = sl.destination?.iata_code || (typeof sl.destination === 'string' ? sl.destination : '');
         const segSigs = (sl.segments || []).map(s => {
-          const carrier = s.marketing_carrier?.iata_code
-            || (typeof s.marketing_carrier === 'string' ? s.marketing_carrier : '')
-            || s.operating_carrier?.iata_code
-            || (typeof s.operating_carrier === 'string' ? s.operating_carrier : '')
-            || '';
-          const flight  = s.marketing_carrier_flight_number
-            || s.operating_carrier_flight_number
-            || '';
-          // Strip down to YYYY-MM-DD — avoids timezone/precision mismatches
+          const airline = s.airline || '';
+          const flight  = s.flight_number || '';
+          const orig    = s.origin || '';
+          const dest    = s.destination || '';
+          // YYYY-MM-DD only — robust to timezone / precision drift
           let depDate = '';
-          if (s.departing_at) {
-            const m = String(s.departing_at).match(/^(\d{4}-\d{2}-\d{2})/);
+          if (s.departure) {
+            const m = String(s.departure).match(/^(\d{4}-\d{2}-\d{2})/);
             if (m) depDate = m[1];
           }
-          return `${carrier}${flight}@${depDate}`;
-        }).join('|');
-        return `${orig}-${dest}:${segSigs}`;
-      }).join('||');
+          return `${airline}|${flight}|${orig}-${dest}@${depDate}`;
+        }).join('||');
+        return segSigs;
+      }).join('|||');
     } catch (e) {
       console.warn('[signature] build failed:', e);
       return '';
