@@ -10680,7 +10680,7 @@
     }, 1000);
   }
 
-  function searchNowFromOfferGone() {
+  async function searchNowFromOfferGone() {
     if (window.__offerGoneTimer) {
       clearInterval(window.__offerGoneTimer);
       window.__offerGoneTimer = null;
@@ -10692,11 +10692,24 @@
     selectedOutbound = null;
     selectedInbound = null;
     selectedOffer = null;
-    if (lastSearchParams) {
-      runSearch(lastSearchParams).catch(e => console.warn('[offer-gone] runSearch failed:', e));
-    } else {
+    if (!lastSearchParams) {
       showView('home');
+      return;
     }
+    // Wait for a fresh Turnstile token. The background re-validate that
+    // detected the offer-gone state already consumed the previous token,
+    // and calling runSearch without a token gives a 403 from search-flights.
+    try {
+      if (typeof turnstile !== 'undefined' && turnstileSearchWidgetId != null) {
+        try { turnstile.reset(turnstileSearchWidgetId); } catch (_) {}
+        try { turnstile.execute(turnstileSearchWidgetId); } catch (_) {}
+        const deadline = Date.now() + 6000;
+        while (Date.now() < deadline && !turnstileSearchToken) {
+          await new Promise(r => setTimeout(r, 100));
+        }
+      }
+    } catch (_) {}
+    runSearch(lastSearchParams).catch(e => console.warn('[offer-gone] runSearch failed:', e));
   }
 
   // Surfaced when goToPayment() is called with a pendingPriceUpdate set by
@@ -10754,18 +10767,29 @@
   }
 
   // Cleared when user picks "Try another search" — fresh search, no stale state
-  function tryAnotherSearchFromPriceDrift() {
+  async function tryAnotherSearchFromPriceDrift() {
     pendingPriceUpdate = null;
     document.getElementById('price-update-modal')?.remove();
     // Clear booking selections so the user picks fresh from results
     selectedOutbound = null;
     selectedInbound = null;
     selectedOffer = null;
-    if (lastSearchParams) {
-      runSearch(lastSearchParams).catch(e => console.warn('[price-drift] runSearch failed:', e));
-    } else {
+    if (!lastSearchParams) {
       showView('home');
+      return;
     }
+    // Refresh Turnstile token before runSearch — same reason as offer-gone path
+    try {
+      if (typeof turnstile !== 'undefined' && turnstileSearchWidgetId != null) {
+        try { turnstile.reset(turnstileSearchWidgetId); } catch (_) {}
+        try { turnstile.execute(turnstileSearchWidgetId); } catch (_) {}
+        const deadline = Date.now() + 6000;
+        while (Date.now() < deadline && !turnstileSearchToken) {
+          await new Promise(r => setTimeout(r, 100));
+        }
+      }
+    } catch (_) {}
+    runSearch(lastSearchParams).catch(e => console.warn('[price-drift] runSearch failed:', e));
   }
 
   function cancelPriceUpdate() {
@@ -12145,18 +12169,66 @@
 
   // Helper: re-find a selection in fresh search results by offer_id.
   // Returns { selection, priceChanged: bool, oldKes, newKes } or null if not found.
-  function refindOfferInResults(offerId, oldKes) {
-    if (!offerId) return null;
-    for (const ob of allOffers) {
-      const cabins = ob.cabinPricings || ob.cabin_pricings || [];
-      for (const cp of cabins) {
-        if (cp.offer_id === offerId) {
-          return {
-            selection: { offer: ob, cabin: cp.cabin, cabinPricing: cp },
-            priceChanged: oldKes && cp.price_kes !== oldKes,
-            oldKes: oldKes || null,
-            newKes: cp.price_kes,
-          };
+  // Builds a stable identity for a flight — same airline + flight number +
+  // departure time across all segments yields the same string. Resilient to
+  // Duffel offer_id rotation, which happens frequently (offers regenerate
+  // every ~20-30min even when the underlying flight is unchanged).
+  function buildFlightSignature(offer) {
+    if (!offer || !offer.slices) return '';
+    try {
+      return offer.slices.map(sl =>
+        (sl.segments || []).map(s => {
+          const carrier = s.marketing_carrier?.iata_code || s.operating_carrier?.iata_code || '';
+          const flight  = s.marketing_carrier_flight_number || s.operating_carrier_flight_number || '';
+          const dep     = s.departing_at || '';
+          return `${carrier}${flight}@${dep}`;
+        }).join('|')
+      ).join('||');
+    } catch (_) { return ''; }
+  }
+
+  // Two-pass lookup:
+  //   1. Strict offer_id match — fast, exact, used when Duffel didn't rotate the id
+  //   2. Itinerary signature + cabin match — fallback when the id rotated but
+  //      the flight (same airline/flight#/departure) is still bookable
+  //
+  // snapshotSelection (optional) is the full {offer, cabin, cabinPricing} from
+  // the snapshot. When passed, pass-2 can run; otherwise we're limited to pass-1.
+  function refindOfferInResults(offerId, oldKes, snapshotSelection) {
+    // PASS 1 — exact offer_id match
+    if (offerId) {
+      for (const ob of allOffers) {
+        const cabins = ob.cabinPricings || ob.cabin_pricings || [];
+        for (const cp of cabins) {
+          if (cp.offer_id === offerId) {
+            return {
+              selection: { offer: ob, cabin: cp.cabin, cabinPricing: cp },
+              priceChanged: oldKes && cp.price_kes !== oldKes,
+              oldKes: oldKes || null,
+              newKes: cp.price_kes,
+            };
+          }
+        }
+      }
+    }
+    // PASS 2 — itinerary signature match (handles Duffel id rotation)
+    if (snapshotSelection?.offer) {
+      const targetSig   = buildFlightSignature(snapshotSelection.offer);
+      const targetCabin = snapshotSelection.cabin;
+      if (targetSig) {
+        for (const ob of allOffers) {
+          if (buildFlightSignature(ob) !== targetSig) continue;
+          const cabins = ob.cabinPricings || ob.cabin_pricings || [];
+          for (const cp of cabins) {
+            if (cp.cabin !== targetCabin) continue;
+            console.log('[refind] matched by signature (offer_id rotated):', offerId, '→', cp.offer_id);
+            return {
+              selection: { offer: ob, cabin: cp.cabin, cabinPricing: cp },
+              priceChanged: oldKes && cp.price_kes !== oldKes,
+              oldKes: oldKes || null,
+              newKes: cp.price_kes,
+            };
+          }
         }
       }
     }
@@ -12300,7 +12372,11 @@
       return;
     }
 
-    const outboundMatch = refindOfferInResults(snap.selectedOutboundOfferId, snap.selectedOutboundOfferKes);
+    const outboundMatch = refindOfferInResults(
+      snap.selectedOutboundOfferId,
+      snap.selectedOutboundOfferKes,
+      snap.selectedOutboundFull
+    );
     if (!outboundMatch) {
       showRestoreBanner(`Your flight is no longer available at that fare. Please pick again.`, 'warn');
       return;
@@ -12308,7 +12384,11 @@
     selectedOutbound = outboundMatch.selection;
     let inboundMatch = null;
     if (snap.selectedInboundOfferId) {
-      inboundMatch = refindOfferInResults(snap.selectedInboundOfferId, snap.selectedInboundOfferKes);
+      inboundMatch = refindOfferInResults(
+        snap.selectedInboundOfferId,
+        snap.selectedInboundOfferKes,
+        snap.selectedInboundFull
+      );
       if (!inboundMatch) {
         selectedOutbound = null;
         showRestoreBanner(`Your return flight is no longer available. Please pick again.`, 'warn');
@@ -12388,12 +12468,15 @@
       return;
     }
 
-    // Re-find selections against fresh data
-    const outboundMatch = refindOfferInResults(snap.selectedOutboundOfferId, snap.selectedOutboundOfferKes);
+    // Re-find selections against fresh data. Pass the full snapshot selection
+    // so signature-based fallback can handle Duffel offer_id rotation —
+    // otherwise a same-flight-different-id would falsely trigger offer-gone.
+    const outboundMatch = refindOfferInResults(
+      snap.selectedOutboundOfferId,
+      snap.selectedOutboundOfferKes,
+      snap.selectedOutboundFull
+    );
     if (!outboundMatch) {
-      // Offer is gone — show the modal IMMEDIATELY. 4-second countdown then
-      // auto-redirect to results with same search params. User can pick a
-      // different flight from there.
       console.log('[bg-validate] outbound offer gone — showing modal');
       showOfferGoneModal({ isReturn: false });
       return;
@@ -12401,7 +12484,11 @@
 
     let inboundMatch = null;
     if (snap.selectedInboundOfferId) {
-      inboundMatch = refindOfferInResults(snap.selectedInboundOfferId, snap.selectedInboundOfferKes);
+      inboundMatch = refindOfferInResults(
+        snap.selectedInboundOfferId,
+        snap.selectedInboundOfferKes,
+        snap.selectedInboundFull
+      );
       if (!inboundMatch) {
         console.log('[bg-validate] inbound offer gone — showing modal');
         showOfferGoneModal({ isReturn: true });
