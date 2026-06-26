@@ -12252,7 +12252,10 @@
         }
         // No match — log so we can debug what actually came back
         console.warn('[refind] signature MISS — target:', targetSig, '| cabin:', targetCabin);
-        console.warn('[refind] available offers (first 5):', availSigs.slice(0, 5));
+        console.warn('[refind] available signatures:');
+        availSigs.slice(0, 8).forEach((entry, i) => {
+          console.warn(`  [${i}] sig="${entry.sig}" cabins=${JSON.stringify(entry.cabins)}`);
+        });
       } else {
         console.warn('[refind] could not build target signature; snapshot offer shape:', snapshotSelection.offer);
       }
