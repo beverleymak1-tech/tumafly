@@ -12676,6 +12676,44 @@
     try { initCountryPicker('profile', defaultDial); } catch (_) {}
     document.getElementById('profile-phone').value = localNum;
 
+    // Live validation on profile phone field — matches the booking-page pattern.
+    // Stays quiet while typing the first time (blur-first), then validates live
+    // so the user gets immediate feedback as they correct it. Uses the same
+    // showPhoneHint helper as the booking-page contact phone, except profile
+    // has no separate inline hint element — we surface errors via profile-msg
+    // and mark the field red via the existing .pax-input-err class.
+    const profPhoneEl = document.getElementById('profile-phone');
+    if (profPhoneEl && !profPhoneEl.dataset.phoneValidHooked) {
+      profPhoneEl.dataset.phoneValidHooked = '1';
+      let profPhoneBlurred = false;
+      const runProfilePhoneValidation = () => {
+        const iso = countryPickerState.profile?.iso || 'KE';
+        const local = profPhoneEl.value.replace(/\D/g, '').replace(/^0+/, '');
+        const msgEl = document.getElementById('profile-msg');
+        const grp   = document.getElementById('profile-phone-group');
+        if (!local) {
+          // Empty is allowed on profile (phone is optional); just clear any error
+          if (msgEl && msgEl.textContent && msgEl.style.color === 'var(--danger)') {
+            msgEl.textContent = '';
+          }
+          grp?.classList.remove('pax-input-err');
+          return;
+        }
+        const err = validatePhoneLocal(iso, local);
+        if (err) {
+          if (msgEl) { msgEl.textContent = err; msgEl.style.color = 'var(--danger)'; }
+          grp?.classList.add('pax-input-err');
+        } else {
+          if (msgEl && msgEl.style.color === 'var(--danger)') {
+            msgEl.textContent = '';
+          }
+          grp?.classList.remove('pax-input-err');
+        }
+      };
+      profPhoneEl.addEventListener('blur',  () => { profPhoneBlurred = true; runProfilePhoneValidation(); });
+      profPhoneEl.addEventListener('input', () => { if (profPhoneBlurred) runProfilePhoneValidation(); });
+    }
+
     // Dirty tracking — save button disabled until something changes
     const saveBtn = document.getElementById('profile-save-btn');
     if (saveBtn) {
