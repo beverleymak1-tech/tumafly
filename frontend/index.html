@@ -5863,7 +5863,7 @@
       </button>
       <div class="auth-divider">or</div>
       <label class="auth-label">Phone number</label>
-      <div class="phone-input-group" id="auth-phone-group" style="margin-bottom:16px;">
+      <div class="phone-input-group" id="auth-phone-group" style="margin-bottom:6px;">
         <button type="button" class="phone-cc-trigger" id="auth-phone-cc-btn" onclick="openCountryPicker('auth')" aria-label="Choose country code">
           <span class="phone-cc-flag" id="auth-phone-cc-flag"></span>
           <svg class="phone-cc-chevron" width="10" height="10" viewBox="0 0 12 12" fill="none" aria-hidden="true"><path d="M3 5l3 3 3-3" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
@@ -5871,6 +5871,7 @@
         <span class="phone-cc-prefix" id="auth-phone-cc-prefix">+254</span>
         <input id="auth-phone" type="tel" class="phone-num" placeholder="712 345 678" inputmode="tel" autocomplete="tel-national">
       </div>
+      <p id="auth-phone-hint" style="display:none;margin:0 0 10px;font-size:12px;color:var(--danger);"></p>
       <div id="auth-choose-error" class="auth-error hidden"></div>
       <button class="auth-btn" id="auth-send-otp-btn" onclick="sendOtp()">Continue</button>
       <p class="auth-terms">By continuing you agree to our <a href="/legal/terms">Terms</a> and <a href="/legal/privacy">Privacy Policy</a>.</p>
@@ -6253,6 +6254,31 @@
     const n = localDigits.length;
     if (n < range[0] || n > range[1]) return 'Invalid phone number.';
     return null;
+  }
+
+  // If the user pastes a full international number into the LOCAL phone field
+  // (e.g. types/pastes "+254703278885" when the country picker already shows
+  // +254), silently strip the leading dial code so they end up with the local
+  // form they intended. Only strips when stripping yields a valid local length
+  // for the selected country — otherwise leaves the input alone (it might just
+  // be a number that coincidentally starts with the country's digits).
+  //
+  // pickerKey: 'auth' | 'profile' | 'contact' (which countryPickerState slot)
+  function tryAutoStripDialCode(el, pickerKey) {
+    const state = countryPickerState[pickerKey];
+    if (!state || !state.iso || !state.dial) return;
+    const range = PHONE_DIGIT_COUNTS[state.iso];
+    if (!range) return;
+    const dialDigits = state.dial.replace(/\D/g, '');   // "+254" → "254"
+    if (!dialDigits) return;
+    const allDigits = el.value.replace(/\D/g, '').replace(/^0+/, '');
+    if (!allDigits.startsWith(dialDigits)) return;
+    const remaining = allDigits.slice(dialDigits.length);
+    // Only strip if what's left is a valid local length — avoids stripping
+    // a legitimate local number that happens to start with the country digits
+    if (remaining.length >= range[0] && remaining.length <= range[1]) {
+      el.value = remaining;
+    }
   }
 
   // Shows or clears the inline hint beneath a phone-input-group.
@@ -8712,6 +8738,7 @@
       contactPhoneEl.dataset.phoneValidHooked = '1';
       let phoneBlurred = false;
       const runContactPhoneValidation = () => {
+        tryAutoStripDialCode(contactPhoneEl, 'contact');
         const iso = countryPickerState.contact?.iso || 'KE';
         const local = contactPhoneEl.value.replace(/\D/g, '').replace(/^0+/, '');
         const err = validatePhoneLocal(iso, local);
@@ -10543,6 +10570,8 @@
     }
     const email = document.getElementById('contact-email').value.trim();
     const phoneCC = countryPickerState.contact?.dial || '+254';
+    // Auto-strip pasted country code before normalization
+    tryAutoStripDialCode(document.getElementById('contact-phone'), 'contact');
     const phoneRaw = document.getElementById('contact-phone').value.trim();
     // Strip any non-digit chars the user may have entered alongside the number
     const phoneDigits = phoneRaw.replace(/\D/g, '');
@@ -11793,6 +11822,29 @@
     // Initialise the country picker (defaults to +254 KE)
     try { initCountryPicker('auth', '+254'); } catch (_) {}
     document.getElementById('auth-phone').focus();
+    // Clear stale phone hint from any prior open
+    showPhoneHint('auth-phone-hint', 'auth-phone-group', null);
+
+    // Wire live validation on the auth-phone input — same pattern as
+    // contact-phone on booking page. Validates after first blur, then on
+    // every input. Idempotent: only attaches once per page load.
+    const authPhoneEl = document.getElementById('auth-phone');
+    if (authPhoneEl && !authPhoneEl.dataset.phoneValidHooked) {
+      authPhoneEl.dataset.phoneValidHooked = '1';
+      let authPhoneBlurred = false;
+      const runAuthPhoneValidation = () => {
+        // Auto-strip the country code if user pasted/typed a full international form
+        tryAutoStripDialCode(authPhoneEl, 'auth');
+        const iso = countryPickerState.auth?.iso || 'KE';
+        const local = authPhoneEl.value.replace(/\D/g, '').replace(/^0+/, '');
+        // Empty is allowed in the live validator (don't show "please enter"
+        // until the user actually tries to submit)
+        const err = local ? validatePhoneLocal(iso, local) : null;
+        showPhoneHint('auth-phone-hint', 'auth-phone-group', err);
+      };
+      authPhoneEl.addEventListener('blur',  () => { authPhoneBlurred = true; runAuthPhoneValidation(); });
+      authPhoneEl.addEventListener('input', () => { if (authPhoneBlurred) runAuthPhoneValidation(); });
+    }
   }
   function closeAuthModal() {
     document.getElementById('auth-overlay').classList.add('hidden');
@@ -11894,16 +11946,22 @@
 
   // ── Phone OTP ────────────────────────────────────────────────
   async function sendOtp() {
-    const sel = countryPickerState['auth'] || { dial: '+254' };
+    const sel = countryPickerState['auth'] || { iso: 'KE', dial: '+254' };
+    // Auto-strip the country code if the user typed it in (e.g. "+254703…")
+    // This catches the case where they click Continue without blurring the field.
+    tryAutoStripDialCode(document.getElementById('auth-phone'), 'auth');
     // Normalize identically to saveProfile: strip non-digits, then strip leading
     // zero(s) — the national trunk prefix that's never part of E.164. Without
     // this, "0703…" becomes "+2540703…" (wrong, 11 digits) and "703…" becomes
     // "+254703…" (correct, 9 digits) — the same person would hit two accounts.
     const raw = document.getElementById('auth-phone').value.replace(/\D/g, '').replace(/^0+/, '');
-    if (!raw || raw.length < 6) {
-      showAuthError('auth-choose-error', 'Please enter a valid phone number.');
+    // Per-country digit-count validation (same rule used on booking + account pages)
+    const phoneErr = validatePhoneLocal(sel.iso || 'KE', raw);
+    if (phoneErr) {
+      showPhoneHint('auth-phone-hint', 'auth-phone-group', phoneErr);
       return;
     }
+    showPhoneHint('auth-phone-hint', 'auth-phone-group', null);
     pendingPhone = sel.dial + raw;
 
     const btn = document.getElementById('auth-send-otp-btn');
@@ -12154,6 +12212,7 @@
       profPhoneEl.dataset.phoneValidHooked = '1';
       let profPhoneBlurred = false;
       const runProfilePhoneValidation = () => {
+        tryAutoStripDialCode(profPhoneEl, 'profile');
         const iso = countryPickerState.profile?.iso || 'KE';
         const local = profPhoneEl.value.replace(/\D/g, '').replace(/^0+/, '');
         // Empty is allowed on profile (phone is optional)
@@ -12169,7 +12228,17 @@
     if (saveBtn) {
       saveBtn.disabled = true;
       const fields = ['profile-first-name','profile-last-name','profile-phone'];
-      const onEdit = () => { saveBtn.disabled = false; };
+      const onEdit = () => {
+        saveBtn.disabled = false;
+        // Clear lingering toast/error from a prior save (e.g. "phone already
+        // linked to another account") the moment the user starts editing —
+        // otherwise it sits there confusingly while they try a different value.
+        const msg = document.getElementById('profile-msg');
+        if (msg && msg.textContent) {
+          msg.textContent = '';
+          msg.style.color = '';
+        }
+      };
       fields.forEach(id => {
         const el = document.getElementById(id);
         if (el && !el.dataset.dirtyHooked) {
@@ -12191,6 +12260,9 @@
   async function saveProfile() {
     if (!currentUser) return;
     const sel = countryPickerState['profile'] || { iso: 'KE', dial: '+254' };
+    // Auto-strip pasted country code before normalization (handles "Continue"
+    // clicked without blurring the field)
+    tryAutoStripDialCode(document.getElementById('profile-phone'), 'profile');
     const phoneLocalRaw = document.getElementById('profile-phone').value.replace(/\D/g, '').replace(/^0+/, '');
     // Validate digit count before saving — prevents storing an unusable number.
     if (phoneLocalRaw) {
