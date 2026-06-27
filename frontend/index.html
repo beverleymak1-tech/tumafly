@@ -8664,6 +8664,83 @@
     }
   }
 
+  // Pre-fill contact email + phone on the booking page from the signed-in
+  // user's profile. Quiet by design: no-ops if signed out, fails silently if
+  // the profile fetch errors, and never overwrites fields the user has
+  // already typed into. Country picker for phone is updated to match the
+  // stored dial code so the user sees their full number, formatted correctly.
+  async function prefillContactFromProfile() {
+    if (!currentUser) return;
+    const emailEl = document.getElementById('contact-email');
+    const phoneEl = document.getElementById('contact-phone');
+    if (!emailEl || !phoneEl) return;
+
+    // Decide which fields actually need filling — don't clobber user input
+    const emailEmpty = !emailEl.value.trim();
+    const phoneEmpty = !phoneEl.value.trim();
+    if (!emailEmpty && !phoneEmpty) return;
+
+    // Best-effort profile fetch. Falls back to user_metadata + auth.users
+    // fields if profiles row is empty (e.g. brand-new Google signup before
+    // first profile save).
+    let profile = null;
+    try {
+      const sb = await getSupabase();
+      const { data } = await sb.from('profiles')
+        .select('email, phone')
+        .eq('id', currentUser.id)
+        .maybeSingle();
+      profile = data || null;
+    } catch (_) { /* swallow — pre-fill is best-effort */ }
+
+    // ── Email ─────────────────────────────────────────────────
+    if (emailEmpty) {
+      const email = profile?.email
+        || currentUser.email
+        || currentUser.user_metadata?.email
+        || '';
+      if (email) {
+        emailEl.value = email;
+        // Clear any prior error hint that might be showing from a previous attempt
+        const hint = document.getElementById('contact-email-hint');
+        if (hint) hint.style.display = 'none';
+        emailEl.classList.remove('pax-input-err');
+      }
+    }
+
+    // ── Phone ─────────────────────────────────────────────────
+    // Same split pattern used by loadProfile (account view): try to match the
+    // stored full phone (e.g. "+254703278885") against each dial code in
+    // PHONE_COUNTRIES. The longest matching dial code wins (e.g. +1340 beats
+    // +1 for a US Virgin Islands number).
+    if (phoneEmpty) {
+      const storedPhone = profile?.phone || currentUser.phone || '';
+      if (storedPhone) {
+        // Some Supabase responses strip the leading "+", so normalize by ensuring it's there
+        const e164 = storedPhone.startsWith('+') ? storedPhone : ('+' + storedPhone.replace(/\D/g, ''));
+        // Find longest-prefix dial-code match (sort by dial length desc so we win ties)
+        const matched = [...PHONE_COUNTRIES]
+          .sort((a, b) => b[2].length - a[2].length)
+          .find(c => e164.startsWith(c[2]));
+        if (matched) {
+          const dial = matched[2];
+          const local = e164.slice(dial.length);
+          // initCountryPicker is idempotent (returns early if state already exists),
+          // so to actually change the picker we set the state directly.
+          countryPickerState['contact'] = { iso: matched[0], name: matched[1], dial };
+          applyCountrySelection('contact', countryPickerState['contact']);
+          phoneEl.value = local;
+        } else {
+          // No dial code matched — fill the raw digits and let the user verify
+          phoneEl.value = e164.replace(/\D/g, '');
+        }
+        // Clear any prior phone error
+        const hint = document.getElementById('contact-phone-hint');
+        if (hint) hint.style.display = 'none';
+      }
+    }
+  }
+
   function proceedToBooking() {
     // Compute international status before deciding traveler state — we need it for
     // the force-expand logic and for re-validating saved travelers.
@@ -8711,6 +8788,10 @@
     // Initialise the contact phone country picker (idempotent — sets the default
     // dial code + flag if not yet set, otherwise preserves whatever the user picked).
     initCountryPicker('contact', '+254');
+    // Pre-fill contact email + phone from the signed-in user's profile, async.
+    // Only fills empty fields — never overwrites what the user already typed.
+    // Silently no-ops if signed out or profile fetch fails.
+    prefillContactFromProfile().catch(e => console.warn('[prefill] failed:', e));
     // Wire real-time validation on the contact email field (blur first, then live).
     const contactEmailEl = document.getElementById('contact-email');
     if (contactEmailEl && !contactEmailEl.dataset.emailValidHooked) {
