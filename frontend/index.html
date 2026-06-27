@@ -486,18 +486,110 @@
     .ff-add-btn { font-size: 13px; color: var(--brand); background: none; border: none; cursor: pointer; font-weight: 500; padding: 4px 0; }
 
     /* My Trips */
+    .trips-tabs {
+      display: flex; gap: 8px; margin-bottom: 20px; flex-wrap: wrap;
+    }
+    .trips-tab {
+      padding: 8px 18px; border-radius: 999px;
+      border: 1px solid var(--border-2);
+      background: var(--surface); color: var(--text-2);
+      font-size: 14px; font-weight: 500;
+      cursor: pointer;
+      transition: all 0.15s ease;
+    }
+    .trips-tab:hover { border-color: var(--brand); color: var(--brand); }
+    .trips-tab.active {
+      border-color: var(--brand); color: var(--brand);
+      background: var(--brand-soft, rgba(61,149,245,0.08));
+      font-weight: 600;
+    }
     .trip-card {
       background: var(--surface); border: 1px solid var(--border);
-      border-radius: var(--radius); padding: 20px 24px; margin-bottom: 12px;
-      display: flex; align-items: center; justify-content: space-between; gap: 16px;
+      border-radius: var(--radius); padding: 22px 24px; margin-bottom: 14px;
       cursor: pointer;
+      transition: border-color 0.15s ease, box-shadow 0.15s ease;
     }
     .trip-card:hover { border-color: var(--brand); box-shadow: var(--shadow); }
-    .trip-card-left { flex: 1; min-width: 0; }
-    .trip-route { font-size: 16px; font-weight: 700; color: var(--ink); }
-    .trip-meta { font-size: 13px; color: var(--text-2); margin-top: 4px; }
-    .trip-pnr { font-family: var(--mono); font-size: 13px; font-weight: 600;
-      color: var(--text-2); margin-top: 4px; letter-spacing: 1px; }
+    .trip-card-body {
+      display: flex; justify-content: space-between; align-items: flex-start;
+      gap: 16px;
+    }
+    .trip-card-main { flex: 1; min-width: 0; }
+    .trip-card-header {
+      font-size: 13px; color: var(--text-2); font-weight: 500;
+      margin-bottom: 4px;
+    }
+    .trip-card-route {
+      font-size: 22px; font-weight: 700; color: var(--ink);
+      margin-bottom: 4px;
+      line-height: 1.25;
+    }
+    .trip-card-day {
+      font-size: 14px; color: var(--text-2);
+      margin-bottom: 14px;
+    }
+    .trip-card-flight {
+      font-size: 14px; color: var(--text-1, var(--ink));
+      margin-bottom: 12px;
+      display: flex; align-items: center; gap: 8px;
+    }
+    .trip-card-flight-icon {
+      flex-shrink: 0; width: 18px; height: 18px;
+      color: var(--text-3);
+    }
+    .trip-card-timeline {
+      display: flex; align-items: center; gap: 16px;
+    }
+    .trip-timeline-side {
+      flex-shrink: 0;
+      min-width: 80px;
+    }
+    .trip-timeline-time {
+      font-size: 17px; font-weight: 700; color: var(--ink);
+      line-height: 1.2;
+    }
+    .trip-timeline-iata {
+      font-size: 12px; color: var(--text-2); font-weight: 500;
+      margin-top: 2px;
+      letter-spacing: 0.5px;
+    }
+    .trip-timeline-bar {
+      flex: 1;
+      display: flex; flex-direction: column; align-items: center;
+      gap: 4px;
+      min-width: 60px;
+    }
+    .trip-timeline-line {
+      width: 100%; height: 2px;
+      background: var(--ink);
+      position: relative;
+    }
+    .trip-timeline-line::before,
+    .trip-timeline-line::after {
+      content: ''; position: absolute;
+      top: 50%; transform: translateY(-50%);
+      width: 6px; height: 6px;
+      background: var(--ink); border-radius: 50%;
+    }
+    .trip-timeline-line::before { left: 0; }
+    .trip-timeline-line::after  { right: 0; }
+    .trip-timeline-stop {
+      font-size: 11px; color: var(--text-3); font-weight: 500;
+      text-transform: uppercase; letter-spacing: 0.5px;
+    }
+    .trip-timeline-side.right { text-align: right; }
+    .trip-card-meta {
+      display: flex; flex-direction: column; align-items: flex-end; gap: 8px;
+      flex-shrink: 0;
+    }
+    .trip-card-total {
+      font-weight: 700; color: var(--ink); font-size: 16px;
+    }
+    .trip-card-pnr {
+      font-family: var(--mono); font-weight: 600;
+      font-size: 13px;
+      letter-spacing: 1px; color: var(--text-2);
+    }
     .trip-status-badge {
       display: inline-flex; align-items: center;
       padding: 3px 10px; border-radius: 20px;
@@ -505,9 +597,16 @@
     }
     .trip-status-badge.booked { background: var(--success-soft); color: var(--success); }
     .trip-status-badge.pending { background: var(--warning-soft); color: var(--warning); }
-    .trip-card-right { text-align: right; flex-shrink: 0; }
-    .trip-total { font-size: 16px; font-weight: 700; color: var(--ink); }
-    .trip-arrow { color: var(--text-3); font-size: 18px; }
+    .trip-status-badge.cancelled { background: var(--danger-soft, #FEE2E2); color: var(--danger, #DC2626); }
+
+    @media (max-width: 600px) {
+      .trip-card { padding: 18px 18px; }
+      .trip-card-route { font-size: 18px; }
+      .trip-card-timeline { gap: 12px; }
+      .trip-timeline-side { min-width: 64px; }
+      .trip-timeline-time { font-size: 15px; }
+      .trip-card-total { font-size: 15px; }
+    }
 
     /* Find booking */
     .find-booking-wrap { max-width: 480px; margin: 0 auto; padding: 60px 24px 80px; }
@@ -5809,6 +5908,11 @@
   <div class="account-wrap">
     <h1 class="account-title">My trips</h1>
     <p class="account-sub">All your bookings in one place.</p>
+    <div class="trips-tabs" role="tablist">
+      <button class="trips-tab active" data-tab="upcoming"  onclick="switchTripsTab('upcoming')"  role="tab">Upcoming Trips</button>
+      <button class="trips-tab"        data-tab="past"      onclick="switchTripsTab('past')"      role="tab">Past Trips</button>
+      <button class="trips-tab"        data-tab="cancelled" onclick="switchTripsTab('cancelled')" role="tab">Cancelled Trips</button>
+    </div>
     <div id="trips-list">
       <!-- Populated by JS -->
     </div>
@@ -12821,62 +12925,185 @@
   });
 
   // ── My Trips ─────────────────────────────────────────────────
+  // Cached trips + active tab. allTrips is fetched once on entry; switching
+  // tabs just re-filters the cached list (no extra network calls).
+  let _allTrips = [];
+  let _activeTripsTab = 'upcoming';
+
   async function loadMyTrips() {
     if (!currentUser) { showView('home'); openAuthModal(); return; }
     const list = document.getElementById('trips-list');
     list.innerHTML = `
       <div style="padding:20px 0">
-        <div class="skeleton" style="height:80px;margin-bottom:12px;border-radius:12px;"></div>
-        <div class="skeleton" style="height:80px;margin-bottom:12px;border-radius:12px;"></div>
+        <div class="skeleton" style="height:200px;margin-bottom:14px;border-radius:14px;"></div>
+        <div class="skeleton" style="height:200px;margin-bottom:14px;border-radius:14px;"></div>
       </div>`;
+    // Reset to default tab on every entry so users see Upcoming first
+    _activeTripsTab = 'upcoming';
+    document.querySelectorAll('.trips-tab').forEach(b => {
+      b.classList.toggle('active', b.dataset.tab === 'upcoming');
+    });
     try {
       const { data: { session } } = await (await getSupabase()).auth.getSession();
       const res = await fetch(`${SUPABASE_URL}/functions/v1/get-user-trips`, {
         headers: { 'Authorization': `Bearer ${session.access_token}` }
       });
       const { trips } = await res.json();
-      renderTripsList(trips || []);
+      _allTrips = trips || [];
+      renderTripsList();
     } catch (e) {
       list.innerHTML = `<p style="color:var(--danger);padding:20px 0;">Failed to load trips. Please try again.</p>`;
     }
   }
 
-  function renderTripsList(trips) {
+  function switchTripsTab(tab) {
+    _activeTripsTab = tab;
+    document.querySelectorAll('.trips-tab').forEach(b => {
+      b.classList.toggle('active', b.dataset.tab === tab);
+    });
+    renderTripsList();
+  }
+
+  // Filter cached trips by the active tab.
+  //   - upcoming:  last-slice departure_at is in the future, not cancelled
+  //   - past:      last-slice departure_at is in the past, not cancelled
+  //   - cancelled: status === 'cancelled' (regardless of date)
+  function filterTripsForTab(trips, tab) {
+    const now = Date.now();
+    return trips.filter(t => {
+      const isCancelled = (t.status || '').toLowerCase() === 'cancelled';
+      const slices = t.offer?.slices || [];
+      const lastDateStr = slices[slices.length - 1]?.departing_at;
+      const isPast = lastDateStr ? new Date(lastDateStr).getTime() < now : false;
+      if (tab === 'cancelled') return isCancelled;
+      if (tab === 'upcoming')  return !isCancelled && !isPast;
+      if (tab === 'past')      return !isCancelled && isPast;
+      return true;
+    });
+  }
+
+  // Format helpers for the card.
+  function fmtDayShort(d) {
+    return new Date(d).toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' });
+  }
+  function fmtDayLong(d) {
+    return new Date(d).toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long' });
+  }
+  function fmtTime(d) {
+    return new Date(d).toLocaleTimeString('en-GB', { hour: 'numeric', minute: '2-digit', hour12: true })
+      .toUpperCase().replace(' ', '');
+  }
+
+  function renderTripsList() {
     const list = document.getElementById('trips-list');
+    const trips = filterTripsForTab(_allTrips, _activeTripsTab);
+
     if (!trips.length) {
+      const tabLabel = _activeTripsTab === 'upcoming' ? 'upcoming'
+                     : _activeTripsTab === 'past'     ? 'past'
+                     : 'cancelled';
       list.innerHTML = `
         <div style="text-align:center;padding:60px 0;color:var(--text-2);">
           <div style="font-size:40px;margin-bottom:16px;">✈️</div>
-          <div style="font-size:18px;font-weight:600;color:var(--ink);margin-bottom:8px;">No trips yet</div>
-          <div style="margin-bottom:24px;">Your bookings will appear here.</div>
-          <button class="btn btn-primary" onclick="showView('home')">Search for a flight</button>
+          <div style="font-size:18px;font-weight:600;color:var(--ink);margin-bottom:8px;">
+            You have 0 ${tabLabel} trips.
+          </div>
+          <div style="margin-bottom:24px;">
+            ${ _activeTripsTab === 'upcoming'
+                ? "Your next bookings will appear here."
+                : _activeTripsTab === 'past'
+                ? "Bookings from past trips will show up here."
+                : "Cancelled bookings will show up here." }
+          </div>
+          ${ _activeTripsTab === 'upcoming'
+              ? '<button class="btn btn-primary" onclick="showView(\'home\')">Search for a flight</button>'
+              : '' }
         </div>`;
       return;
     }
+
     list.innerHTML = trips.map(t => {
-      const offer = t.offer || t.outboundOffer || {};
-      const slices = offer.slices || [];
-      const origin = slices[0]?.origin?.iata_code || '—';
-      const dest   = slices[slices.length-1]?.destination?.iata_code || '—';
-      const date   = slices[0]?.departing_at ? new Date(slices[0].departing_at).toLocaleDateString('en-GB', {day:'numeric',month:'short',year:'numeric'}) : '';
-      // KES from pending_bookings preferred; fall back to source currency from bookings
-      const total  = t.totalKes
+      const slices  = t.offer?.slices || [];
+      const out     = slices[0] || {};
+      const last    = slices[slices.length - 1] || {};
+      const isRound = slices.length > 1;
+
+      const outOrigin = out.origin?.iata_code || '—';
+      const outDest   = out.destination?.iata_code || '—';
+      const outDep    = out.departing_at;
+
+      // Date range header — for round-trips, "Out date - Return date"; for one-way, just the departure
+      const headerRange = isRound && last.departing_at
+        ? `${fmtDayShort(outDep)} – ${fmtDayShort(last.departing_at)}`
+        : fmtDayShort(outDep);
+
+      // Big route headline — use IATA codes (no city-name lookup table yet)
+      const routeHeadline = `${outOrigin} → ${outDest}`;
+      const dayLong = outDep ? fmtDayLong(outDep) : '';
+
+      // Airline + flight number — derived in EF
+      const airlineFlight = t.airline
+        ? `${t.airline}${t.flightNumber ? ' · ' + t.flightNumber : ''}`
+        : '';
+
+      // Timeline departure/arrival times. We don't have arrival_at in the
+      // current bookings schema, only departing_at. So show only departure time
+      // on the left, IATA on the right.
+      // TODO: when bookings.arrival_at gets stored, render both sides with times.
+      const depTime = outDep ? fmtTime(outDep) : '';
+
+      // Stop label — "Nonstop" since each `slice` is rendered as a single hop
+      // in this simplified view. (Multi-segment slices would need their own row.)
+      const stopLabel = 'Nonstop';
+
+      // Price + PNR + status
+      const total = t.totalKes
         ? `KES ${Number(t.totalKes).toLocaleString()}`
         : (t.totalAmount && t.totalCurrency
             ? `${t.totalCurrency} ${Number(t.totalAmount).toLocaleString()}`
             : '');
-      const badge  = t.status === 'booked' ? '<span class="trip-status-badge booked">Confirmed</span>' : '<span class="trip-status-badge pending">Pending</span>';
+      const statusKey = (t.status || 'booked').toLowerCase();
+      const badge = statusKey === 'cancelled'
+        ? '<span class="trip-status-badge cancelled">Cancelled</span>'
+        : statusKey === 'booked'
+          ? '<span class="trip-status-badge booked">Confirmed</span>'
+          : '<span class="trip-status-badge pending">Pending</span>';
+
+      const pnr = t.pnr || t.merchantReference || '';
+
       return `
-        <div class="trip-card" onclick="viewTrip('${t.merchantReference || ''}')">
-          <div class="trip-card-left">
-            <div class="trip-route">${origin} → ${dest}</div>
-            <div class="trip-meta">${date}</div>
-            <div class="trip-pnr">${t.pnr || 'PNR pending'}</div>
-          </div>
-          <div class="trip-card-right">
-            ${badge}
-            <div class="trip-total" style="margin-top:8px;">${total}</div>
-            <div class="trip-arrow">›</div>
+        <div class="trip-card" onclick="viewTrip('${pnr}')">
+          <div class="trip-card-body">
+            <div class="trip-card-main">
+              <div class="trip-card-header">${headerRange}</div>
+              <div class="trip-card-route">${routeHeadline}</div>
+              <div class="trip-card-day">${dayLong}</div>
+              ${airlineFlight ? `
+                <div class="trip-card-flight">
+                  <svg class="trip-card-flight-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                    <path d="M2 16l20-9-3 9-7 2-3-2-7-0z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/>
+                  </svg>
+                  <span>${airlineFlight}</span>
+                </div>` : ''}
+              <div class="trip-card-timeline">
+                <div class="trip-timeline-side">
+                  <div class="trip-timeline-time">${depTime}</div>
+                  <div class="trip-timeline-iata">${outOrigin}</div>
+                </div>
+                <div class="trip-timeline-bar">
+                  <div class="trip-timeline-line"></div>
+                  <div class="trip-timeline-stop">${stopLabel}</div>
+                </div>
+                <div class="trip-timeline-side right">
+                  <div class="trip-timeline-iata">${outDest}</div>
+                </div>
+              </div>
+            </div>
+            <div class="trip-card-meta">
+              ${badge}
+              ${total ? `<div class="trip-card-total">${total}</div>` : ''}
+              ${pnr ? `<div class="trip-card-pnr">${pnr}</div>` : ''}
+            </div>
           </div>
         </div>`;
     }).join('');
