@@ -599,6 +599,96 @@
     .trip-status-badge.pending { background: var(--warning-soft); color: var(--warning); }
     .trip-status-badge.cancelled { background: var(--danger-soft, #FEE2E2); color: var(--danger, #DC2626); }
 
+    /* ────────── Itinerary detail view ────────── */
+    .itin-wrap {
+      max-width: 1024px;
+      margin: 0 auto;
+      padding: 24px 24px 80px;
+    }
+    .itin-back {
+      display: inline-flex; align-items: center; gap: 6px;
+      background: none; border: none; padding: 8px 0;
+      color: var(--brand); font-size: 14px; font-weight: 500;
+      cursor: pointer; margin-bottom: 16px;
+    }
+    .itin-back:hover { text-decoration: underline; }
+    .itin-title {
+      font-size: 32px; font-weight: 700; color: var(--ink);
+      margin: 0 0 16px; line-height: 1.15;
+    }
+    .itin-header-row {
+      display: flex; flex-wrap: wrap; gap: 8px 28px;
+      font-size: 14px; color: var(--text-2);
+      margin-bottom: 28px;
+    }
+    .itin-header-row b { color: var(--ink); font-weight: 600; }
+    .itin-layout {
+      display: grid;
+      grid-template-columns: 1fr 340px;
+      gap: 24px;
+      align-items: start;
+    }
+    .itin-card {
+      background: var(--surface); border: 1px solid var(--border);
+      border-radius: 14px; padding: 22px 24px;
+    }
+    .itin-card + .itin-card { margin-top: 16px; }
+    .itin-flight-head {
+      display: flex; justify-content: space-between; align-items: baseline; gap: 12px;
+      margin-bottom: 6px;
+    }
+    .itin-flight-route {
+      font-size: 18px; font-weight: 700; color: var(--ink);
+    }
+    .itin-flight-day {
+      font-size: 14px; color: var(--text-2);
+      margin-bottom: 16px;
+    }
+    .itin-flight-airline {
+      font-size: 14px; color: var(--ink); font-weight: 500;
+      margin-bottom: 14px;
+      display: flex; align-items: center; gap: 8px;
+    }
+    .itin-summary-title {
+      font-size: 16px; font-weight: 700; color: var(--ink);
+      margin: 0 0 14px;
+    }
+    .itin-summary-row {
+      display: flex; justify-content: space-between; align-items: center;
+      padding: 6px 0;
+      font-size: 14px;
+    }
+    .itin-summary-row .label { color: var(--text-2); }
+    .itin-summary-row .value { color: var(--ink); font-weight: 500; }
+    .itin-summary-divider {
+      border: 0; border-top: 1px solid var(--border);
+      margin: 12px 0;
+    }
+    .itin-summary-total {
+      display: flex; justify-content: space-between; align-items: center;
+      padding-top: 10px;
+      border-top: 2px solid var(--ink);
+      margin-top: 8px;
+    }
+    .itin-summary-total .label {
+      font-size: 16px; font-weight: 700; color: var(--ink);
+    }
+    .itin-summary-total .value {
+      font-size: 18px; font-weight: 700; color: var(--success, #16A34A);
+    }
+    .itin-fine-print {
+      font-size: 12px; color: var(--text-3);
+      margin-top: 14px; line-height: 1.5;
+    }
+    @media (max-width: 880px) {
+      .itin-layout { grid-template-columns: 1fr; }
+      .itin-title { font-size: 24px; }
+    }
+    @media (max-width: 600px) {
+      .itin-wrap { padding: 16px 16px 60px; }
+      .itin-card { padding: 18px; }
+    }
+
     @media (max-width: 600px) {
       .trip-card { padding: 18px 18px; }
       .trip-card-route { font-size: 18px; }
@@ -5920,6 +6010,23 @@
 </div>
 
 <!-- ============================================================
+     ITINERARY VIEW — clicked-through detail page from My Trips
+     ============================================================ -->
+<div id="view-itinerary" class="hidden">
+  <div class="itin-wrap">
+    <button class="itin-back" onclick="showView('my-trips')" type="button">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+        <path d="M15 18l-6-6 6-6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+      </svg>
+      Back to My trips
+    </button>
+    <div id="itin-content">
+      <!-- Populated by JS -->
+    </div>
+  </div>
+</div>
+
+<!-- ============================================================
      FIND BOOKING VIEW (guests + account holders)
      ============================================================ -->
 <div id="view-find-booking" class="hidden">
@@ -6700,7 +6807,7 @@
   }
 
   function showView(name, opts = {}) {
-    ['home','results','booking','payment','success','profile','my-trips','find-booking'].forEach(n => {
+    ['home','results','booking','payment','success','profile','my-trips','find-booking','itinerary'].forEach(n => {
       document.getElementById('view-' + n).classList.toggle('hidden', n !== name);
     });
     document.body.setAttribute('data-view', name);
@@ -13109,17 +13216,192 @@
     }).join('');
   }
 
-  function viewTrip(merchantRef) {
-    if (!merchantRef) return;
-    activeMerchantRef = merchantRef;
-    showView('success');
-    // Fetch full booking details and populate success view
-    fetch(`${SUPABASE_URL}/functions/v1/payment-status?ref=${encodeURIComponent(merchantRef)}`, {
-      headers: { 'Authorization': `Bearer ${SUPABASE_ANON_KEY}` }
-    }).then(r => r.json()).then(data => {
-      const refSlot = document.getElementById('success-ref');
-      if (data?.booking?.booking_reference && refSlot) refSlot.textContent = data.booking.booking_reference;
-    }).catch(() => {});
+  // ── Itinerary detail view ─────────────────────────────────────
+  // Called from My Trips card click. Reads the trip from the cached
+  // _allTrips array (populated by loadMyTrips) — no extra network call.
+  let activeItineraryPnr = null;
+
+  function viewTrip(pnr) {
+    if (!pnr) return;
+    activeItineraryPnr = pnr;
+    activeMerchantRef = pnr;   // legacy compatibility for any code reading this
+    loadItinerary(pnr);
+    showView('itinerary');
+  }
+
+  // Format helpers reused from the trip card. (Defined globally in this file;
+  // safe to reference here.)
+  function loadItinerary(pnr) {
+    const container = document.getElementById('itin-content');
+    const trip = (_allTrips || []).find(t => t.pnr === pnr || t.merchantReference === pnr);
+    if (!trip) {
+      // Defensive — should never happen if viewTrip was called from My Trips,
+      // but if a user deep-links or refreshes, _allTrips is empty.
+      container.innerHTML = `
+        <div style="text-align:center;padding:60px 0;color:var(--text-2);">
+          <div style="font-size:18px;font-weight:600;color:var(--ink);margin-bottom:8px;">
+            Loading your trip…
+          </div>
+          <div style="margin-bottom:20px;">If this takes more than a few seconds, head back and try again.</div>
+          <button class="btn btn-primary" onclick="showView('my-trips');loadMyTrips();">Back to My trips</button>
+        </div>`;
+      // Trigger a refetch — once it lands, loadItinerary will find the trip
+      loadMyTrips().then(() => {
+        if (activeItineraryPnr === pnr) loadItinerary(pnr);
+      });
+      return;
+    }
+
+    const slices = trip.offer?.slices || [];
+    const out    = slices[0] || {};
+    const ret    = slices[1];
+    const isRound = !!ret;
+
+    const outOrigin = out.origin?.iata_code || '—';
+    const outDest   = out.destination?.iata_code || '—';
+    const outAirline      = out.airline || trip.airline || '';
+    const outFlightNumber = out.flight_number || trip.flightNumber || '';
+
+    // Page title: "Flight to {destination}"
+    const titleDest = outDest;
+
+    // Header info row
+    const email  = trip.passengerEmail || '';
+    const pnrRef = trip.pnr || trip.merchantReference || '';
+    const tfRef  = trip.pesapalOrderId || '';
+
+    // Payment summary numbers — render KES if we have the pending match,
+    // fall back to source currency otherwise.
+    const haveKes = trip.totalKes != null;
+    const fmtKes = (n) => n != null ? `KES ${Number(n).toLocaleString()}` : '—';
+    const ticketCostLine = haveKes && trip.baseAmountKes != null
+      ? { label: 'Ticket cost',           value: fmtKes(trip.baseAmountKes) }
+      : { label: 'Ticket cost',           value: trip.totalAmount ? `${trip.totalCurrency} ${Number(trip.totalAmount).toLocaleString()}` : '—' };
+    const serviceFeeLine = trip.serviceFeeKes != null
+      ? { label: 'TumaFly service fee',   value: fmtKes(trip.serviceFeeKes) }
+      : null;
+    const processingFeeLine = trip.processingFeeKes
+      ? { label: 'Payment processing',    value: fmtKes(trip.processingFeeKes) }
+      : null;
+    const totalLine = haveKes
+      ? fmtKes(trip.totalKes)
+      : (trip.totalAmount ? `${trip.totalCurrency} ${Number(trip.totalAmount).toLocaleString()}` : '—');
+
+    const paymentMethodPretty = (trip.paymentMethod || '').toLowerCase() === 'pesapal'
+      ? 'Card (Pesapal)'
+      : (trip.paymentMethod || '').toLowerCase().includes('mpesa') ? 'M-Pesa'
+      : (trip.paymentMethod ? trip.paymentMethod : '—');
+
+    const purchaseDate = trip.createdAt
+      ? new Date(trip.createdAt).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })
+      : '—';
+
+    // Build a single flight card (one slice)
+    const renderSlice = (s, label) => {
+      const origin = s.origin?.iata_code || '—';
+      const dest   = s.destination?.iata_code || '—';
+      const dep    = s.departing_at;
+      const airline      = s.airline || '';
+      const flightNumber = s.flight_number || '';
+      const dayLong = dep ? fmtDayLong(dep) : '';
+      const depTime = dep ? fmtTime(dep) : '';
+      const airlineLine = airline
+        ? `${airline}${flightNumber ? ' · ' + flightNumber : ''}`
+        : '';
+      return `
+        <div class="itin-card">
+          <div class="itin-flight-head">
+            <div class="itin-flight-route">${origin} → ${dest}</div>
+            ${label ? `<div style="font-size:13px;color:var(--text-2);font-weight:500;">${label}</div>` : ''}
+          </div>
+          <div class="itin-flight-day">${dayLong}</div>
+          ${airlineLine ? `
+            <div class="itin-flight-airline">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true" style="color:var(--text-3);flex-shrink:0;">
+                <path d="M2 16l20-9-3 9-7 2-3-2-7-0z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/>
+              </svg>
+              <span>${airlineLine}</span>
+            </div>` : ''}
+          <div class="trip-card-timeline">
+            <div class="trip-timeline-side">
+              <div class="trip-timeline-time">${depTime}</div>
+              <div class="trip-timeline-iata">${origin}</div>
+            </div>
+            <div class="trip-timeline-bar">
+              <div class="trip-timeline-line"></div>
+              <div class="trip-timeline-stop">Nonstop</div>
+            </div>
+            <div class="trip-timeline-side right">
+              <div class="trip-timeline-iata">${dest}</div>
+            </div>
+          </div>
+        </div>`;
+    };
+
+    container.innerHTML = `
+      <h1 class="itin-title">Flight to ${titleDest}</h1>
+      <div class="itin-header-row">
+        ${email   ? `<div>Email sent to: <b>${email}</b></div>` : ''}
+        ${tfRef   ? `<div>TumaFly ref #: <b>${tfRef}</b></div>` : ''}
+        ${pnrRef  ? `<div>Confirmation #: <b>${pnrRef}</b></div>` : ''}
+      </div>
+      <div class="itin-layout">
+        <div>
+          ${renderSlice(out, isRound ? 'Outbound' : '')}
+          ${isRound ? renderSlice(ret, 'Return') : ''}
+        </div>
+        <aside>
+          <div class="itin-card">
+            <h2 class="itin-summary-title">Payment summary</h2>
+            ${tfRef ? `
+              <div class="itin-summary-row">
+                <span class="label">TumaFly ref</span>
+                <span class="value" style="font-family:var(--mono);font-size:13px;">${tfRef}</span>
+              </div>` : ''}
+            <div class="itin-summary-row">
+              <span class="label">Purchase date</span>
+              <span class="value">${purchaseDate}</span>
+            </div>
+            <div class="itin-summary-row">
+              <span class="label">Payment method</span>
+              <span class="value">${paymentMethodPretty}</span>
+            </div>
+            <div class="itin-summary-row">
+              <span class="label">Billing name</span>
+              <span class="value">${trip.passengerName || '—'}</span>
+            </div>
+            <hr class="itin-summary-divider">
+            <div class="itin-summary-row">
+              <span class="label">${ticketCostLine.label}</span>
+              <span class="value">${ticketCostLine.value}</span>
+            </div>
+            ${serviceFeeLine ? `
+              <div class="itin-summary-row">
+                <span class="label">${serviceFeeLine.label}</span>
+                <span class="value">${serviceFeeLine.value}</span>
+              </div>` : ''}
+            ${processingFeeLine ? `
+              <div class="itin-summary-row">
+                <span class="label">${processingFeeLine.label}</span>
+                <span class="value">${processingFeeLine.value}</span>
+              </div>` : ''}
+            <div class="itin-summary-row">
+              <span class="label">Number of travelers</span>
+              <span class="value">${trip.passengerCount || 1}</span>
+            </div>
+            <div class="itin-summary-total">
+              <span class="label">Total charged</span>
+              <span class="value">${totalLine}</span>
+            </div>
+            <p class="itin-fine-print">
+              This itinerary and payment summary is your official receipt.
+              ${haveKes ? 'Prices shown in KES.' : ''}
+              For changes or cancellations, contact TumaFly support.
+            </p>
+          </div>
+        </aside>
+      </div>
+    `;
   }
 
   // ── Find booking (guest + account) ───────────────────────────
