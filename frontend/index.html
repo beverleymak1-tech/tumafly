@@ -12859,7 +12859,12 @@
       const origin = slices[0]?.origin?.iata_code || '—';
       const dest   = slices[slices.length-1]?.destination?.iata_code || '—';
       const date   = slices[0]?.departing_at ? new Date(slices[0].departing_at).toLocaleDateString('en-GB', {day:'numeric',month:'short',year:'numeric'}) : '';
-      const total  = t.totalKes ? `KES ${Number(t.totalKes).toLocaleString()}` : '';
+      // KES from pending_bookings preferred; fall back to source currency from bookings
+      const total  = t.totalKes
+        ? `KES ${Number(t.totalKes).toLocaleString()}`
+        : (t.totalAmount && t.totalCurrency
+            ? `${t.totalCurrency} ${Number(t.totalAmount).toLocaleString()}`
+            : '');
       const badge  = t.status === 'booked' ? '<span class="trip-status-badge booked">Confirmed</span>' : '<span class="trip-status-badge pending">Pending</span>';
       return `
         <div class="trip-card" onclick="viewTrip('${t.merchantReference || ''}')">
