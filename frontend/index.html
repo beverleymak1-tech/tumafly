@@ -11789,6 +11789,14 @@
     // passenger forms, etc.) survives sign-in intact. Just update nav + callbacks.
     if (authCallback) { authCallback(user); authCallback = null; }
 
+    // If user is on the booking view when sign-in completes (e.g. signed in
+    // mid-booking via the nav menu), re-run the contact pre-fill. The function
+    // is safe to call repeatedly — it only fills empty fields, never clobbers
+    // anything the user already typed.
+    if (document.body.getAttribute('data-view') === 'booking' && typeof prefillContactFromProfile === 'function') {
+      prefillContactFromProfile().catch(e => console.warn('[prefill] post-signin failed:', e));
+    }
+
     // If there's a pending post-booking link, hide the nudge banner
     const nudge = document.getElementById('save-booking-nudge');
     if (nudge) nudge.classList.add('hidden');
