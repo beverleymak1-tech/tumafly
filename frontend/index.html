@@ -6734,6 +6734,16 @@
     document.querySelectorAll('button[onclick*="goToPayment"]').forEach(b => b.disabled = true);
   }
 
+  // Counterpart to disablePaymentActions — re-enables payment CTAs after a
+  // fare-timer expiry, called from proceedToBooking when the user lands on a
+  // fresh offer. Without this, the "Continue to payment" button stays greyed
+  // out from the previous expired session even though the new offer is valid.
+  function enablePaymentActions() {
+    const cardBtn = document.getElementById('card-start-btn');
+    if (cardBtn) { cardBtn.disabled = false; cardBtn.classList.add('btn-primary'); }
+    document.querySelectorAll('button[onclick*="goToPayment"]').forEach(b => b.disabled = false);
+  }
+
   function rerunSearchFromExpiry() {
     if (!lastSearchParams) {
       // Fallback: send them home so they can start a fresh search
@@ -8742,6 +8752,11 @@
   }
 
   function proceedToBooking() {
+    // Reset any expired-fare state from a prior offer. proceedToBooking is
+    // called when the user picks a fresh flight from results, so we know the
+    // selected offer is now valid and the payment CTA should be live again.
+    fareTimerExpired = false;
+    enablePaymentActions();
     // Compute international status before deciding traveler state — we need it for
     // the force-expand logic and for re-validating saved travelers.
     tripRequiresPassport = computeTripInternational();
@@ -10725,9 +10740,12 @@
       // need to book.
       // One-way: only selectedOutbound exists.
       const bookingOfferId = (selectedInbound || selectedOutbound).cabinPricing.offer_id;
+      // If signed in, pass the user's JWT so the EF can resolve user_id and
+      // link the booking to their account. Falls back to anon key for guests.
+      const authBearer = await getAuthBearer();
       const res = await fetch(`${SUPABASE_URL}/functions/v1/create-payment`, {
         method: 'POST',
-        headers: { 'Authorization': `Bearer ${SUPABASE_ANON_KEY}`, 'Content-Type': 'application/json' },
+        headers: { 'Authorization': `Bearer ${authBearer}`, 'Content-Type': 'application/json' },
         body: JSON.stringify({
           offer_id: bookingOfferId,
           passengers: passengerData,
@@ -11735,6 +11753,20 @@
   async function getSupabase() {
     if (_supabase) return _supabase;
     return await initSupabase();
+  }
+
+  // Returns the user's JWT if signed in, otherwise the anon key. Used as the
+  // Authorization bearer when calling EFs that need to know who the user is
+  // (e.g. create-payment, to stash user_id on pending_bookings). The EF
+  // accepts either — it tries auth.getUser(jwt) and falls back to guest if
+  // the token doesn't resolve to a user.
+  async function getAuthBearer() {
+    try {
+      const sb = await getSupabase();
+      const { data: { session } } = await sb.auth.getSession();
+      if (session?.access_token) return session.access_token;
+    } catch (_) { /* fall through to anon */ }
+    return SUPABASE_ANON_KEY;
   }
 
   // ── Google Identity Services config ──────────────────────────
