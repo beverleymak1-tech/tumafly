@@ -250,6 +250,24 @@ serve(async (req) => {
 
   const supabase = createClient(SUPABASE_URL, SERVICE_ROLE_KEY);
 
+  // ── Resolve user_id from request JWT (or null for guest checkout) ──────
+  // Frontend sends the user's session JWT in Authorization when signed in,
+  // or the anon key when not. supabase.auth.getUser(jwt) returns null for
+  // the anon key — that's our signal it's a guest booking. user_id is then
+  // stashed on pending_bookings so the webhook can copy it to bookings,
+  // which is what My Trips filters on.
+  let userId: string | null = null;
+  const incomingAuth = req.headers.get("Authorization") || "";
+  if (incomingAuth.startsWith("Bearer ")) {
+    const userJwt = incomingAuth.slice(7);
+    if (userJwt && userJwt !== SERVICE_ROLE_KEY) {
+      try {
+        const { data: { user } } = await supabase.auth.getUser(userJwt);
+        if (user) userId = user.id;
+      } catch (_) { /* guest checkout — leave userId null */ }
+    }
+  }
+
   try {
     const { offer_id, passengers, contact, seats, baggages, turnstile_token } = await req.json();
 
@@ -545,6 +563,7 @@ serve(async (req) => {
     const { data: pending, error: insertErr } = await supabase
       .from("pending_bookings")
       .insert({
+        user_id: userId,                  // null for guests; uid for signed-in users
         pesapal_order_id: merchantRef,
         duffel_offer_id: offer_id,
         passengers,

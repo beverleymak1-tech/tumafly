@@ -14314,19 +14314,16 @@
             </div>
             <div class="itin-summary-row">
               <span class="label">Payment method</span>
-              <span class="value">${paymentMethodPretty}</span>
-            </div>
-            <div class="itin-summary-row">
-              <span class="label">Billing name</span>
-              <span class="value">${
-                (() => {
-                  // Show only the primary traveler's name (the payer/billing
-                  // contact). passengerName is a comma-joined list of all
-                  // passengers; we just take the first segment.
-                  const first = (trip.passengerName || '').split(',')[0].trim();
-                  return first || '—';
-                })()
-              }</span>
+              <span class="value">${(() => {
+                // Append the last-4 of the payment account inline so users
+                // can confirm WHICH card/account was used (e.g., "Visa ****1234"
+                // or "M-Pesa ****8881"). Pulled from Pesapal's masked
+                // payment_account at webhook time. Replaces the old Billing
+                // name row, which was always passenger 0's name (not actually
+                // queryable as "the person who paid" from Pesapal).
+                const last4 = trip.paymentAccountLast4;
+                return last4 ? `${paymentMethodPretty} ****${escapeHtml(last4)}` : paymentMethodPretty;
+              })()}</span>
             </div>
             <hr class="itin-summary-divider">
             <div class="itin-summary-row">

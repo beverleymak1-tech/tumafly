@@ -389,8 +389,107 @@ serve(async (req) => {
     const returnSlice = order.slices[1] || null;
     const returnSeg = returnSlice ? returnSlice.segments[0] : null;
 
+    // ── Derive itinerary-detail fields for the bookings row ─────────────
+    // cabin_class & fare_brand_name come from the OFFER (declared earlier
+    // in the handler at line 272). Duffel structures these per-passenger-
+    // per-segment; we sample the first one since TumaFly currently sells
+    // one fare brand per booking. fare_brand_name is per-slice and sometimes
+    // missing — fall back to a pretty-printed cabin_class when so.
+    const sampleCabin =
+      offer?.slices?.[0]?.segments?.[0]?.passengers?.[0]?.cabin_class
+      || offer?.slices?.[0]?.fare_brand_name
+      || null;
+    const fareBrandName =
+      offer?.slices?.[0]?.fare_brand_name
+      || offer?.slices?.[0]?.segments?.[0]?.passengers?.[0]?.cabin_class_marketing_name
+      || null;
+
+    // Amenity flags for the itinerary view's fare-amenities list.
+    // baggage_included: any segment-passenger spec has a checked bag quantity > 0
+    const baggageIncluded = (() => {
+      try {
+        const bags = offer?.slices?.[0]?.segments?.[0]?.passengers?.[0]?.baggages || [];
+        return bags.some((b: any) => b?.type === "checked" && (b?.quantity || 0) > 0);
+      } catch (_) { return false; }
+    })();
+    // seats_selected: did the user purchase seats during booking? Whether or
+    // not Duffel ultimately reserved them (sandbox skips), the customer's
+    // intent was to have seats — so we mark it true.
+    const seatsSelected = Array.isArray(pending.contact?.seats) && pending.contact.seats.length > 0;
+    // changes_allowed: Duffel's offer.conditions.change_before_departure.allowed
+    const changesAllowed = offer?.conditions?.change_before_departure?.allowed ?? null;
+
+    // Build a per-passenger × per-segment list with seat + ticket info.
+    //
+    // SEAT extraction sources (priority order):
+    //   1. order.services[].metadata.designator — when Duffel actually
+    //      reserved a specific seat. Empty in sandbox by design.
+    //   2. pending.contact.seats[] — what the customer selected at booking,
+    //      stashed before payment. Used as fallback so the customer sees
+    //      what they picked even if Duffel didn't formally reserve it.
+    //
+    // TICKET extraction:
+    //   Duffel v2 returns issued tickets under order.documents[] with
+    //   type: "electronic_ticket" and unique_identifier as the ticket #.
+    //   Older code looked at order.tickets which doesn't exist in v2.
+    //   Documents are NOT explicitly linked to passengers in the response,
+    //   so we match by array index — works for single-passenger bookings
+    //   and is a reasonable approximation for multi-passenger.
+    const storedSeatsByPaxAndSeg: Record<string, string> = {};
+    for (const s of (pending.contact?.seats || [])) {
+      // Each entry: { passenger_index, segment_id?, designator, service_id, ... }
+      // Key by passenger index + segment_id (or just passenger index if seg unknown)
+      const key = `${s.passenger_index}::${s.segment_id || ''}`;
+      if (s.designator) storedSeatsByPaxAndSeg[key] = s.designator;
+    }
+
+    const electronicTickets = (order.documents || [])
+      .filter((d: any) => d?.type === "electronic_ticket" || d?.type === "ticket")
+      .map((d: any) => d?.unique_identifier)
+      .filter(Boolean);
+
+    const passengerDetails = (order.passengers || []).map((p: any, paxIdx: number) => {
+      const segments: any[] = [];
+      for (const slice of (order.slices || [])) {
+        for (const seg of (slice.segments || [])) {
+          // Source 1 — Duffel service (live mode after seat reservation succeeds)
+          const seatService = (order.services || []).find((s: any) =>
+            s.type === "seat"
+            && Array.isArray(s.passenger_ids) && s.passenger_ids.includes(p.id)
+            && Array.isArray(s.segment_ids)   && s.segment_ids.includes(seg.id)
+          );
+          // Source 2 — pending.contact.seats fallback (works in sandbox too)
+          const storedKeyExact = `${paxIdx}::${seg.id}`;
+          const storedKeyAny = `${paxIdx}::`;
+          const fallbackSeat =
+            storedSeatsByPaxAndSeg[storedKeyExact]
+            || storedSeatsByPaxAndSeg[storedKeyAny]
+            || null;
+          const seatDesignator = seatService?.metadata?.designator || fallbackSeat || null;
+
+          // Ticket number: index-based mapping into electronicTickets array
+          const tNum = electronicTickets[paxIdx] || null;
+
+          segments.push({
+            origin: seg.origin?.iata_code || null,
+            destination: seg.destination?.iata_code || null,
+            carrier: seg.marketing_carrier?.iata_code || null,
+            flight: seg.marketing_carrier_flight_number || null,
+            seat: seatDesignator,
+            ticket: tNum,
+          });
+        }
+      }
+      return {
+        name: `${p.given_name || ''} ${p.family_name || ''}`.trim(),
+        type: p.type || null,
+        segments,
+      };
+    });
+
     // 8. Save booking
     const { error: dbErr } = await supabase.from("bookings").insert({
+      user_id: pending.user_id || null,   // mirror from pending_bookings (null for guests)
       duffel_order_id: order.id,
       booking_reference: order.booking_reference,
       origin: outbound.origin.iata_code,
@@ -398,12 +497,29 @@ serve(async (req) => {
       departure_at: outboundSeg.departing_at,
       airline: order.owner.name,
       flight_number: `${outboundSeg.marketing_carrier.iata_code}${outboundSeg.marketing_carrier_flight_number}`,
+      cabin_class: sampleCabin,
+      fare_brand_name: fareBrandName,
+      baggage_included: baggageIncluded,
+      seats_selected: seatsSelected,
+      changes_allowed: changesAllowed,
+      passenger_details: passengerDetails,
       total_amount: parseFloat(order.total_amount),
       total_currency: order.total_currency,
       total_paid_kes: pending.total_kes,
       service_fee_kes: pending.service_fee_kes,
       processing_fee_kes: pending.processing_fee_kes,
       payment_method: paymentMethod,
+      // H-redo: Pesapal returns a masked payment_account on success:
+      //   - cards: e.g. "411111XXXXXX1111" or "411111****1111"
+      //   - M-Pesa: a phone number like "254712345678"
+      // We extract just the last 4 digits — enough to confirm WHICH card/account
+      // was used (e.g. "Visa ****1234") without storing any PCI-sensitive data.
+      // The full account is intentionally NOT persisted on our side.
+      payment_account_last4: ((acct: string | null) => {
+        if (!acct) return null;
+        const digits = String(acct).replace(/\D/g, "");
+        return digits.length >= 4 ? digits.slice(-4) : null;
+      })(statusData.payment_account || null),
       pesapal_tracking_id: trackingId,
       pesapal_confirmation_code: statusData.confirmation_code || null,
       passenger_name: order.passengers.map((p: any) => `${p.given_name} ${p.family_name}`).join(", "),

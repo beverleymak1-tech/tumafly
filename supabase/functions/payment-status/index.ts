@@ -44,25 +44,105 @@ serve(async (req) => {
   const supabase = createClient(SUPABASE_URL, SERVICE_ROLE_KEY);
 
   try {
-    // Accept either merchant_ref (TF-...) or tracking_id (Pesapal's UUID)
-    let merchantRef = "", trackingId = "";
+    // Accept three lookup modes:
+    //   - merchant_ref (TF-...) → polling during checkout (status of pending payment)
+    //   - tracking_id (Pesapal UUID) → same as merchant_ref but via Pesapal's id
+    //   - PNR (e.g. LPAPZU) + last_name → find-booking view (lookup a confirmed booking)
+    //
+    // We detect which mode by:
+    //   - tracking_id param → mode A
+    //   - ref starts with "TF-" → mode A
+    //   - otherwise treat ref as PNR → mode C
+    let merchantRef = "", trackingId = "", pnr = "", lastName = "";
     if (req.method === "GET") {
       const url = new URL(req.url);
-      merchantRef = url.searchParams.get("ref") || "";
+      const refParam = url.searchParams.get("ref") || "";
       trackingId = url.searchParams.get("tracking_id") || "";
+      lastName = (url.searchParams.get("last_name") || "").trim();
+      if (refParam.startsWith("TF-")) merchantRef = refParam;
+      else if (refParam) pnr = refParam.toUpperCase();
     } else {
       const body = await req.json().catch(() => ({}));
-      merchantRef = body.ref || body.merchant_ref || "";
+      const refParam = body.ref || body.merchant_ref || "";
       trackingId = body.tracking_id || "";
+      lastName = (body.last_name || "").trim();
+      if (refParam.startsWith("TF-")) merchantRef = refParam;
+      else if (refParam) pnr = String(refParam).toUpperCase();
     }
 
-    if (!merchantRef && !trackingId) {
+    if (!merchantRef && !trackingId && !pnr) {
       return new Response(JSON.stringify({ error: "Missing ref or tracking_id" }), {
         status: 400,
         headers: { ...CORS_HEADERS, "Content-Type": "application/json" },
       });
     }
 
+    // ── Mode C: PNR lookup (find-booking) ───────────────────────────────
+    // Confirmed bookings only — pending payments aren't visible by PNR
+    // since Duffel only assigns booking_reference after the order is created.
+    // last_name acts as a soft auth: anyone with a PNR can request, but
+    // we require the last name to match a passenger on the booking.
+    if (pnr) {
+      const { data: booking, error: bookingErr } = await supabase
+        .from("bookings")
+        .select(`
+          id, booking_reference, status, origin, destination, departure_at,
+          airline, flight_number, cabin_class, fare_brand_name,
+          baggage_included, seats_selected, changes_allowed, passenger_details,
+          total_amount, total_currency, total_paid_kes, service_fee_kes,
+          processing_fee_kes, payment_method,
+          passenger_name, passenger_email, passenger_count,
+          trip_type, return_date, return_airline, return_flight_number,
+          created_at, user_id
+        `)
+        .eq("booking_reference", pnr)
+        .maybeSingle();
+
+      if (bookingErr || !booking) {
+        return new Response(JSON.stringify({
+          state: "not_found",
+          message: "We couldn't find a booking with that reference. Please double-check and try again.",
+        }), {
+          status: 404,
+          headers: { ...CORS_HEADERS, "Content-Type": "application/json" },
+        });
+      }
+
+      // last_name verification — case-insensitive substring on passenger_name.
+      // passenger_name is comma-joined names; we check if any name's last word
+      // matches the entered last name.
+      if (lastName) {
+        const names = (booking.passenger_name || "").split(",").map((n: string) => n.trim());
+        const requested = lastName.toLowerCase();
+        const hit = names.some((n: string) => {
+          const parts = n.toLowerCase().split(/\s+/);
+          // match the final word OR allow a whole-name match
+          return parts[parts.length - 1] === requested || n.toLowerCase().includes(requested);
+        });
+        if (!hit) {
+          return new Response(JSON.stringify({
+            state: "not_found",
+            message: "We couldn't find a booking matching those details. Please check the reference and last name.",
+          }), {
+            status: 404,
+            headers: { ...CORS_HEADERS, "Content-Type": "application/json" },
+          });
+        }
+      }
+
+      // Return the booking shape directly. Frontend's findBooking() reshapes
+      // it into the _allTrips entry shape and navigates to the itinerary view.
+      return new Response(JSON.stringify({
+        state: "confirmed",
+        message: "Booking found.",
+        final: true,
+        booking,
+      }), {
+        headers: { ...CORS_HEADERS, "Content-Type": "application/json" },
+      });
+    }
+
+    // ── Mode A / B: merchant_ref or tracking_id (checkout polling) ──────
     // 1. Look up pending_booking
     const query = supabase.from("pending_bookings").select("*");
     const { data: pending, error } = await (
@@ -101,7 +181,12 @@ serve(async (req) => {
     if (pending.status === "booked" && pending.duffel_order_id) {
       const { data: booking } = await supabase
         .from("bookings")
-        .select("booking_reference, origin, destination, departure_at, airline, flight_number, trip_type, return_date, return_airline, return_flight_number, passenger_name, passenger_count, total_paid_kes")
+        .select(`
+          booking_reference, origin, destination, departure_at, airline, flight_number,
+          cabin_class, fare_brand_name, passenger_details,
+          trip_type, return_date, return_airline, return_flight_number,
+          passenger_name, passenger_count, total_paid_kes
+        `)
         .eq("duffel_order_id", pending.duffel_order_id)
         .maybeSingle();
 

@@ -390,8 +390,72 @@ serve(async (req) => {
     const returnSlice = order.slices[1] || null;
     const returnSeg = returnSlice ? returnSlice.segments[0] : null;
 
+    // ── Derive itinerary-detail fields for the bookings row ─────────────
+    // See pesapal-webhook for the rationale on each field.
+    const sampleCabin =
+      offer?.slices?.[0]?.segments?.[0]?.passengers?.[0]?.cabin_class
+      || offer?.slices?.[0]?.fare_brand_name
+      || null;
+    const fareBrandName =
+      offer?.slices?.[0]?.fare_brand_name
+      || offer?.slices?.[0]?.segments?.[0]?.passengers?.[0]?.cabin_class_marketing_name
+      || null;
+    const baggageIncluded = (() => {
+      try {
+        const bags = offer?.slices?.[0]?.segments?.[0]?.passengers?.[0]?.baggages || [];
+        return bags.some((b: any) => b?.type === "checked" && (b?.quantity || 0) > 0);
+      } catch (_) { return false; }
+    })();
+    const seatsSelected = Array.isArray(pending.contact?.seats) && pending.contact.seats.length > 0;
+    const changesAllowed = offer?.conditions?.change_before_departure?.allowed ?? null;
+
+    const storedSeatsByPaxAndSeg: Record<string, string> = {};
+    for (const s of (pending.contact?.seats || [])) {
+      const key = `${s.passenger_index}::${s.segment_id || ''}`;
+      if (s.designator) storedSeatsByPaxAndSeg[key] = s.designator;
+    }
+    const electronicTickets = (order.documents || [])
+      .filter((d: any) => d?.type === "electronic_ticket" || d?.type === "ticket")
+      .map((d: any) => d?.unique_identifier)
+      .filter(Boolean);
+
+    const passengerDetails = (order.passengers || []).map((p: any, paxIdx: number) => {
+      const segments: any[] = [];
+      for (const slice of (order.slices || [])) {
+        for (const seg of (slice.segments || [])) {
+          const seatService = (order.services || []).find((s: any) =>
+            s.type === "seat"
+            && Array.isArray(s.passenger_ids) && s.passenger_ids.includes(p.id)
+            && Array.isArray(s.segment_ids)   && s.segment_ids.includes(seg.id)
+          );
+          const storedKeyExact = `${paxIdx}::${seg.id}`;
+          const storedKeyAny = `${paxIdx}::`;
+          const fallbackSeat =
+            storedSeatsByPaxAndSeg[storedKeyExact]
+            || storedSeatsByPaxAndSeg[storedKeyAny]
+            || null;
+          const seatDesignator = seatService?.metadata?.designator || fallbackSeat || null;
+          const tNum = electronicTickets[paxIdx] || null;
+          segments.push({
+            origin: seg.origin?.iata_code || null,
+            destination: seg.destination?.iata_code || null,
+            carrier: seg.marketing_carrier?.iata_code || null,
+            flight: seg.marketing_carrier_flight_number || null,
+            seat: seatDesignator,
+            ticket: tNum,
+          });
+        }
+      }
+      return {
+        name: `${p.given_name || ''} ${p.family_name || ''}`.trim(),
+        type: p.type || null,
+        segments,
+      };
+    });
+
     // 9. Save booking
     const { error: dbErr } = await supabase.from("bookings").insert({
+      user_id: pending.user_id || null,   // mirror from pending_bookings (null for guests)
       duffel_order_id: order.id,
       booking_reference: order.booking_reference,
       origin: outbound.origin.iata_code,
@@ -399,6 +463,12 @@ serve(async (req) => {
       departure_at: outboundSeg.departing_at,
       airline: order.owner.name,
       flight_number: `${outboundSeg.marketing_carrier.iata_code}${outboundSeg.marketing_carrier_flight_number}`,
+      cabin_class: sampleCabin,
+      fare_brand_name: fareBrandName,
+      baggage_included: baggageIncluded,
+      seats_selected: seatsSelected,
+      changes_allowed: changesAllowed,
+      passenger_details: passengerDetails,
       total_amount: parseFloat(order.total_amount),
       total_currency: order.total_currency,
       total_paid_kes: pending.total_kes,
