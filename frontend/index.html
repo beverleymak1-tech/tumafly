@@ -3548,7 +3548,32 @@
       margin-bottom: 8px;
     }
     .saved-trav-picker .pax-select {
-      width: 100%;
+      flex: 1 1 auto;
+      min-width: 0;
+    }
+    .saved-trav-picker-row {
+      display: flex;
+      align-items: stretch;
+      gap: 8px;
+    }
+    .saved-trav-clear {
+      flex: 0 0 auto;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 40px;
+      padding: 0;
+      background: var(--surface-1, #fff);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      color: var(--text-2);
+      cursor: pointer;
+      transition: color 120ms, border-color 120ms, background 120ms;
+    }
+    .saved-trav-clear:hover {
+      color: var(--danger, #c0392b);
+      border-color: var(--danger, #c0392b);
+      background: var(--danger-soft, #FDE8E8);
     }
 
     /* Inline save error — appears right under the Save traveler button.
@@ -10595,6 +10620,15 @@
     renderPassengerForms();
   }
 
+  // Trashcan affordance next to the picker dropdown — un-picks the saved
+  // traveler from this slot, returning the form to the "— New traveler —"
+  // state. The cleared traveler automatically reappears in other slots'
+  // dropdowns via the pickedElsewhere filter.
+  function clearPickedTraveler(i) {
+    applySavedTraveler(i, '');
+  }
+  window.clearPickedTraveler = clearPickedTraveler;
+
   // Q4: Returns true if any field on the traveler data differs from the
   // original picked snapshot. Used to decide whether to show the
   // "Update saved profile" checkbox (vs hiding it entirely when nothing
@@ -10682,6 +10716,52 @@
       if (s.saved) return renderSavedTraveler(i);
       return renderTravelerForm(i);
     }).join('');
+
+    // Q4 (live): attach delegated input/change watcher exactly once.
+    // Survives subsequent innerHTML rewrites because it lives on the
+    // container, not on the swapped children.
+    if (!container.__tfPickerWatchersAttached) {
+      const onLiveEdit = (e) => {
+        const card = e.target.closest('[data-traveler-card]');
+        if (!card) return;
+        const idx = parseInt(card.dataset.travelerCard, 10);
+        if (isNaN(idx)) return;
+        // Exclusions: the picker dropdown (its onchange mutates state via
+        // applySavedTraveler then re-renders; snapshotting mid-transition
+        // would clobber). The save checkbox itself (we don't want ticking
+        // it to retrigger a re-evaluation that re-renders the wrap).
+        if (e.target.matches('.saved-trav-picker .pax-select')) return;
+        if (e.target.id === `p${idx}-save-to-account`) return;
+        snapshotTraveler(idx);
+        refreshUpdateOnFileCheckbox(idx);
+      };
+      container.addEventListener('input', onLiveEdit, true);
+      container.addEventListener('change', onLiveEdit, true);
+      container.__tfPickerWatchersAttached = true;
+    }
+  }
+
+  // Q4 (live): driven by the delegated watcher above. Mutates only the
+  // checkbox wrap's display + label text — never re-renders the card —
+  // so cursor position and focus are preserved while the user types.
+  function refreshUpdateOnFileCheckbox(i) {
+    const wrap = document.getElementById(`p${i}-update-checkbox-wrap`);
+    const labelSpan = document.getElementById(`p${i}-save-to-account-label`);
+    if (!wrap || !labelSpan) return;
+    const d = travelerStates[i]?.data;
+    if (!d) return;
+    if (d._saved_traveler_id) {
+      if (travelerHasEditsVsPicked(d)) {
+        const name = [d.given_name, d.family_name].filter(Boolean).join(' ').trim() || 'this traveler';
+        labelSpan.textContent = `Update ${name}'s saved profile with these changes`;
+        wrap.style.display = '';
+      } else {
+        wrap.style.display = 'none';
+      }
+    } else {
+      labelSpan.textContent = 'Save this traveler to my account for future bookings';
+      wrap.style.display = '';
+    }
   }
 
   function renderTravelerForm(i) {
@@ -10751,17 +10831,27 @@
             t.id === travelerStates[i].data._saved_traveler_id || !pickedElsewhere.has(t.id)
           );
           if (visible.length === 0) return ''; // nothing left to offer — hide picker entirely
+          const isPicked = !!travelerStates[i].data._saved_traveler_id;
           return `
           <div class="saved-trav-picker">
             <label class="saved-trav-picker-label">Use a saved traveler</label>
-            <select class="pax-select" onchange="applySavedTraveler(${i}, this.value)">
-              <option value="">— New traveler —</option>
-              ${visible.map(t => {
-                const label = [t.given_name, t.family_name].filter(Boolean).join(' ').trim() || '(no name)';
-                const sel = travelerStates[i].data._saved_traveler_id === t.id ? 'selected' : '';
-                return `<option value="${escapeHtml(t.id)}" ${sel}>${escapeHtml(label)}</option>`;
-              }).join('')}
-            </select>
+            <div class="saved-trav-picker-row">
+              <select class="pax-select" onchange="applySavedTraveler(${i}, this.value)">
+                <option value="">— New traveler —</option>
+                ${visible.map(t => {
+                  const label = [t.given_name, t.family_name].filter(Boolean).join(' ').trim() || '(no name)';
+                  const sel = travelerStates[i].data._saved_traveler_id === t.id ? 'selected' : '';
+                  return `<option value="${escapeHtml(t.id)}" ${sel}>${escapeHtml(label)}</option>`;
+                }).join('')}
+              </select>
+              ${isPicked ? `
+                <button type="button" class="saved-trav-clear" onclick="clearPickedTraveler(${i})" aria-label="Clear picked traveler" title="Clear traveler">
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                    <path d="M3 6h18M8 6V4a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1v2m2 0v14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2V6h12zM10 11v6M14 11v6" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
+                  </svg>
+                </button>
+              ` : ''}
+            </div>
           </div>
         `;
         })() : ''}
@@ -10861,25 +10951,33 @@
         `)}
 
         ${currentUser ? (() => {
-          // Q4: The checkbox does triple-duty depending on context:
-          //  - New traveler (no saved id):           "Save this traveler to my account"
-          //  - Picked + edited:                       "Update [name]'s saved profile"
-          //  - Picked + unchanged (no edits to save): hide entirely
+          // Q4 (live): one stable wrap + label span. Visibility + label text
+          // are driven by refreshUpdateOnFileCheckbox(i), which is invoked on
+          // every input/change inside this card by the live watcher in
+          // renderPassengerForms. That avoids a full re-render on every
+          // keystroke (which would steal focus / lose cursor position).
+          //
+          // Three states:
+          //  - New traveler (no saved id):     visible, "Save this traveler…"
+          //  - Picked + edited:                visible, "Update [name]'s saved profile…"
+          //  - Picked + unchanged:             hidden
+          let labelText, hidden;
           if (d._saved_traveler_id) {
-            if (!travelerHasEditsVsPicked(d)) return ''; // nothing to update — hide
+            const edited = travelerHasEditsVsPicked(d);
+            hidden = !edited;
             const name = [d.given_name, d.family_name].filter(Boolean).join(' ').trim() || 'this traveler';
-            return `
-              <label class="save-to-account-row">
-                <input type="checkbox" id="p${i}-save-to-account" ${d.save_to_account ? 'checked' : ''}>
-                <span>Update ${escapeHtml(name)}'s saved profile with these changes</span>
-              </label>
-            `;
+            labelText = `Update ${name}'s saved profile with these changes`;
+          } else {
+            hidden = false;
+            labelText = 'Save this traveler to my account for future bookings';
           }
           return `
-            <label class="save-to-account-row">
-              <input type="checkbox" id="p${i}-save-to-account" ${d.save_to_account ? 'checked' : ''}>
-              <span>Save this traveler to my account for future bookings</span>
-            </label>
+            <div id="p${i}-update-checkbox-wrap" class="pax-update-checkbox-wrap" style="${hidden ? 'display:none;' : ''}">
+              <label class="save-to-account-row">
+                <input type="checkbox" id="p${i}-save-to-account" ${d.save_to_account ? 'checked' : ''}>
+                <span id="p${i}-save-to-account-label">${escapeHtml(labelText)}</span>
+              </label>
+            </div>
           `;
         })() : ''}
 
