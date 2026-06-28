@@ -3523,6 +3523,24 @@
     .save-traveler-btn:hover { background: var(--brand-dark); }
     .save-traveler-btn:active { transform: scale(0.99); }
 
+    /* "Save this traveler to my account" checkbox row — appears above the
+       Save traveler button when the user is signed in. */
+    .save-to-account-row {
+      display: flex; align-items: center; gap: 10px;
+      margin-top: 18px; padding: 12px 14px;
+      background: var(--brand-soft, rgba(61, 149, 245, 0.08));
+      border-radius: var(--radius-sm);
+      font-size: 14px; color: var(--ink);
+      cursor: pointer;
+      user-select: none;
+    }
+    .save-to-account-row input[type="checkbox"] {
+      width: 18px; height: 18px;
+      accent-color: var(--brand);
+      cursor: pointer;
+      flex-shrink: 0;
+    }
+
     /* Saved traveler card (post-save state) */
     .saved-traveler {
       display: flex;
@@ -8968,6 +8986,7 @@
           known_traveler_id: '',
           redress_number: '',
           special_assistance: '',
+          save_to_account: false,    // signed-in users opt-in to persisting this traveler
         },
         openSections: new Set(),  // section keys currently expanded
         showRequiredErrors: false, // true after a failed save — surfaces red per-field errors
@@ -10108,6 +10127,9 @@
     if (g('kti')) s.data.known_traveler_id = g('kti').value.trim();
     if (g('redress')) s.data.redress_number = g('redress').value.trim();
     if (g('assist')) s.data.special_assistance = g('assist').value.trim();
+    // "Save to my account" checkbox — only present when signed in.
+    const saveBox = document.getElementById(`p${i}-save-to-account`);
+    if (saveBox) s.data.save_to_account = saveBox.checked;
     // Frequent-flyer rows
     const ffRows = document.querySelectorAll(`[data-ff-pax="${i}"]`);
     s.data.frequent_flyer = [];
@@ -10184,6 +10206,48 @@
     renderPassengerForms();
     const alertBox = document.getElementById('booking-alert');
     if (alertBox) alertBox.innerHTML = '';
+
+    // Persist to saved_travelers if the user opted in. Non-blocking: if the
+    // insert fails (network, RLS, etc.), the local booking flow continues
+    // unaffected and we surface a soft warning in the booking alert.
+    if (currentUser && d.save_to_account) {
+      persistSavedTraveler(d).catch(err => {
+        console.warn('[saved_travelers] insert failed:', err);
+        const ab = document.getElementById('booking-alert');
+        if (ab) ab.innerHTML = `
+          <div class="alert alert-info">
+            Couldn't save the traveler to your account right now — your booking is unaffected.
+          </div>`;
+      });
+    }
+  }
+
+  // Insert one traveler into saved_travelers via the user's Supabase session.
+  // RLS policies on the table restrict inserts to auth.uid() = user_id, so we
+  // just send user_id from the current session — no server-side EF needed.
+  async function persistSavedTraveler(d) {
+    const sb = await getSupabase();
+    const { data: { session } } = await sb.auth.getSession();
+    if (!session?.user?.id) throw new Error('Not signed in');
+    const row = {
+      user_id:           session.user.id,
+      title:             d.title || null,
+      gender:            d.gender || null,
+      given_name:        d.given_name,
+      middle_name:       d.middle_name || null,
+      family_name:       d.family_name,
+      born_on:           d.born_on || null,
+      nationality:       d.nationality || null,
+      passport_country:  d.passport?.country || null,
+      passport_number:   d.passport?.number || null,
+      passport_expires:  d.passport?.expires || null,
+      known_traveler_id: d.known_traveler_id || null,
+      redress_number:    d.redress_number || null,
+      special_assistance: d.special_assistance || null,
+      frequent_flyer:    Array.isArray(d.frequent_flyer) ? d.frequent_flyer : [],
+    };
+    const { error } = await sb.from('saved_travelers').insert(row);
+    if (error) throw error;
   }
 
   function editTraveler(i) {
@@ -10366,6 +10430,13 @@
             Special assistance requests are forwarded to our support team and the airline before your flight.
           </div>
         `)}
+
+        ${currentUser ? `
+          <label class="save-to-account-row">
+            <input type="checkbox" id="p${i}-save-to-account" ${d.save_to_account ? 'checked' : ''}>
+            <span>Save this traveler to my account for future bookings</span>
+          </label>
+        ` : ''}
 
         <button type="button" class="save-traveler-btn" onclick="saveTraveler(${i})">Save traveler</button>
       </div>
