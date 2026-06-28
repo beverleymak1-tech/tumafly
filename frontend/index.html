@@ -720,15 +720,13 @@
     /* Passengers card */
     .itin-pax-title {
       font-size: 16px; font-weight: 700; color: var(--ink);
-      margin: 0 0 16px;
+      margin: 0 0 14px;
+      padding-bottom: 14px;
+      border-bottom: 1px solid var(--border);
     }
     .itin-pax-block + .itin-pax-block {
       border-top: 1px solid var(--border);
       margin-top: 18px; padding-top: 18px;
-    }
-    .itin-pax-name {
-      font-size: 15px; font-weight: 700; color: var(--ink);
-      margin: 0 0 10px;
     }
     .itin-pax-table {
       width: 100%; border-collapse: collapse;
@@ -736,9 +734,17 @@
     }
     .itin-pax-table thead th {
       text-align: left;
-      font-size: 13px; font-weight: 700; color: var(--ink);
-      padding: 8px 12px 8px 0;
+      padding: 8px 12px 12px 0;
       border-bottom: 1px solid var(--border);
+      vertical-align: bottom;
+    }
+    /* Passenger name takes the first column — visually heavier than the
+       "Seat" / "Ticket Number" labels next to it. */
+    .itin-pax-table thead th.itin-pax-name {
+      font-size: 15px; font-weight: 700; color: var(--ink);
+    }
+    .itin-pax-table thead th.itin-pax-col {
+      font-size: 13px; font-weight: 700; color: var(--ink);
     }
     .itin-pax-table tbody td {
       padding: 12px 12px 12px 0;
@@ -13470,13 +13476,12 @@
           }).join('');
           return `
             <div class="itin-pax-block">
-              <h3 class="itin-pax-name">${p.name || 'Passenger'}</h3>
               <table class="itin-pax-table">
                 <thead>
                   <tr>
-                    <th></th>
-                    <th>Seat</th>
-                    <th>Ticket Number</th>
+                    <th class="itin-pax-name">${p.name || 'Passenger'}</th>
+                    <th class="itin-pax-col">Seat</th>
+                    <th class="itin-pax-col">Ticket Number</th>
                   </tr>
                 </thead>
                 <tbody>${rows}</tbody>
@@ -13522,13 +13527,12 @@
         }).join('');
         return `
           <div class="itin-pax-block">
-            <h3 class="itin-pax-name">${name}</h3>
             <table class="itin-pax-table">
               <thead>
                 <tr>
-                  <th></th>
-                  <th>Seat</th>
-                  <th>Ticket Number</th>
+                  <th class="itin-pax-name">${name}</th>
+                  <th class="itin-pax-col">Seat</th>
+                  <th class="itin-pax-col">Ticket Number</th>
                 </tr>
               </thead>
               <tbody>${rows}</tbody>
