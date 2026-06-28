@@ -10685,8 +10685,9 @@
   }
 
   function renderTravelerForm(i) {
-    const d = travelerStates[i].data;
-    const sections = travelerStates[i].openSections;
+    const s = travelerStates[i];
+    const d = s.data;
+    const sections = s.openSections;
     const REQ = '<span class="pax-required">*</span>';
 
     // When the trip is international, surface passport fields as required: open by
