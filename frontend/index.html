@@ -6064,7 +6064,7 @@
           </div>
           <div>
             <label class="pax-label">First name <span class="pax-required">*</span></label>
-            <input id="tf-first" type="text" class="pax-input" placeholder="As on passport">
+            <input id="tf-given" type="text" class="pax-input" placeholder="As on passport">
           </div>
           <div>
             <label class="pax-label">Middle name <span style="color:var(--text-3);font-weight:400;">(optional)</span></label>
@@ -6072,11 +6072,11 @@
           </div>
           <div class="full">
             <label class="pax-label">Last name <span class="pax-required">*</span></label>
-            <input id="tf-last" type="text" class="pax-input" placeholder="As on passport">
+            <input id="tf-family" type="text" class="pax-input" placeholder="As on passport">
           </div>
           <div>
             <label class="pax-label">Date of birth</label>
-            <input id="tf-dob" type="date" class="pax-input">
+            <input id="tf-born" type="date" class="pax-input">
           </div>
           <div>
             <label class="pax-label">Nationality <span style="color:var(--text-3);font-weight:400;">(optional)</span></label>
@@ -6094,11 +6094,11 @@
             </div>
             <div>
               <label class="pax-label">Passport number</label>
-              <input id="tf-passport-num" type="text" class="pax-input" placeholder="A12345678">
+              <input id="tf-passport-number" type="text" class="pax-input" placeholder="A12345678">
             </div>
             <div>
               <label class="pax-label">Passport expiry</label>
-              <input id="tf-passport-exp" type="date" class="pax-input">
+              <input id="tf-passport-expires" type="date" class="pax-input">
             </div>
           </div>
         </div>
@@ -6107,6 +6107,27 @@
           <div class="pax-section-title" style="margin-bottom:12px;font-size:14px;font-weight:600;color:var(--ink);">Frequent flyer programs <span style="color:var(--text-3);font-weight:400;">(optional)</span></div>
           <div id="tf-ff-list"></div>
           <button class="ff-add-btn" type="button" onclick="addFFRow()">+ Add program</button>
+        </div>
+
+        <div style="margin-top:20px;">
+          <div class="pax-section-title" style="margin-bottom:12px;font-size:14px;font-weight:600;color:var(--ink);">Additional details <span style="color:var(--text-3);font-weight:400;">(optional)</span></div>
+          <div class="form-grid">
+            <div>
+              <label class="pax-label">Known Traveler ID (TSA PreCheck)</label>
+              <input id="tf-kti" type="text" class="pax-input">
+            </div>
+            <div>
+              <label class="pax-label">Redress number</label>
+              <input id="tf-redress" type="text" class="pax-input">
+            </div>
+            <div class="full">
+              <label class="pax-label">Special assistance</label>
+              <textarea id="tf-assist" class="pax-input" rows="2" placeholder="e.g. Wheelchair, dietary needs"></textarea>
+            </div>
+          </div>
+          <div class="pax-collapse-note" style="margin-top:10px;margin-bottom:0;font-size:13px;color:var(--text-2);">
+            Special assistance requests are forwarded to our support team and the airline before your flight.
+          </div>
         </div>
 
         <div class="traveler-form-actions">
@@ -7116,12 +7137,21 @@
   });
 
   // On initial load, set the base state so the first back press doesn't leave the site.
-  // BUT: if the URL has an OAuth callback hash (#access_token=...), don't touch it —
-  // Supabase needs to read it to complete sign-in. We'll clean it up after auth resolves.
+  // BUT: skip the URL wipe entirely when the URL is a callback we need to preserve:
+  //   - OAuth callback (#access_token=...) — Supabase reads this to complete sign-in
+  //   - Pesapal callback (?ref=... or ?OrderMerchantReference=...) — the Pesapal
+  //     return handler reads these params to route the user to the success view
+  // Without this guard, safeHistory('replace', ..., pathname) wipes the search +
+  // hash, the post-load handler reads empty location.search, and the user lands
+  // on home with their newly created booking only visible from My Trips.
   let initialState = null;
   try { initialState = history.state; } catch (_) {}
   const _isOAuthCallback = window.location.hash.includes('access_token=') || window.location.hash.includes('error=');
-  if (!initialState && !_isOAuthCallback) {
+  const _searchForCallback = new URLSearchParams(window.location.search);
+  const _isPesapalCallback = _searchForCallback.has('OrderMerchantReference')
+                          || _searchForCallback.has('OrderTrackingId')
+                          || _searchForCallback.has('ref');
+  if (!initialState && !_isOAuthCallback && !_isPesapalCallback) {
     safeHistory('replace', { view: 'home' }, window.location.pathname);
   }
 
@@ -9091,6 +9121,99 @@
     }
   }
 
+  // ── D5: Guest localStorage prefill ───────────────────────────────────
+  // For users who book without signing in. We stash the contact info and
+  // first traveler at goToPayment time, then on the next booking session
+  // pre-fill the form so they don't retype.
+  //
+  // Both functions are no-ops when:
+  //   - User is signed in (signed-in users use profiles/saved_travelers)
+  //   - localStorage is unavailable (private browsing, etc.)
+  //   - The user has already typed something in the target field
+  const GUEST_PREFILL_KEY = 'tumafly:guest_prefill';
+
+  function stashGuestPrefill() {
+    if (currentUser) return;
+    try {
+      const phoneCC = countryPickerState.contact?.iso || 'KE';
+      const data = {
+        contact: {
+          email:        contactData.email || document.getElementById('contact-email')?.value.trim() || '',
+          phone_number: contactData.phone_number || '',
+          phone_iso:    phoneCC,
+        },
+        // Stash the full first-traveler form data. We exclude save_to_account
+        // and _saved_traveler_id since they're booking-session-specific.
+        first_passenger: travelerStates[0]?.data
+          ? (() => {
+              const { save_to_account, _saved_traveler_id, ...rest } = travelerStates[0].data;
+              return rest;
+            })()
+          : null,
+        stashed_at: new Date().toISOString(),
+      };
+      localStorage.setItem(GUEST_PREFILL_KEY, JSON.stringify(data));
+    } catch (_) {
+      // Quiet — localStorage may be disabled (Safari private, etc.)
+    }
+  }
+
+  function readGuestPrefill() {
+    if (currentUser) return;
+    try {
+      const raw = localStorage.getItem(GUEST_PREFILL_KEY);
+      if (!raw) return;
+      const data = JSON.parse(raw);
+
+      // Contact — only fill if the field is empty (don't clobber user input)
+      const emailEl = document.getElementById('contact-email');
+      const phoneEl = document.getElementById('contact-phone');
+      if (emailEl && !emailEl.value && data.contact?.email) {
+        emailEl.value = data.contact.email;
+      }
+      if (phoneEl && !phoneEl.value && data.contact?.phone_number) {
+        const e164 = data.contact.phone_number.startsWith('+')
+          ? data.contact.phone_number
+          : '+' + data.contact.phone_number.replace(/\D/g, '');
+        // Longest-prefix dial-code match (same approach as prefillContactFromProfile)
+        const matched = [...PHONE_COUNTRIES]
+          .sort((a, b) => b[2].length - a[2].length)
+          .find(c => e164.startsWith(c[2]));
+        if (matched) {
+          countryPickerState['contact'] = { iso: matched[0], name: matched[1], dial: matched[2] };
+          applyCountrySelection('contact', countryPickerState['contact']);
+          phoneEl.value = e164.slice(matched[2].length);
+        } else {
+          phoneEl.value = e164.replace(/\D/g, '');
+        }
+      }
+
+      // First traveler — only fill when the form is genuinely empty.
+      // (User may have arrived with travelerStates from a previous in-session
+      // booking; we don't want to clobber that.)
+      const ts0 = travelerStates[0];
+      if (ts0 && !ts0.saved && data.first_passenger) {
+        const cur = ts0.data;
+        const formIsEmpty = !cur.given_name && !cur.family_name && !cur.born_on;
+        if (formIsEmpty) {
+          ts0.data = {
+            ...cur,                       // keep defaults like title='mr', empty FF array
+            ...data.first_passenger,      // overlay stashed values
+            save_to_account: false,       // never carry forward
+            _saved_traveler_id: null,
+            // Restore the passport object shape (JSON.parse turns it into a plain object — that's fine)
+            passport: data.first_passenger.passport || { country: '', number: '', expires: '' },
+            frequent_flyer: Array.isArray(data.first_passenger.frequent_flyer) ? data.first_passenger.frequent_flyer : [],
+          };
+          // Re-render so the user sees the pre-filled fields immediately
+          renderPassengerForms();
+        }
+      }
+    } catch (e) {
+      console.warn('[guest_prefill] read failed:', e);
+    }
+  }
+
   function proceedToBooking() {
     // Reset any expired-fare state from a prior offer. proceedToBooking is
     // called when the user picks a fresh flight from results, so we know the
@@ -9147,6 +9270,9 @@
     // Only fills empty fields — never overwrites what the user already typed.
     // Silently no-ops if signed out or profile fetch fails.
     prefillContactFromProfile().catch(e => console.warn('[prefill] failed:', e));
+    // D5: Guest fallback — if no signed-in user, pre-fill from localStorage
+    // (last booking's contact + first traveler). Quiet no-op for fresh devices.
+    readGuestPrefill();
     // Fetch the user's saved_travelers (if signed in) so the per-card "Use a
     // saved traveler" picker can render. When the list lands, re-render the
     // forms — picker is hidden when the user has none.
@@ -11200,6 +11326,11 @@
     passengerData = r.passengers;
     contactData = { email, phone_number: phone };
 
+    // D5: Stash guest's contact + first traveler in localStorage so the next
+    // booking on the same device pre-fills. Signed-in users skip this — they
+    // use the saved_travelers picker + profile-based contact prefill instead.
+    stashGuestPrefill();
+
     renderPaymentSummary();
     // Show a loading state immediately — the iframe loads itself, no gate.
     // If startCardPayment fails (Turnstile, mode/key, etc.) the user gets a
@@ -13148,34 +13279,37 @@
     }
   }
 
-  // ── Saved travelers ──────────────────────────────────────────
-  let savedTravelersCache = [];
+  // ── Saved travelers (Account view) ──────────────────────────────────
+  // Shares the _savedTravelers cache with the booking-side D3 picker.
+  // fetchSavedTravelers() is defined earlier in the file.
 
   async function loadSavedTravelers() {
     if (!currentUser) return;
-    const sb = await getSupabase();
-    const { data } = await sb.from('saved_travelers').select('*').eq('user_id', currentUser.id).order('created_at');
-    savedTravelersCache = data || [];
+    await fetchSavedTravelers();
     renderTravelerList();
   }
 
   function renderTravelerList() {
     const list = document.getElementById('travelers-list');
     if (!list) return;
-    if (!savedTravelersCache.length) { list.innerHTML = ''; return; }
+    if (!_savedTravelers.length) { list.innerHTML = ''; return; }
     const titleMap = { mr: 'Mr', mrs: 'Mrs', ms: 'Ms', dr: 'Dr' };
-    list.innerHTML = savedTravelersCache.map(t => {
+    list.innerHTML = _savedTravelers.map(t => {
       const titleLabel = t.title ? titleMap[t.title] + ' ' : '';
       const middle = t.middle_name ? t.middle_name + ' ' : '';
+      // Country code → readable name lookup for the meta line
+      const natName = t.nationality
+        ? (PHONE_COUNTRIES.find(([iso]) => iso === t.nationality)?.[1] || t.nationality)
+        : '';
       return `
       <div class="traveler-card">
         <div class="traveler-card-info">
-          <div class="traveler-card-name">${titleLabel}${t.first_name} ${middle}${t.last_name}</div>
-          <div class="traveler-card-meta">${t.nationality || ''}${t.passport_number ? ' · Passport: ' + t.passport_number : ''}</div>
+          <div class="traveler-card-name">${escapeHtml(titleLabel)}${escapeHtml(t.given_name || '')} ${escapeHtml(middle)}${escapeHtml(t.family_name || '')}</div>
+          <div class="traveler-card-meta">${escapeHtml(natName)}${t.passport_number ? ' · Passport: ' + escapeHtml(t.passport_number) : ''}</div>
         </div>
         <div class="traveler-card-actions">
-          <button class="traveler-card-btn" onclick="openTravelerForm('${t.id}')">Edit</button>
-          <button class="traveler-card-btn danger" onclick="deleteTraveler('${t.id}')">Remove</button>
+          <button class="traveler-card-btn" onclick="openTravelerForm('${escapeHtml(t.id)}')">Edit</button>
+          <button class="traveler-card-btn danger" onclick="deleteTraveler('${escapeHtml(t.id)}')">Remove</button>
         </div>
       </div>`;
     }).join('');
@@ -13186,34 +13320,32 @@
     const addBtn = document.getElementById('add-traveler-btn');
     form.classList.remove('hidden');
     addBtn.classList.add('hidden');
-    // Populate country dropdowns
     populateCountryDropdowns();
+    const clear = (...ids) => ids.forEach(i => { const el = document.getElementById(i); if (el) el.value = ''; });
     if (id) {
-      const t = savedTravelersCache.find(x => x.id === id);
+      const t = _savedTravelers.find(x => x.id === id);
       if (!t) return;
       document.getElementById('traveler-form-title').textContent = 'Edit traveler';
-      document.getElementById('tf-id').value             = t.id;
-      document.getElementById('tf-title').value          = t.title        || '';
-      document.getElementById('tf-first').value          = t.first_name   || '';
-      document.getElementById('tf-middle').value         = t.middle_name  || '';
-      document.getElementById('tf-last').value           = t.last_name    || '';
-      document.getElementById('tf-dob').value            = t.dob          || '';
-      document.getElementById('tf-gender').value         = t.gender       || '';
-      document.getElementById('tf-nationality').value    = t.nationality  || '';
-      document.getElementById('tf-passport-num').value   = t.passport_number  || '';
-      document.getElementById('tf-passport-exp').value   = t.passport_expiry  || '';
-      document.getElementById('tf-passport-country').value = t.passport_country || '';
+      document.getElementById('tf-id').value                = t.id;
+      document.getElementById('tf-title').value             = t.title             || '';
+      document.getElementById('tf-given').value             = t.given_name        || '';
+      document.getElementById('tf-middle').value            = t.middle_name       || '';
+      document.getElementById('tf-family').value            = t.family_name       || '';
+      document.getElementById('tf-born').value              = t.born_on           || '';
+      document.getElementById('tf-gender').value            = t.gender            || '';
+      document.getElementById('tf-nationality').value       = t.nationality       || '';
+      document.getElementById('tf-passport-country').value  = t.passport_country  || '';
+      document.getElementById('tf-passport-number').value   = t.passport_number   || '';
+      document.getElementById('tf-passport-expires').value  = t.passport_expires  || '';
+      document.getElementById('tf-kti').value               = t.known_traveler_id || '';
+      document.getElementById('tf-redress').value           = t.redress_number    || '';
+      document.getElementById('tf-assist').value            = t.special_assistance || '';
       renderFFRows(t.frequent_flyer || []);
     } else {
       document.getElementById('traveler-form-title').textContent = 'New traveler';
-      document.getElementById('tf-id').value = '';
-      ['tf-first','tf-middle','tf-last','tf-passport-num'].forEach(id => document.getElementById(id).value = '');
-      document.getElementById('tf-title').value = '';
-      document.getElementById('tf-dob').value = '';
-      document.getElementById('tf-gender').value = '';
-      document.getElementById('tf-nationality').value = '';
-      document.getElementById('tf-passport-exp').value = '';
-      document.getElementById('tf-passport-country').value = '';
+      clear('tf-id','tf-title','tf-given','tf-middle','tf-family','tf-born','tf-gender',
+            'tf-nationality','tf-passport-country','tf-passport-number','tf-passport-expires',
+            'tf-kti','tf-redress','tf-assist');
       renderFFRows([]);
     }
     form.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
@@ -13227,36 +13359,44 @@
 
   async function saveTravelerProfile() {
     if (!currentUser) return;
-    const first = document.getElementById('tf-first').value.trim();
-    const last  = document.getElementById('tf-last').value.trim();
-    if (!first || !last) {
-      document.getElementById('tf-msg').textContent = 'First and last name are required.';
-      document.getElementById('tf-msg').style.color = 'var(--danger)';
+    const given  = document.getElementById('tf-given').value.trim();
+    const family = document.getElementById('tf-family').value.trim();
+    const msg = document.getElementById('tf-msg');
+    if (!given || !family) {
+      msg.textContent = 'First and last name are required.';
+      msg.style.color = 'var(--danger)';
       return;
     }
     const id = document.getElementById('tf-id').value;
+    const v = i => (document.getElementById(i)?.value || '').trim();
     const payload = {
-      user_id:          currentUser.id,
-      title:            document.getElementById('tf-title').value || null,
-      first_name:       first,
-      middle_name:      document.getElementById('tf-middle').value.trim() || null,
-      last_name:        last,
-      dob:              document.getElementById('tf-dob').value || null,
-      gender:           document.getElementById('tf-gender').value || null,
-      nationality:      document.getElementById('tf-nationality').value || null,
-      passport_number:  document.getElementById('tf-passport-num').value.trim() || null,
-      passport_expiry:  document.getElementById('tf-passport-exp').value || null,
-      passport_country: document.getElementById('tf-passport-country').value || null,
-      frequent_flyer:   collectFFRows(),
+      user_id:           currentUser.id,
+      title:             v('tf-title') || null,
+      given_name:        given,
+      middle_name:       v('tf-middle') || null,
+      family_name:       family,
+      born_on:           v('tf-born') || null,
+      gender:            v('tf-gender') || null,
+      nationality:       v('tf-nationality') || null,
+      passport_country:  v('tf-passport-country') || null,
+      passport_number:   v('tf-passport-number') || null,
+      passport_expires:  v('tf-passport-expires') || null,
+      known_traveler_id: v('tf-kti') || null,
+      redress_number:    v('tf-redress') || null,
+      special_assistance: v('tf-assist') || null,
+      frequent_flyer:    collectFFRows(),
+      updated_at:        new Date().toISOString(),
     };
     if (id) payload.id = id;
 
     const sb = await getSupabase();
     const { error } = await sb.from('saved_travelers').upsert(payload);
-    const msg = document.getElementById('tf-msg');
-    if (error) { msg.textContent = 'Save failed: ' + error.message; msg.style.color = 'var(--danger)'; }
-    else {
-      msg.textContent = 'Saved ✓'; msg.style.color = 'var(--success)';
+    if (error) {
+      msg.textContent = 'Save failed: ' + error.message;
+      msg.style.color = 'var(--danger)';
+    } else {
+      msg.textContent = 'Saved ✓';
+      msg.style.color = 'var(--success)';
       setTimeout(closeTravelerForm, 800);
       await loadSavedTravelers();
     }
