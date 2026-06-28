@@ -190,19 +190,24 @@ function renderSliceCard(slice: any, label: string): string {
 
     return `
       <tr><td style="padding:10px 0 ${idx < slice.segments.length - 1 ? '0' : '10'}px 0;">
-        <table width="100%" cellpadding="0" cellspacing="0" style="background:#e8f3ff;border-radius:8px;">
+        <!-- R4: airline + class are now two separate inline-block pills sized
+             to content, rather than one 100%-width table. This stops the
+             tinted background from stretching to the full card width — it
+             now hugs the actual text content (similar to how city names
+             above only span their text width). -->
+        <table width="100%" cellpadding="0" cellspacing="0">
           <tr>
-            <td style="padding:10px 14px;font-size:14px;color:${TEXT_DARK};font-weight:600;">
-              ${escapeHtml(carrier)}${flightNum ? ` · ${escapeHtml(flightNum)}` : ""}
+            <td style="font-size:14px;color:${TEXT_DARK};font-weight:600;">
+              <span style="display:inline-block;background:#e8f3ff;border-radius:8px;padding:8px 12px;">
+                ${escapeHtml(carrier)}${flightNum ? ` · ${escapeHtml(flightNum)}` : ""}
+              </span>
             </td>
-            <td align="right" style="padding:10px 14px;font-size:13px;color:${BRAND_BLUE};font-weight:500;white-space:nowrap;">
+            <td align="right" style="font-size:13px;color:${BRAND_BLUE};font-weight:500;white-space:nowrap;">
               ${(() => {
-                // Right-justified "Class:" caption. Only the word "Class" is hardcoded —
-                // airline, cabin, and the (fare-basis) marker all come from the offer.
                 if (!cabin) return "";
                 const fareCode = cabinPax?.fare_basis_code || "";
                 const marker = fareCode ? ` (${escapeHtml(fareCode)})` : "";
-                return `Class: ${escapeHtml(carrier)} ${escapeHtml(cabin)}${marker}`;
+                return `<span style="display:inline-block;background:#e8f3ff;border-radius:8px;padding:8px 12px;">Class: ${escapeHtml(carrier)} ${escapeHtml(cabin)}${marker}</span>`;
               })()}
             </td>
           </tr>

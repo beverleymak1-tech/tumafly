@@ -3551,6 +3551,20 @@
       width: 100%;
     }
 
+    /* Inline save error — appears right under the Save traveler button.
+       Replaces the page-level booking-alert for per-card validation issues
+       so users see the error next to the action they just took. */
+    .pax-inline-save-error {
+      margin-top: 12px;
+      padding: 10px 14px;
+      background: var(--danger-soft, #FDE8E8);
+      border: 1px solid var(--danger, #DC2626);
+      border-radius: var(--radius-sm);
+      color: var(--danger, #DC2626);
+      font-size: 13px;
+      line-height: 1.45;
+    }
+
     /* "Save this traveler to my account" checkbox row — appears above the
        Save traveler button when the user is signed in. */
     .save-to-account-row {
@@ -4067,13 +4081,22 @@
       background: var(--bg);
       border: 1px solid var(--border);
       border-radius: var(--radius);
-      height: 580px;
+      /* Tall enough that Pesapal's payment form fits without inner scrolling
+         on most viewports. The min() ensures we don't push the iframe taller
+         than the viewport on mobile. Earlier 580px was too short. */
+      height: min(820px, calc(100vh - 80px));
+      min-height: 580px;
       display: grid;
       place-items: center;
       color: var(--text-3);
       font-size: 14px;
       padding: 20px;
       text-align: center;
+    }
+    /* When the iframe is mounted, drop the padding so the iframe fills the
+       wrap edge-to-edge. The loading-state placeholder uses the padding. */
+    .pay-iframe-wrap:has(iframe) {
+      padding: 0;
     }
     .pay-iframe-wrap iframe {
       width: 100%;
@@ -7142,6 +7165,17 @@
       pollHandle = null;
     }
     showView(view, { fromPopState: true });
+    // Q3: When the user navigates back to booking (e.g., Account → edit
+    // a saved traveler → browser back), refresh _savedTravelers so the
+    // picker reflects any edits made in the Account view. Cheap to do; no
+    // risk of clobbering in-progress traveler data since fetchSavedTravelers
+    // only updates the cache, and renderPassengerForms preserves the local
+    // state of each traveler card.
+    if (view === 'booking' && currentUser) {
+      fetchSavedTravelers().then(() => {
+        renderPassengerForms();
+      }).catch(e => console.warn('[saved_travelers] popstate refresh failed:', e));
+    }
   });
 
   // On initial load, set the base state so the first back press doesn't leave the site.
@@ -10426,8 +10460,11 @@
       // Same pattern as showPassportErrors — surface per-field red borders + inline
       // error text only after a failed save, never on first render.
       s.showRequiredErrors = true;
-      const alertBox = document.getElementById('booking-alert');
-      if (alertBox) showAlert('booking-alert', `Please fill in: ${errors.join(', ')} for Traveler ${i + 1}.`);
+      // Q2: Render the error INLINE inside the traveler card so the user sees
+      // it right next to the Save button they just clicked. The page-level
+      // booking-alert is too far down — users were thinking the button was
+      // broken because the error rendered offscreen.
+      s.lastSaveError = `Please fill in: ${errors.join(', ')} for Traveler ${i + 1}.`;
       renderPassengerForms();
       // Scroll the first error field of THIS traveler into view (not the global first —
       // earlier travelers may also have red fields from prior failed saves, and we
@@ -10442,6 +10479,7 @@
       return;
     }
     s.saved = true;
+    s.lastSaveError = null;  // clear any prior error
     s.showPassportErrors = false;
     s.showRequiredErrors = false;
     s.openSections.clear();
@@ -10520,8 +10558,10 @@
     const t = _savedTravelers.find(x => x.id === savedId);
     if (!t) return;
 
-    // Map saved_travelers row → traveler state data shape
-    travelerStates[i].data = {
+    // Q4: Build the data object first, then deep-clone it as the original
+    // snapshot. The form will later diff current vs original to detect edits
+    // and conditionally show the "Update [name]'s saved profile" checkbox.
+    const data = {
       title:           t.title || 'mr',
       gender:          t.gender || '',
       given_name:      t.given_name || '',
@@ -10541,9 +10581,39 @@
       save_to_account:   false,    // already saved; no need to re-save by default
       _saved_traveler_id: t.id,    // link back so we don't double-save the same one
     };
+    // Snapshot for diff. JSON round-trip = deep clone of plain-JSON shape.
+    data._original_picked = JSON.parse(JSON.stringify({
+      title: data.title, gender: data.gender, given_name: data.given_name,
+      middle_name: data.middle_name, family_name: data.family_name, born_on: data.born_on,
+      nationality: data.nationality, passport: data.passport,
+      frequent_flyer: data.frequent_flyer, known_traveler_id: data.known_traveler_id,
+      redress_number: data.redress_number, special_assistance: data.special_assistance,
+    }));
+    travelerStates[i].data = data;
     travelerStates[i].showRequiredErrors = false;
     travelerStates[i].showPassportErrors = false;
     renderPassengerForms();
+  }
+
+  // Q4: Returns true if any field on the traveler data differs from the
+  // original picked snapshot. Used to decide whether to show the
+  // "Update saved profile" checkbox (vs hiding it entirely when nothing
+  // has changed since the user picked from the dropdown).
+  function travelerHasEditsVsPicked(d) {
+    if (!d._saved_traveler_id || !d._original_picked) return false;
+    const o = d._original_picked;
+    const flat = (x) => [
+      x.title, x.gender, x.given_name, x.middle_name, x.family_name, x.born_on,
+      x.nationality, x.known_traveler_id, x.redress_number, x.special_assistance,
+      x.passport?.country, x.passport?.number, x.passport?.expires,
+    ].map(v => v || '').join('|');
+    if (flat(d) !== flat(o)) return true;
+    // FF: compare normalized JSON
+    const ff = (x) => JSON.stringify(
+      (Array.isArray(x.frequent_flyer) ? x.frequent_flyer : [])
+        .map(f => ({ a: f.airline_iata_code || '', n: f.account_number || '' }))
+    );
+    return ff(d) !== ff(o);
   }
 
   // Insert OR update a traveler in saved_travelers via the user's session.
@@ -10666,19 +10736,34 @@
     return `
       <div class="pax-block" data-traveler-card="${i}">
         <div class="pax-block-title">Traveler ${i + 1} · ${getExpectedPaxTypeLabel(i)}${i === 0 ? ' · Primary' : ''}</div>
-        ${currentUser && _savedTravelers.length ? `
+        ${currentUser && _savedTravelers.length ? (() => {
+          // Q1: Filter out travelers already picked on OTHER slots so the
+          // same person can't be assigned to two slots. We keep the entry
+          // selected on THIS slot (so the dropdown reflects the current
+          // picked traveler) but exclude entries claimed by other slots.
+          const pickedElsewhere = new Set(
+            travelerStates
+              .map((s, idx) => idx !== i ? s?.data?._saved_traveler_id : null)
+              .filter(Boolean)
+          );
+          const visible = _savedTravelers.filter(t =>
+            t.id === travelerStates[i].data._saved_traveler_id || !pickedElsewhere.has(t.id)
+          );
+          if (visible.length === 0) return ''; // nothing left to offer — hide picker entirely
+          return `
           <div class="saved-trav-picker">
             <label class="saved-trav-picker-label">Use a saved traveler</label>
             <select class="pax-select" onchange="applySavedTraveler(${i}, this.value)">
               <option value="">— New traveler —</option>
-              ${_savedTravelers.map(t => {
+              ${visible.map(t => {
                 const label = [t.given_name, t.family_name].filter(Boolean).join(' ').trim() || '(no name)';
                 const sel = travelerStates[i].data._saved_traveler_id === t.id ? 'selected' : '';
                 return `<option value="${escapeHtml(t.id)}" ${sel}>${escapeHtml(label)}</option>`;
               }).join('')}
             </select>
           </div>
-        ` : ''}
+        `;
+        })() : ''}
         <div class="pax-section-title">Traveler details</div>
         <div class="form-grid">
           <div>
@@ -10774,14 +10859,35 @@
           </div>
         `)}
 
-        ${currentUser ? `
-          <label class="save-to-account-row">
-            <input type="checkbox" id="p${i}-save-to-account" ${d.save_to_account ? 'checked' : ''}>
-            <span>Save this traveler to my account for future bookings</span>
-          </label>
-        ` : ''}
+        ${currentUser ? (() => {
+          // Q4: The checkbox does triple-duty depending on context:
+          //  - New traveler (no saved id):           "Save this traveler to my account"
+          //  - Picked + edited:                       "Update [name]'s saved profile"
+          //  - Picked + unchanged (no edits to save): hide entirely
+          if (d._saved_traveler_id) {
+            if (!travelerHasEditsVsPicked(d)) return ''; // nothing to update — hide
+            const name = [d.given_name, d.family_name].filter(Boolean).join(' ').trim() || 'this traveler';
+            return `
+              <label class="save-to-account-row">
+                <input type="checkbox" id="p${i}-save-to-account" ${d.save_to_account ? 'checked' : ''}>
+                <span>Update ${escapeHtml(name)}'s saved profile with these changes</span>
+              </label>
+            `;
+          }
+          return `
+            <label class="save-to-account-row">
+              <input type="checkbox" id="p${i}-save-to-account" ${d.save_to_account ? 'checked' : ''}>
+              <span>Save this traveler to my account for future bookings</span>
+            </label>
+          `;
+        })() : ''}
 
         <button type="button" class="save-traveler-btn" onclick="saveTraveler(${i})">Save traveler</button>
+        ${s.lastSaveError ? `
+          <div class="pax-inline-save-error">
+            ${escapeHtml(s.lastSaveError)}
+          </div>
+        ` : ''}
       </div>
     `;
   }
@@ -12608,10 +12714,22 @@
     }
   })();
 
+  // Set to true between OTP verification and profile completion. When true,
+  // onSignedIn skips the nav update so the pill stays "Sign in" until the
+  // user actually completes their first name + last name. Prevents the
+  // "Account" pill flashing during the brief window between verifyOtp
+  // success and the profile-capture step submission.
+  let _pendingProfileCapture = false;
+
   function onSignedIn(user) {
     console.log('[auth] onSignedIn called, current view:', document.body.getAttribute('data-view'));
     currentUser = user;
-    updateNavForUser(user);
+    // Defer nav update if we're between OTP verify and profile completion —
+    // the user technically has a Supabase session but no name yet. The
+    // completeProfile() success handler will re-run updateNavForUser then.
+    if (!_pendingProfileCapture) {
+      updateNavForUser(user);
+    }
     // Clean any stale OAuth tokens from URL (shouldn't appear with GSI but defensive)
     if (window.location.hash.includes('access_token=')) {
       try { history.replaceState({ view: 'home' }, '', window.location.pathname); } catch (_) {}
@@ -12767,6 +12885,22 @@
     }
   }
   function closeAuthModal() {
+    // A2: If the profile-capture step is visible, the user has verified OTP
+    // but hasn't given us their name. X-ing out at this point shouldn't leave
+    // them as a nameless "Account" — revert them to guest by signing out.
+    // The auth.users row stays (Supabase doesn't expose user deletion from
+    // client-side), so re-OTP'ing the same phone later will pick up the
+    // existing user and re-show the profile-capture step naturally.
+    const profileStep = document.getElementById('auth-step-profile');
+    if (profileStep && !profileStep.classList.contains('hidden')) {
+      _pendingProfileCapture = false;
+      (async () => {
+        try {
+          const sb = await getSupabase();
+          await sb.auth.signOut();
+        } catch (e) { console.warn('[auth] signOut on profile-capture-close failed:', e); }
+      })();
+    }
     document.getElementById('auth-overlay').classList.add('hidden');
     authCallback = null;
   }
@@ -12878,19 +13012,11 @@
       if (e.message === '__cancelled__') {
         // User dismissed or closed the picker — quiet, no error message.
       } else if (e.message === '__fedcm_blocked__') {
-        // Browser blocked the FedCM picker. Common causes:
-        //   1. Third-party sign-in is blocked in site settings (most common)
-        //   2. Incognito/private mode with no existing Google session in-context
-        //   3. Browser cooldown after repeated dismissals (Chrome temporarily
-        //      mutes FedCM if dismissed too many times in a short window)
-        // We don't redirect — the OAuth-restore cleanup removed the state
-        // preservation that would survive a redirect mid-checkout.
-        showAuthError('auth-choose-error',
-          "Google sign-in isn't available in this browser. Third-party sign-in may be blocked — " +
-          "enable it in Site settings (lock icon → bottom of panel), try another browser, or close this " +
-          "to keep browsing without signing in. In incognito or private mode, you also need to be " +
-          "signed into Google in this window first."
-        );
+        // Browser blocked the FedCM picker. Show a dedicated modal explaining
+        // the situation + workarounds. Close the auth modal first so the
+        // FedCM-blocked modal isn't stacking on top of a stale state.
+        closeAuthModal();
+        showFedcmBlockedModal();
       } else {
         const msg = e.message || 'Something went wrong. Please try again.';
         showAuthError('auth-choose-error', msg);
@@ -13049,6 +13175,10 @@
       }
 
       // First-time phone signup: show profile capture step
+      // Set the flag BEFORE re-querying nav so any in-flight onSignedIn calls
+      // see it and keep the "Sign in" pill visible.
+      _pendingProfileCapture = true;
+      updateNavForGuest();   // force nav back to "Sign in" — onSignedIn may have already flipped it
       document.getElementById('auth-step-otp').classList.add('hidden');
       document.getElementById('auth-step-profile').classList.remove('hidden');
       document.getElementById('auth-verified-phone-display').textContent = pendingPhone;
@@ -13095,6 +13225,49 @@
     `;
     document.body.appendChild(modal);
     document.getElementById('dup-account-ok').addEventListener('click', () => modal.remove());
+  }
+
+  // Modal shown when Google FedCM is blocked by the browser (third-party
+  // sign-in disabled, incognito without an in-context Google session, browser
+  // cooldown, etc.). We deliberately do not OAuth-redirect — the redirect
+  // flow's state preservation was removed in earlier cleanup, so a redirect
+  // mid-checkout would clobber the user's selections.
+  function showFedcmBlockedModal() {
+    document.getElementById('fedcm-blocked-modal')?.remove();
+    const modal = document.createElement('div');
+    modal.id = 'fedcm-blocked-modal';
+    modal.className = 'search-loading-backdrop';
+    modal.innerHTML = `
+      <div class="search-loading-card" style="max-width:440px;">
+        <div style="display:flex;justify-content:center;margin-bottom:14px;">
+          <div style="width:48px;height:48px;border-radius:50%;background:var(--warning-soft,#FEF6E7);display:flex;align-items:center;justify-content:center;">
+            <svg width="26" height="26" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+              <path d="M12 8v4M12 16h.01" stroke="var(--warning,#B45309)" stroke-width="2.5" stroke-linecap="round"/>
+              <circle cx="12" cy="12" r="10" stroke="var(--warning,#B45309)" stroke-width="2"/>
+            </svg>
+          </div>
+        </div>
+        <div style="font-size:18px;font-weight:600;color:var(--ink,#0F1923);margin-bottom:12px;text-align:center;">
+          Google sign-in unavailable
+        </div>
+        <div style="font-size:14px;color:var(--text-2,#4A5568);margin-bottom:14px;line-height:1.5;">
+          This browser is blocking third-party sign-in. To continue:
+        </div>
+        <ul style="font-size:14px;color:var(--text-2,#4A5568);margin:0 0 14px;padding-left:20px;line-height:1.6;">
+          <li>Allow it in <strong style="color:var(--ink,#0F1923);">Site settings</strong>, or</li>
+          <li>Try a different browser, or</li>
+          <li>Use phone sign-in if your number is linked to your TumaFly profile</li>
+        </ul>
+        <div style="font-size:13px;color:var(--text-3,#717A86);margin-bottom:20px;line-height:1.5;">
+          Note: in incognito or private mode, you also need to be signed into Google in this window first.
+        </div>
+        <button type="button" id="fedcm-blocked-ok" style="width:100%;padding:12px 16px;border-radius:10px;border:none;background:var(--brand,#3D95F5);color:#fff;font-weight:600;cursor:pointer;font-size:14px;">
+          Got it
+        </button>
+      </div>
+    `;
+    document.body.appendChild(modal);
+    document.getElementById('fedcm-blocked-ok').addEventListener('click', () => modal.remove());
   }
 
   // Save profile from the post-OTP capture step.
@@ -13148,6 +13321,7 @@
       // Refresh nav with the new name
       try {
         const refreshed = { ...user, user_metadata: { ...(user.user_metadata||{}), first_name: first, last_name: last, full_name: fullName } };
+        _pendingProfileCapture = false;   // capture done — nav can show the real name now
         updateNavForUser(refreshed);
         currentUser = refreshed;
       } catch (_) {}
