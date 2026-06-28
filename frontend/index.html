@@ -3655,6 +3655,12 @@
       flex-shrink: 0;
     }
     .saved-traveler-edit:hover { border-color: var(--brand); background: var(--brand-soft); }
+    .saved-traveler-clear { margin-left: 6px; color: var(--text-2); }
+    .saved-traveler-clear:hover {
+      border-color: var(--danger, #c0392b);
+      background: var(--danger-soft, #FDE8E8);
+      color: var(--danger, #c0392b);
+    }
 
     /* International-trip banner at the top of the Travelers card */
     .intl-banner {
@@ -10620,12 +10626,31 @@
     renderPassengerForms();
   }
 
-  // Trashcan affordance next to the picker dropdown — un-picks the saved
-  // traveler from this slot, returning the form to the "— New traveler —"
-  // state. The cleared traveler automatically reappears in other slots'
-  // dropdowns via the pickedElsewhere filter.
+  // Trashcan affordance next to the pencil on the saved (collapsed) card.
+  // Unsaves the traveler, blanks the form, and clears any link to a saved
+  // profile. The cleared traveler automatically reappears in other slots'
+  // dropdowns via the pickedElsewhere filter inside renderTravelerForm.
   function clearPickedTraveler(i) {
-    applySavedTraveler(i, '');
+    const s = travelerStates[i];
+    if (!s) return;
+    s.saved = false;
+    s.lastSaveError = null;
+    s.showRequiredErrors = false;
+    s.showPassportErrors = false;
+    if (s.openSections && typeof s.openSections.clear === 'function') s.openSections.clear();
+    // Reset to a blank "— New traveler —" data shape (mirrors applySavedTraveler's
+    // empty branch). Drops _saved_traveler_id and _original_picked so the live
+    // checkbox watcher correctly reverts to "Save this traveler…" mode.
+    s.data = {
+      title: 'mr', gender: '', given_name: '', middle_name: '', family_name: '',
+      born_on: '', nationality: '',
+      passport: { country: '', number: '', expires: '' },
+      frequent_flyer: [],
+      known_traveler_id: '', redress_number: '', special_assistance: '',
+      save_to_account: false,
+      _saved_traveler_id: null,
+    };
+    renderPassengerForms();
   }
   window.clearPickedTraveler = clearPickedTraveler;
 
@@ -10831,27 +10856,17 @@
             t.id === travelerStates[i].data._saved_traveler_id || !pickedElsewhere.has(t.id)
           );
           if (visible.length === 0) return ''; // nothing left to offer — hide picker entirely
-          const isPicked = !!travelerStates[i].data._saved_traveler_id;
           return `
           <div class="saved-trav-picker">
             <label class="saved-trav-picker-label">Use a saved traveler</label>
-            <div class="saved-trav-picker-row">
-              <select class="pax-select" onchange="applySavedTraveler(${i}, this.value)">
-                <option value="">— New traveler —</option>
-                ${visible.map(t => {
-                  const label = [t.given_name, t.family_name].filter(Boolean).join(' ').trim() || '(no name)';
-                  const sel = travelerStates[i].data._saved_traveler_id === t.id ? 'selected' : '';
-                  return `<option value="${escapeHtml(t.id)}" ${sel}>${escapeHtml(label)}</option>`;
-                }).join('')}
-              </select>
-              ${isPicked ? `
-                <button type="button" class="saved-trav-clear" onclick="clearPickedTraveler(${i})" aria-label="Clear picked traveler" title="Clear traveler">
-                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-                    <path d="M3 6h18M8 6V4a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1v2m2 0v14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2V6h12zM10 11v6M14 11v6" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
-                  </svg>
-                </button>
-              ` : ''}
-            </div>
+            <select class="pax-select" onchange="applySavedTraveler(${i}, this.value)">
+              <option value="">— New traveler —</option>
+              ${visible.map(t => {
+                const label = [t.given_name, t.family_name].filter(Boolean).join(' ').trim() || '(no name)';
+                const sel = travelerStates[i].data._saved_traveler_id === t.id ? 'selected' : '';
+                return `<option value="${escapeHtml(t.id)}" ${sel}>${escapeHtml(label)}</option>`;
+              }).join('')}
+            </select>
           </div>
         `;
         })() : ''}
@@ -11007,6 +11022,11 @@
         <button class="saved-traveler-edit" onclick="editTraveler(${i})" aria-label="Edit traveler">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none">
             <path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04a1 1 0 0 0 0-1.41l-2.34-2.34a1 1 0 0 0-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z" fill="currentColor"/>
+          </svg>
+        </button>
+        <button class="saved-traveler-edit saved-traveler-clear" onclick="clearPickedTraveler(${i})" aria-label="Clear traveler" title="Clear traveler">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+            <path d="M3 6h18M8 6V4a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1v2m2 0v14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2V6h12zM10 11v6M14 11v6" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/>
           </svg>
         </button>
       </div>
