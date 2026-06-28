@@ -9438,6 +9438,10 @@
     legs.forEach((leg, legIdx) => {
       const unavailable = !!seatMapsData[leg.segment_id]?.unavailable;
       for (let paxIdx = 0; paxIdx < passengerCount; paxIdx++) {
+        // Skip unsaved/cleared traveler slots — a generic "Passenger N"
+        // row with no name would be misleading and any pick would be
+        // orphaned at Pesapal submission.
+        if (!travelerStates[paxIdx]?.saved) continue;
         const sel = selectedSeats[paxIdx]?.[leg.segment_id] || null;
         const paxName = travelerStates[paxIdx]?.data?.given_name
           ? `${travelerStates[paxIdx].data.given_name} ${travelerStates[paxIdx].data.family_name || ''}`.trim()
@@ -9475,10 +9479,12 @@
       }
     });
 
-    // Check if any (pax × leg) has no seat AND seat maps are available
+    // Check if any (pax × leg) has no seat AND seat maps are available.
+    // Only counts saved travelers — unsaved slots have no visible row.
     const anyUnselected = legs.some(leg => {
       if (seatMapsData[leg.segment_id]?.unavailable) return false;
       for (let p = 0; p < passengerCount; p++) {
+        if (!travelerStates[p]?.saved) continue;
         if (!selectedSeats[p]?.[leg.segment_id]) return true;
       }
       return false;
@@ -10057,8 +10063,10 @@
       return;
     }
 
-    // Status rows: one per passenger summarising their bag selection (if any)
+    // Status rows: one per passenger summarising their bag selection (if any).
+    // Skip unsaved/cleared slots — same rationale as renderSeatsList.
     const rows = Array.from({ length: passengerCount }).map((_, i) => {
+      if (!travelerStates[i]?.saved) return '';
       const opts = baggageOptionsByPax[i] || [];
       const sel = selectedBaggages[i] || {};
       const count = Object.values(sel).reduce((a, b) => a + b, 0);
@@ -10098,6 +10106,7 @@
 
     // Show CTA group only if at least one pax has options + no selection yet
     const anyWithOptionsUnpicked = Array.from({ length: passengerCount }).some((_, i) => {
+      if (!travelerStates[i]?.saved) return false;
       const opts = baggageOptionsByPax[i] || [];
       const sel = selectedBaggages[i] || {};
       const count = Object.values(sel).reduce((a, b) => a + b, 0);
@@ -10509,6 +10518,25 @@
       }, 50);
       return;
     }
+
+    // Q4 fix: refresh the picked-baseline so a future re-edit diffs against
+    // the just-saved state, not the initial pick. Without this, opening the
+    // pencil again would still flag the saved-but-edited record as "edited"
+    // and re-show the checkbox in its prior checked state.
+    if (d._saved_traveler_id) {
+      d._original_picked = JSON.parse(JSON.stringify({
+        title: d.title, gender: d.gender, given_name: d.given_name,
+        middle_name: d.middle_name, family_name: d.family_name, born_on: d.born_on,
+        nationality: d.nationality, passport: d.passport,
+        frequent_flyer: d.frequent_flyer, known_traveler_id: d.known_traveler_id,
+        redress_number: d.redress_number, special_assistance: d.special_assistance,
+      }));
+    }
+    // Capture persist intent BEFORE resetting (the upsert below still
+    // needs to honor it). Reset the flag so a future edit starts fresh.
+    const wantsToPersist = !!d.save_to_account;
+    d.save_to_account = false;
+
     s.saved = true;
     s.lastSaveError = null;  // clear any prior error
     s.showPassportErrors = false;
@@ -10526,7 +10554,7 @@
     //   - set (picked from dropdown)  → upsert WITH that id, becomes UPDATE
     //   - unset (typed from scratch)  → upsert WITHOUT id, becomes INSERT
     // Either way the user sees the new/updated info next time they pick.
-    if (currentUser && d.save_to_account) {
+    if (currentUser && wantsToPersist) {
       persistSavedTraveler(d)
         .then(() => fetchSavedTravelers())   // refresh cache so the entry appears (or reflects updates) in pickers
         .catch(err => {
@@ -10650,7 +10678,15 @@
       save_to_account: false,
       _saved_traveler_id: null,
     };
+    // Drop any seat/baggage picks tied to this slot — they'd otherwise
+    // remain in state with no visible row, still added to the total +
+    // sent to Duffel on book.
+    if (typeof selectedSeats !== 'undefined' && selectedSeats[i]) delete selectedSeats[i];
+    if (typeof selectedBaggages !== 'undefined' && selectedBaggages[i]) delete selectedBaggages[i];
     renderPassengerForms();
+    if (typeof renderSeatsList === 'function') renderSeatsList();
+    if (typeof renderBaggageList === 'function') renderBaggageList();
+    if (typeof renderBookingSummary === 'function') renderBookingSummary();
   }
   window.clearPickedTraveler = clearPickedTraveler;
 
