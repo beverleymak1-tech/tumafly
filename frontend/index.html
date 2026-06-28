@@ -10313,7 +10313,12 @@
           </div>
           <div>
             <label class="pax-label">Nationality <span style="color:var(--text-3);font-weight:400;">(optional)</span></label>
-            <input id="p${i}-nationality" type="text" class="pax-input" value="${escapeHtml(d.nationality)}" placeholder="e.g. Kenyan">
+            <select id="p${i}-nationality" class="pax-select">
+              <option value="" ${!d.nationality ? 'selected' : ''}>Select nationality…</option>
+              ${PHONE_COUNTRIES.map(([iso, name]) =>
+                `<option value="${escapeHtml(iso)}" ${d.nationality === iso ? 'selected' : ''}>${escapeHtml(name)}</option>`
+              ).join('')}
+            </select>
           </div>
         </div>
 
