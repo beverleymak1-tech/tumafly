@@ -3523,6 +3523,26 @@
     .save-traveler-btn:hover { background: var(--brand-dark); }
     .save-traveler-btn:active { transform: scale(0.99); }
 
+    /* Saved-traveler picker — top of each traveler card, signed-in only */
+    .saved-trav-picker {
+      margin: 14px 0 18px;
+      padding: 12px 14px;
+      background: var(--surface-2, #f7f9fc);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+    }
+    .saved-trav-picker-label {
+      display: block;
+      font-size: 12px; font-weight: 600;
+      color: var(--text-2);
+      letter-spacing: 0.5px;
+      text-transform: uppercase;
+      margin-bottom: 8px;
+    }
+    .saved-trav-picker .pax-select {
+      width: 100%;
+    }
+
     /* "Save this traveler to my account" checkbox row — appears above the
        Save traveler button when the user is signed in. */
     .save-to-account-row {
@@ -9127,6 +9147,14 @@
     // Only fills empty fields — never overwrites what the user already typed.
     // Silently no-ops if signed out or profile fetch fails.
     prefillContactFromProfile().catch(e => console.warn('[prefill] failed:', e));
+    // Fetch the user's saved_travelers (if signed in) so the per-card "Use a
+    // saved traveler" picker can render. When the list lands, re-render the
+    // forms — picker is hidden when the user has none.
+    fetchSavedTravelers().then(() => {
+      if (!document.getElementById('view-booking').classList.contains('hidden')) {
+        renderPassengerForms();
+      }
+    }).catch(e => console.warn('[saved_travelers] fetch failed:', e));
     // Wire real-time validation on the contact email field (blur first, then live).
     const contactEmailEl = document.getElementById('contact-email');
     if (contactEmailEl && !contactEmailEl.dataset.emailValidHooked) {
@@ -10210,16 +10238,97 @@
     // Persist to saved_travelers if the user opted in. Non-blocking: if the
     // insert fails (network, RLS, etc.), the local booking flow continues
     // unaffected and we surface a soft warning in the booking alert.
-    if (currentUser && d.save_to_account) {
-      persistSavedTraveler(d).catch(err => {
-        console.warn('[saved_travelers] insert failed:', err);
-        const ab = document.getElementById('booking-alert');
-        if (ab) ab.innerHTML = `
-          <div class="alert alert-info">
-            Couldn't save the traveler to your account right now — your booking is unaffected.
-          </div>`;
-      });
+    //
+    // Skip when this traveler was loaded from the picker (_saved_traveler_id
+    // is set) — the row already exists. D3 doesn't update existing rows;
+    // user can manage them from the Account view in D4.
+    if (currentUser && d.save_to_account && !d._saved_traveler_id) {
+      persistSavedTraveler(d)
+        .then(() => fetchSavedTravelers())   // refresh cache so the new entry appears in pickers
+        .catch(err => {
+          console.warn('[saved_travelers] insert failed:', err);
+          const ab = document.getElementById('booking-alert');
+          if (ab) ab.innerHTML = `
+            <div class="alert alert-info">
+              Couldn't save the traveler to your account right now — your booking is unaffected.
+            </div>`;
+        });
     }
+  }
+
+  // ── Saved travelers cache ───────────────────────────────────
+  // Populated by fetchSavedTravelers() when the booking view loads. RLS on
+  // saved_travelers limits the rows to those owned by the signed-in user, so
+  // an unauthenticated fetch returns an empty array.
+  let _savedTravelers = [];
+
+  async function fetchSavedTravelers() {
+    if (!currentUser) { _savedTravelers = []; return; }
+    try {
+      const sb = await getSupabase();
+      const { data, error } = await sb
+        .from('saved_travelers')
+        .select('*')
+        .order('created_at', { ascending: false });
+      if (error) throw error;
+      _savedTravelers = data || [];
+    } catch (e) {
+      console.warn('[saved_travelers] fetch failed:', e);
+      _savedTravelers = [];
+    }
+  }
+
+  // Apply a saved traveler's data to the form at index `i`. Called by the
+  // picker's <select> onchange. Empty value clears the form back to blanks.
+  function applySavedTraveler(i, savedId) {
+    if (!travelerStates[i]) return;
+    // First snapshot whatever the user has typed (in case they were mid-edit)
+    snapshotTraveler(i);
+
+    if (!savedId) {
+      // "— New traveler —" selected. Reset to blank but keep the form open.
+      travelerStates[i].data = {
+        title: 'mr', gender: '', given_name: '', middle_name: '', family_name: '',
+        born_on: '', nationality: '',
+        passport: { country: '', number: '', expires: '' },
+        frequent_flyer: [],
+        known_traveler_id: '', redress_number: '', special_assistance: '',
+        save_to_account: false,
+        _saved_traveler_id: null,
+      };
+      travelerStates[i].showRequiredErrors = false;
+      travelerStates[i].showPassportErrors = false;
+      renderPassengerForms();
+      return;
+    }
+
+    const t = _savedTravelers.find(x => x.id === savedId);
+    if (!t) return;
+
+    // Map saved_travelers row → traveler state data shape
+    travelerStates[i].data = {
+      title:           t.title || 'mr',
+      gender:          t.gender || '',
+      given_name:      t.given_name || '',
+      middle_name:     t.middle_name || '',
+      family_name:     t.family_name || '',
+      born_on:         t.born_on || '',
+      nationality:     t.nationality || '',
+      passport: {
+        country:  t.passport_country || '',
+        number:   t.passport_number || '',
+        expires:  t.passport_expires || '',
+      },
+      frequent_flyer:   Array.isArray(t.frequent_flyer) ? t.frequent_flyer : [],
+      known_traveler_id: t.known_traveler_id || '',
+      redress_number:    t.redress_number || '',
+      special_assistance: t.special_assistance || '',
+      save_to_account:   false,    // already saved; no need to re-save by default
+      _saved_traveler_id: t.id,    // link back so we don't double-save the same one
+    };
+    travelerStates[i].showRequiredErrors = false;
+    travelerStates[i].showPassportErrors = false;
+    renderPassengerForms();
   }
 
   // Insert one traveler into saved_travelers via the user's Supabase session.
@@ -10336,6 +10445,19 @@
     return `
       <div class="pax-block" data-traveler-card="${i}">
         <div class="pax-block-title">Traveler ${i + 1}${i === 0 ? ' · Primary' : ''}</div>
+        ${currentUser && _savedTravelers.length ? `
+          <div class="saved-trav-picker">
+            <label class="saved-trav-picker-label">Use a saved traveler</label>
+            <select class="pax-select" onchange="applySavedTraveler(${i}, this.value)">
+              <option value="">— New traveler —</option>
+              ${_savedTravelers.map(t => {
+                const label = [t.given_name, t.family_name].filter(Boolean).join(' ').trim() || '(no name)';
+                const sel = travelerStates[i].data._saved_traveler_id === t.id ? 'selected' : '';
+                return `<option value="${escapeHtml(t.id)}" ${sel}>${escapeHtml(label)}</option>`;
+              }).join('')}
+            </select>
+          </div>
+        ` : ''}
         <div class="pax-section-title">Traveler details</div>
         <div class="form-grid">
           <div>
