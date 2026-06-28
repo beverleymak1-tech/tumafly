@@ -735,6 +735,14 @@
     .itin-pax-table {
       width: 100%; border-collapse: collapse;
       font-size: 13px;
+      table-layout: fixed;       /* enforce shared column widths across all traveler blocks */
+    }
+    /* Match Priceline reference: passenger column wider, seat + ticket narrower */
+    .itin-pax-table col.itin-pax-col-name   { width: 50%; }
+    .itin-pax-table col.itin-pax-col-seat   { width: 22%; }
+    .itin-pax-table col.itin-pax-col-ticket { width: 28%; }
+    .itin-pax-table td, .itin-pax-table th {
+      overflow: hidden; text-overflow: ellipsis;   /* protect against weirdly long values */
     }
     .itin-pax-table thead th {
       text-align: left;
@@ -7216,6 +7224,28 @@
   }
   // Initial sweep + observer for dynamically-added inputs
   document.addEventListener('DOMContentLoaded', tfAttachDateClampToAll);
+
+  // ── Whitespace trim on every text-y field ─────────────────────────
+  // Defense in depth: most save paths call .trim() explicitly, but this
+  // catches anything missed and gives users immediate feedback (their
+  // value shrinks on blur, so they SEE the trim happen). Runs in the
+  // capture phase to fire before any per-field blur handlers.
+  document.addEventListener('blur', (e) => {
+    const t = e.target;
+    if (!t || typeof t.value !== 'string') return;
+    // Only text-y fields — leave selects, dates, numbers, etc. alone since
+    // their values are already structured.
+    const tag = t.tagName;
+    const type = (t.type || '').toLowerCase();
+    const isTextInput = tag === 'INPUT' && (
+      type === 'text' || type === 'email' || type === 'tel' ||
+      type === 'search' || type === 'url' || type === ''
+    );
+    const isTextArea = tag === 'TEXTAREA';
+    if (!isTextInput && !isTextArea) return;
+    const trimmed = t.value.trim();
+    if (trimmed !== t.value) t.value = trimmed;
+  }, true);
   const _tfDateObserver = new MutationObserver(() => tfAttachDateClampToAll());
   if (document.body) {
     _tfDateObserver.observe(document.body, { childList: true, subtree: true });
@@ -9335,45 +9365,59 @@
     const legs = collectLegs();
     if (!legs.length) { slot.innerHTML = ''; return; }
 
-    // Build the full seats list HTML including CTA group at the bottom
-    const legRows = legs.map((leg, legIdx) => {
-      // Status: how many passengers have a seat assigned for this leg?
-      const assigned = countAssignedSeatsForLeg(leg.segment_id);
-      const total = passengerCount;
-      let statusHtml;
-      if (seatMapsData[leg.segment_id]?.unavailable) {
-        statusHtml = '<div class="seat-row-status unavailable">Seats assigned at check-in</div>';
-      } else if (assigned > 0) {
-        const seats = passengerData
-          .map((_, i) => selectedSeats[i]?.[leg.segment_id]?.designator)
-          .filter(Boolean)
-          .join(', ');
-        statusHtml = `<div class="seat-row-status selected">${escapeHtml(seats)}</div>
-          <button type="button" class="seat-row-cta" onclick="openSeatModal(${legIdx})">Change</button>`;
-      } else {
-        statusHtml = `<span class="seat-row-dash">—</span>`;
+    // One row per (passenger × leg) — matches the baggage list pattern so
+    // the user sees clearly which seats are assigned vs missing per traveler.
+    // For a 2-pax round-trip with no connections, this is 4 rows; for a
+    // 1-pax one-way, just 1 row.
+    const rows = [];
+    legs.forEach((leg, legIdx) => {
+      const unavailable = !!seatMapsData[leg.segment_id]?.unavailable;
+      for (let paxIdx = 0; paxIdx < passengerCount; paxIdx++) {
+        const sel = selectedSeats[paxIdx]?.[leg.segment_id] || null;
+        const paxName = travelerStates[paxIdx]?.data?.given_name
+          ? `${travelerStates[paxIdx].data.given_name} ${travelerStates[paxIdx].data.family_name || ''}`.trim()
+          : `Passenger ${paxIdx + 1}`;
+        const route = `${escapeHtml(leg.origin)} → ${escapeHtml(leg.destination)}`;
+
+        let statusHtml;
+        if (unavailable) {
+          statusHtml = '<div class="seat-row-status unavailable">Assigned at check-in</div>';
+        } else if (sel?.designator) {
+          const cost = sel.cost_kes ? ` · ${formatKes(sel.cost_kes)}` : '';
+          statusHtml = `
+            <div class="seat-row-status selected">Seat ${escapeHtml(sel.designator)}${cost}</div>
+            <button type="button" class="seat-row-cta" onclick="openSeatModal(${legIdx}, ${paxIdx})">Change</button>`;
+        } else {
+          statusHtml = `
+            <div class="seat-row-status"><span class="seat-row-dash">No seat selected</span></div>
+            <button type="button" class="seat-row-cta" onclick="openSeatModal(${legIdx}, ${paxIdx})">Select</button>`;
+        }
+
+        rows.push(`
+          <div class="seat-row">
+            <div class="seat-row-icon">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                <path d="M21 14L13 9.5V4a1.5 1.5 0 0 0-3 0v5.5L2 14v2l8-2.5V19l-2 1.5V22l3.5-1L15 22v-1.5L13 19v-5.5l8 2.5v-2z" fill="currentColor"/>
+              </svg>
+            </div>
+            <div class="seat-row-info">
+              <div class="seat-row-route">${escapeHtml(paxName)}</div>
+              <div class="seat-row-meta">${route}</div>
+            </div>
+            ${statusHtml}
+          </div>
+        `);
       }
+    });
 
-      return `
-        <div class="seat-row">
-          <div class="seat-row-icon">
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-              <path d="M21 14L13 9.5V4a1.5 1.5 0 0 0-3 0v5.5L2 14v2l8-2.5V19l-2 1.5V22l3.5-1L15 22v-1.5L13 19v-5.5l8 2.5v-2z" fill="currentColor"/>
-            </svg>
-          </div>
-          <div class="seat-row-info">
-            <div class="seat-row-route">${escapeHtml(leg.origin)} <span style="color:var(--text-3);font-weight:400;">→</span> ${escapeHtml(leg.destination)}</div>
-            <div class="seat-row-meta">${escapeHtml(leg.passengerNames || passengerData.map((_, i) => travelerStates[i]?.data?.given_name || `Passenger ${i+1}`).join(', '))}</div>
-          </div>
-          ${statusHtml}
-        </div>
-      `;
-    }).join('');
-
-    // Check if any leg has no seats and seat maps are available
-    const anyUnselected = legs.some(leg =>
-      !seatMapsData[leg.segment_id]?.unavailable && countAssignedSeatsForLeg(leg.segment_id) === 0
-    );
+    // Check if any (pax × leg) has no seat AND seat maps are available
+    const anyUnselected = legs.some(leg => {
+      if (seatMapsData[leg.segment_id]?.unavailable) return false;
+      for (let p = 0; p < passengerCount; p++) {
+        if (!selectedSeats[p]?.[leg.segment_id]) return true;
+      }
+      return false;
+    });
 
     const ctaGroup = anyUnselected ? (seatCTACollapsed ? `
       <button type="button" class="cta-collapsed-link" onclick="expandSeatsCTA()">+ Add seats now</button>
@@ -9390,7 +9434,7 @@
       <button type="button" class="btn btn-secondary seat-cta-btn" onclick="skipSeats()">Continue without seats</button>
     `) : '';
 
-    slot.innerHTML = legRows + ctaGroup;
+    slot.innerHTML = rows.join('') + ctaGroup;
   }
 
   // Walks the selected outbound + inbound offers and produces a flat list of
@@ -9483,12 +9527,14 @@
     renderSeatsList();
   }
 
-  async function openSeatModal(legIdx) {
+  async function openSeatModal(legIdx, paxIdx) {
     const legs = collectLegs();
     if (!legs.length) return;
     seatModalState = {
       activeLegIdx: legIdx,
-      activePaxIdx: 0,
+      // When opened from a per-(pax × leg) row, start on that passenger's tab.
+      // Default to 0 for the bulk "Select seats now" CTA at the bottom.
+      activePaxIdx: Number.isInteger(paxIdx) ? paxIdx : 0,
       legs,
     };
     renderSeatModal(); // initial render with loading state
@@ -9854,6 +9900,17 @@
     return qty;
   }
 
+  // Count of distinct seat selections across all passengers × segments.
+  // Used to render "Seat selection ×N" on the price-summary card.
+  function seatTotalCount() {
+    let n = 0;
+    for (const paxIdx of Object.keys(selectedSeats || {})) {
+      const perSeg = selectedSeats[paxIdx] || {};
+      n += Object.keys(perSeg).length;
+    }
+    return n;
+  }
+
   // Returns array sent to create-payment for server-side re-validation
   function collectBaggageSelections() {
     const out = [];
@@ -10054,6 +10111,11 @@
     const opt = opts.find(o => o.service_id === serviceId);
     if (!opt) return;
     if (!baggageModalState.draft[paxIdx]) baggageModalState.draft[paxIdx] = {};
+
+    // Capture pre-change state so we can detect "this pax just got their
+    // first bag" for the auto-advance below.
+    const hadAnyBagBefore = Object.values(baggageModalState.draft[paxIdx]).some(q => q > 0);
+
     const cur = baggageModalState.draft[paxIdx][serviceId] || 0;
     const max = Math.max(1, opt.max_quantity || 1);
     const next = Math.max(0, Math.min(max, cur + delta));
@@ -10062,6 +10124,24 @@
     } else {
       baggageModalState.draft[paxIdx][serviceId] = next;
     }
+
+    // Auto-advance to next traveler with zero bags — but ONLY when this pax
+    // just got their first bag (so users can still adjust ±1 on the same
+    // pax without getting yanked away). Matches the seat-picker auto-advance
+    // pattern. Skip when there's only one passenger.
+    const hasAnyBagNow = Object.values(baggageModalState.draft[paxIdx]).some(q => q > 0);
+    if (!hadAnyBagBefore && hasAnyBagNow && passengerCount > 1 && paxIdx === baggageModalState.activePaxIdx) {
+      for (let i = 1; i < passengerCount; i++) {
+        const cand = (paxIdx + i) % passengerCount;
+        const candHasBag = baggageModalState.draft[cand]
+          && Object.values(baggageModalState.draft[cand]).some(q => q > 0);
+        if (!candHasBag) {
+          baggageModalState.activePaxIdx = cand;
+          break;
+        }
+      }
+    }
+
     renderBaggageModal();
   }
 
@@ -10325,6 +10405,14 @@
     if (!d.born_on) errors.push('Date of birth');
     if (!d.gender) errors.push('Gender');
 
+    // DOB vs expected type — must match what we searched Duffel with, or the
+    // order will reject at booking time with money already taken.
+    if (d.born_on) {
+      const expected = getExpectedPaxType(i);
+      const ageErr = validateAgeForType(d.born_on, expected);
+      if (ageErr) errors.push(ageErr);
+    }
+
     // When the trip is international, passport details become required for every traveler.
     // We use the showPassportErrors flag to surface per-field red errors only after a
     // failed save attempt — first render stays clean even when fields are empty.
@@ -10365,14 +10453,15 @@
     // insert fails (network, RLS, etc.), the local booking flow continues
     // unaffected and we surface a soft warning in the booking alert.
     //
-    // Skip when this traveler was loaded from the picker (_saved_traveler_id
-    // is set) — the row already exists. D3 doesn't update existing rows;
-    // user can manage them from the Account view in D4.
-    if (currentUser && d.save_to_account && !d._saved_traveler_id) {
+    // _saved_traveler_id behavior:
+    //   - set (picked from dropdown)  → upsert WITH that id, becomes UPDATE
+    //   - unset (typed from scratch)  → upsert WITHOUT id, becomes INSERT
+    // Either way the user sees the new/updated info next time they pick.
+    if (currentUser && d.save_to_account) {
       persistSavedTraveler(d)
-        .then(() => fetchSavedTravelers())   // refresh cache so the new entry appears in pickers
+        .then(() => fetchSavedTravelers())   // refresh cache so the entry appears (or reflects updates) in pickers
         .catch(err => {
-          console.warn('[saved_travelers] insert failed:', err);
+          console.warn('[saved_travelers] upsert failed:', err);
           const ab = document.getElementById('booking-alert');
           if (ab) ab.innerHTML = `
             <div class="alert alert-info">
@@ -10457,9 +10546,11 @@
     renderPassengerForms();
   }
 
-  // Insert one traveler into saved_travelers via the user's Supabase session.
-  // RLS policies on the table restrict inserts to auth.uid() = user_id, so we
-  // just send user_id from the current session — no server-side EF needed.
+  // Insert OR update a traveler in saved_travelers via the user's session.
+  // RLS limits writes to auth.uid() = user_id. We use upsert so the same
+  // function handles both new inserts and edits to existing rows — if
+  // d._saved_traveler_id is set (the form was hydrated from the picker),
+  // upsert finds the row and updates it; otherwise a fresh INSERT.
   async function persistSavedTraveler(d) {
     const sb = await getSupabase();
     const { data: { session } } = await sb.auth.getSession();
@@ -10480,8 +10571,12 @@
       redress_number:    d.redress_number || null,
       special_assistance: d.special_assistance || null,
       frequent_flyer:    Array.isArray(d.frequent_flyer) ? d.frequent_flyer : [],
+      updated_at:        new Date().toISOString(),
     };
-    const { error } = await sb.from('saved_travelers').insert(row);
+    // Include id only when we're updating an existing row. Omitting the id
+    // for new rows lets the DB default (gen_random_uuid()) generate one.
+    if (d._saved_traveler_id) row.id = d._saved_traveler_id;
+    const { error } = await sb.from('saved_travelers').upsert(row);
     if (error) throw error;
   }
 
@@ -10570,7 +10665,7 @@
 
     return `
       <div class="pax-block" data-traveler-card="${i}">
-        <div class="pax-block-title">Traveler ${i + 1}${i === 0 ? ' · Primary' : ''}</div>
+        <div class="pax-block-title">Traveler ${i + 1} · ${getExpectedPaxTypeLabel(i)}${i === 0 ? ' · Primary' : ''}</div>
         ${currentUser && _savedTravelers.length ? `
           <div class="saved-trav-picker">
             <label class="saved-trav-picker-label">Use a saved traveler</label>
@@ -10695,7 +10790,8 @@
     const d = travelerStates[i].data;
     const fullName = [d.title.replace(/^\w/, c => c.toUpperCase()), d.given_name, d.middle_name, d.family_name]
       .filter(Boolean).join(' ');
-    const role = i === 0 ? 'Adult · Primary' : 'Adult';
+    const typeLabel = getExpectedPaxTypeLabel(i);
+    const role = i === 0 ? `${typeLabel} · Primary` : typeLabel;
     return `
       <div class="saved-traveler">
         <div class="saved-traveler-check">✓</div>
@@ -10741,10 +10837,18 @@
     if (unsaved >= 0) {
       return { error: `Please click "Save traveler" for Traveler ${unsaved + 1} before continuing.` };
     }
-    const out = travelerStates.map(s => {
+    const out = travelerStates.map((s, i) => {
       const d = s.data;
       const passenger = {
-        type: 'adult',
+        // Derive type from the search-page traveler counts. Slot order:
+        //   first travelers.adults → adult
+        //   next  travelers.children → child
+        //   next  travelers.infantsSeat → infant_without_seat (Duffel calls it that;
+        //         seat-vs-lap is a UX distinction we surface in pricing later)
+        //   remaining → infant_without_seat
+        // This MUST match what we searched Duffel with, otherwise Duffel rejects
+        // the order with "type does not match date of birth".
+        type: getExpectedPaxType(i),
         title: d.title,
         gender: d.gender,
         given_name: d.given_name,
@@ -10777,6 +10881,53 @@
       return passenger;
     });
     return { passengers: out };
+  }
+
+  // ── Passenger type helpers ──────────────────────────────────────────
+  // Duffel's IATA-aligned age boundaries (used at booking time):
+  //   adult: 12+
+  //   child: 2–11
+  //   infant_without_seat: 0–1 (Duffel's lap-infant — sits on adult's lap)
+  // We treat travelers.infantsSeat the same as infantsLap for Duffel purposes
+  // since Duffel doesn't currently distinguish seated infants in the search.
+  function getExpectedPaxType(slotIndex) {
+    const a = travelers.adults || 0;
+    const c = travelers.children || 0;
+    if (slotIndex < a) return 'adult';
+    if (slotIndex < a + c) return 'child';
+    return 'infant_without_seat';
+  }
+
+  function getExpectedPaxTypeLabel(slotIndex) {
+    const t = getExpectedPaxType(slotIndex);
+    return t === 'adult' ? 'Adult' : t === 'child' ? 'Child' : 'Infant';
+  }
+
+  // Compute age in years on the trip's outbound departure date (or today as
+  // fallback). Duffel evaluates age at first travel date — using "today"
+  // would let a 11y8m old child book as adult if the flight is 4 months out.
+  function computeAgeOnTravel(bornOnIso) {
+    if (!bornOnIso) return null;
+    const dob = new Date(bornOnIso);
+    if (isNaN(dob.getTime())) return null;
+    const refStr = selectedOutbound?.offer?.slices?.[0]?.segments?.[0]?.departing_at;
+    const ref = refStr ? new Date(refStr) : new Date();
+    let age = ref.getFullYear() - dob.getFullYear();
+    const m = ref.getMonth() - dob.getMonth();
+    if (m < 0 || (m === 0 && ref.getDate() < dob.getDate())) age--;
+    return age;
+  }
+
+  // Returns null when OK, or a string error when the DOB doesn't match the
+  // expected type. Tolerant of edge cases — we don't want to block a customer
+  // whose 12th birthday lands the week of travel.
+  function validateAgeForType(bornOnIso, expectedType) {
+    const age = computeAgeOnTravel(bornOnIso);
+    if (age === null) return null;            // can't validate without DOB; let normal "required" check catch it
+    if (expectedType === 'adult'  && age < 12) return 'This date of birth is for a child or infant. Restart your search with the correct passenger count.';
+    if (expectedType === 'child'  && (age < 2 || age >= 12)) return 'This date of birth doesn\'t match a Child (age 2–11). Restart your search with the correct passenger count.';
+    if (expectedType === 'infant_without_seat' && age >= 2) return 'This date of birth doesn\'t match an Infant (under 2). Restart your search with the correct passenger count.';
+    return null;
   }
 
   function bookingFareTotal() {
@@ -10906,8 +11057,8 @@
     const baggageKes = b.baggage_kes || 0;
 
     const breakdownHtml = `
-      <div class="line"><span class="label">Flight <span style="color:var(--text-3);font-size:12px;">(taxes included)</span></span><span class="value">${formatKes(b.base_kes)}</span></div>
-      ${seatsKes > 0 ? `<div class="line"><span class="label">Seat selection</span><span class="value">${formatKes(seatsKes)}</span></div>` : ''}
+      <div class="line"><span class="label">Flight ${passengerCount > 1 ? `<span style="color:var(--text-3);font-size:12px;">×${passengerCount}</span> ` : ''}<span style="color:var(--text-3);font-size:12px;">(taxes included)</span></span><span class="value">${formatKes(b.base_kes)}</span></div>
+      ${seatsKes > 0 ? `<div class="line"><span class="label">Seat selection ${seatTotalCount() > 1 ? `<span style="color:var(--text-3);font-size:12px;">×${seatTotalCount()}</span>` : ''}</span><span class="value">${formatKes(seatsKes)}</span></div>` : ''}
       ${baggageKes > 0 ? `<div class="line"><span class="label">Baggage <span style="color:var(--text-3);font-size:12px;">×${baggageTotalQuantity()}</span></span><span class="value">${formatKes(baggageKes)}</span></div>` : ''}
       <div class="line"><span class="label">TumaFly service fee</span><span class="value">${formatKes(b.service_fee_kes)}</span></div>
       <div class="line"><span class="label">Payment processing</span><span class="value">${formatKes(b.processing_fee_kes)}</span></div>
@@ -11407,9 +11558,13 @@
         <iframe src="${escapeHtml(data.redirect_url)}" title="Pesapal payment" allow="payment"></iframe>
       `;
 
-      // Payment is now in flight — stop showing the countdown. Backend's
-      // paid_offer_expired flow handles any race-with-expiry from here.
-      stopFareTimer();
+      // Keep the fare timer ticking through iframe load. Previously this stopped
+      // the timer on iframe load (with the assumption that "backend handles it
+      // via paid_offer_expired"), but that path means the customer pays AND THEN
+      // gets an alert + manual refund. Keeping the timer means the search-expired
+      // modal can still fire while the user is mid-card-entry, blocking the doomed
+      // payment before it goes through. We retain the modal's "Refresh" CTA so
+      // users escape cleanly.
 
       // Begin polling
       startPolling();
@@ -11427,20 +11582,24 @@
 
   function startPolling() {
     pollStartedAt = Date.now();
-    document.getElementById('poll-area').classList.remove('hidden');
-    document.getElementById('poll-area').innerHTML = `
-      <div class="poll-status">
-        <div class="spinner"></div>
-        Waiting for payment confirmation…
-      </div>
-    `;
+    // Don't show any "waiting" UI here — the Pesapal iframe is fully in charge
+    // of telling the user what to do (enter card, click pay, etc.). Earlier
+    // users reported the "Waiting for payment confirmation…" spinner was
+    // confusing — they thought they'd already clicked pay and the spinner
+    // implied processing. We keep the polling running silently in the
+    // background. If the booking confirms, showView('success') fires.
+    // If polling times out, we surface a status message at that point.
+    document.getElementById('poll-area').classList.add('hidden');
+    document.getElementById('poll-area').innerHTML = '';
     pollOnce();
   }
 
   async function pollOnce() {
     if (!activeMerchantRef) return;
     if (Date.now() - pollStartedAt > POLL_TIMEOUT_MS) {
-      document.getElementById('poll-area').innerHTML = `
+      const p = document.getElementById('poll-area');
+      p.classList.remove('hidden');
+      p.innerHTML = `
         <div class="alert alert-warn">Still waiting. If you completed the payment, please check your email — we'll send confirmation as soon as it goes through.</div>
       `;
       return;
@@ -11460,7 +11619,9 @@
       }
 
       if (data.state === 'failed') {
-        document.getElementById('poll-area').innerHTML = `
+        const p = document.getElementById('poll-area');
+        p.classList.remove('hidden');
+        p.innerHTML = `
           <div class="alert alert-error">${escapeHtml(data.message || 'Payment did not complete.')}</div>
           <div style="margin-top:10px;text-align:center;">
             <button class="btn btn-primary" onclick="resetPaymentPane()">Try again</button>
@@ -11470,7 +11631,9 @@
       }
 
       if (data.state === 'needs_support') {
-        document.getElementById('poll-area').innerHTML = `
+        const p = document.getElementById('poll-area');
+        p.classList.remove('hidden');
+        p.innerHTML = `
           <div class="alert alert-warn">${escapeHtml(data.message || 'Something needs our attention. We will reach out.')}</div>
           <div style="font-size:13px;color:var(--text-2);margin-top:10px;">
             Reference: <code style="font-family:var(--mono);">${escapeHtml(activeMerchantRef)}</code>
@@ -11479,8 +11642,14 @@
         return;
       }
 
+      // 'processing' state — payment received, ticket issuance happening
+      // server-side. This is meaningfully different from "still waiting for
+      // the user to enter card details," so we DO surface a small status
+      // indicator here. Should resolve within a few seconds.
       if (data.state === 'processing') {
-        document.getElementById('poll-area').innerHTML = `
+        const p = document.getElementById('poll-area');
+        p.classList.remove('hidden');
+        p.innerHTML = `
           <div class="poll-status">
             <div class="spinner"></div>
             Payment received. Issuing your ticket…
@@ -12668,10 +12837,29 @@
         });
 
         // With use_fedcm_for_prompt:true, prompt() returns a PromptMomentNotification
-        // but the status methods (isNotDisplayed / isDismissedMoment) are deprecated.
-        // We use the simpler pattern: if the callback fires, we resolve. Otherwise
-        // a timeout catches the "user closed without picking" case.
-        google.accounts.id.prompt();
+        // via the callback. When FedCM is blocked by the browser (user dismissed
+        // GSI too many times, third-party cookies disabled, ITP suppression, etc.)
+        // the prompt simply doesn't show — no callback fires. We detect this via
+        // isNotDisplayed/isSkippedMoment and surface a clear message pointing the
+        // user to phone OTP. We deliberately do NOT fall back to OAuth redirect:
+        // the earlier oauth-restore cleanup removed the search/booking state
+        // preservation that flow used to rely on, so a redirect mid-checkout
+        // would lose the user's selections.
+        google.accounts.id.prompt((notification) => {
+          try {
+            const notDisplayed = notification.isNotDisplayed && notification.isNotDisplayed();
+            const skipped = notification.isSkippedMoment && notification.isSkippedMoment();
+            if (notDisplayed || skipped) {
+              const reason = (notDisplayed && notification.getNotDisplayedReason && notification.getNotDisplayedReason())
+                || (skipped && notification.getSkippedReason && notification.getSkippedReason())
+                || 'unknown';
+              console.warn('[gsi] prompt not displayed (reason=', reason, ')');
+              settle(reject, new Error('__fedcm_blocked__'));
+            }
+          } catch (_) {
+            // notification API may not be available in all GSI versions — ignore
+          }
+        });
 
         // Timeout fallback: 60s should be more than enough for the picker UI.
         // If no callback by then, treat as cancelled (user closed the popup).
@@ -12687,7 +12875,23 @@
 
     } catch (e) {
       setLoading(false);
-      if (e.message !== '__cancelled__') {
+      if (e.message === '__cancelled__') {
+        // User dismissed or closed the picker — quiet, no error message.
+      } else if (e.message === '__fedcm_blocked__') {
+        // Browser blocked the FedCM picker. Common causes:
+        //   1. Third-party sign-in is blocked in site settings (most common)
+        //   2. Incognito/private mode with no existing Google session in-context
+        //   3. Browser cooldown after repeated dismissals (Chrome temporarily
+        //      mutes FedCM if dismissed too many times in a short window)
+        // We don't redirect — the OAuth-restore cleanup removed the state
+        // preservation that would survive a redirect mid-checkout.
+        showAuthError('auth-choose-error',
+          "Google sign-in isn't available in this browser. Third-party sign-in may be blocked — " +
+          "enable it in Site settings (lock icon → bottom of panel), try another browser, or close this " +
+          "to keep browsing without signing in. In incognito or private mode, you also need to be " +
+          "signed into Google in this window first."
+        );
+      } else {
         const msg = e.message || 'Something went wrong. Please try again.';
         showAuthError('auth-choose-error', msg);
         console.warn('[gsi] sign-in failed:', e);
@@ -13724,16 +13928,17 @@
       ? new Date(trip.createdAt).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })
       : '—';
 
-    // Pretty-print cabin_class for display. Duffel returns lowercase enum:
-    //   basic_economy / economy / premium_economy / business / first.
-    // fareBrandName takes precedence if the airline supplied one
-    // (e.g. "Saver", "Light", "Comfort Plus").
+    // Use the Duffel cabin_class enum directly (e.g., "first", "economy"),
+    // capitalized for display. We deliberately ignore fare_brand_name (airline
+    // marketing names like "Deluxe", "Saver Lite") so that the itinerary, the
+    // email confirmation, and My Trips all say the same thing — users reported
+    // confusion when one place said "Deluxe" and another said "First."
     const cabinPretty = (c) => {
       if (!c) return null;
       const s = String(c).toLowerCase().replace(/_/g, ' ');
       return s.replace(/\b\w/g, ch => ch.toUpperCase());
     };
-    const fareLabel = trip.fareBrandName || cabinPretty(trip.cabinClass) || 'Economy';
+    const fareLabel = cabinPretty(trip.cabinClass) || 'Economy';
 
     // Dynamic fare amenities based on real flags from the bookings row.
     // Three states per item:
@@ -13838,7 +14043,7 @@
           }).join('');
           return `
             <div class="itin-pax-block">
-              <table class="itin-pax-table">
+              <table class="itin-pax-table"><colgroup><col class="itin-pax-col-name"><col class="itin-pax-col-seat"><col class="itin-pax-col-ticket"></colgroup>
                 <thead>
                   <tr>
                     <th class="itin-pax-name">${p.name || 'Passenger'}</th>
@@ -13889,7 +14094,7 @@
         }).join('');
         return `
           <div class="itin-pax-block">
-            <table class="itin-pax-table">
+            <table class="itin-pax-table"><colgroup><col class="itin-pax-col-name"><col class="itin-pax-col-seat"><col class="itin-pax-col-ticket"></colgroup>
               <thead>
                 <tr>
                   <th class="itin-pax-name">${name}</th>
@@ -13939,7 +14144,15 @@
             </div>
             <div class="itin-summary-row">
               <span class="label">Billing name</span>
-              <span class="value">${trip.passengerName || '—'}</span>
+              <span class="value">${
+                (() => {
+                  // Show only the primary traveler's name (the payer/billing
+                  // contact). passengerName is a comma-joined list of all
+                  // passengers; we just take the first segment.
+                  const first = (trip.passengerName || '').split(',')[0].trim();
+                  return first || '—';
+                })()
+              }</span>
             </div>
             <hr class="itin-summary-divider">
             <div class="itin-summary-row">

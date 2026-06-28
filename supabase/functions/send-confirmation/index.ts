@@ -165,7 +165,10 @@ function renderSliceCard(slice: any, label: string): string {
     const flightNum = seg.marketing_carrier_flight_number ? `${carrierIata}${seg.marketing_carrier_flight_number}` : "";
     const aircraft = seg.aircraft?.name || null;
     const cabinPax = seg.passengers?.[0];
-    const cabin = cabinPax?.cabin_class_marketing_name || (cabinPax?.cabin_class ? capitalize(cabinPax.cabin_class) : null);
+    // Use Duffel's standard cabin_class enum (e.g., "first") capitalized,
+    // not cabin_class_marketing_name (airline marketing names like "Deluxe").
+    // Itinerary view + My Trips both use cabin_class — email matches for consistency.
+    const cabin = cabinPax?.cabin_class ? capitalize(cabinPax.cabin_class) : null;
     const segDur = formatDuration(seg.duration);
     const dep = `${formatTime(seg.departing_at)} · ${seg.origin?.iata_code || ""}${seg.origin?.terminal ? ` Term ${seg.origin.terminal}` : ""}`;
     const arrv = `${formatTime(seg.arriving_at)} · ${seg.destination?.iata_code || ""}${seg.destination?.terminal ? ` Term ${seg.destination.terminal}` : ""}`;
@@ -187,12 +190,24 @@ function renderSliceCard(slice: any, label: string): string {
 
     return `
       <tr><td style="padding:10px 0 ${idx < slice.segments.length - 1 ? '0' : '10'}px 0;">
-        <div style="font-size:14px;color:${TEXT_DARK};font-weight:600;">
-          ${escapeHtml(carrier)}${flightNum ? ` · ${escapeHtml(flightNum)}` : ""}
-        </div>
-        <div style="font-size:13px;color:${TEXT_MED};margin-top:2px;">
-          ${cabin ? escapeHtml(cabin) : ""}${cabin && aircraft ? " · " : ""}${aircraft ? `Aircraft: ${escapeHtml(aircraft)}` : ""}
-        </div>
+        <table width="100%" cellpadding="0" cellspacing="0" style="background:#e8f3ff;border-radius:8px;">
+          <tr>
+            <td style="padding:10px 14px;font-size:14px;color:${TEXT_DARK};font-weight:600;">
+              ${escapeHtml(carrier)}${flightNum ? ` · ${escapeHtml(flightNum)}` : ""}
+            </td>
+            <td align="right" style="padding:10px 14px;font-size:13px;color:${BRAND_BLUE};font-weight:500;white-space:nowrap;">
+              ${(() => {
+                // Right-justified "Class:" caption. Only the word "Class" is hardcoded —
+                // airline, cabin, and the (fare-basis) marker all come from the offer.
+                if (!cabin) return "";
+                const fareCode = cabinPax?.fare_basis_code || "";
+                const marker = fareCode ? ` (${escapeHtml(fareCode)})` : "";
+                return `Class: ${escapeHtml(carrier)} ${escapeHtml(cabin)}${marker}`;
+              })()}
+            </td>
+          </tr>
+        </table>
+        ${aircraft ? `<div style="font-size:12px;color:${TEXT_LITE};margin-top:6px;">Aircraft: ${escapeHtml(aircraft)}</div>` : ""}
         <table width="100%" cellpadding="0" cellspacing="0" style="margin-top:8px;">
           <tr>
             <td style="font-size:13px;color:${TEXT_MED};">${escapeHtml(dep)}</td>
