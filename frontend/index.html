@@ -680,6 +680,86 @@
       font-size: 12px; color: var(--text-3);
       margin-top: 14px; line-height: 1.5;
     }
+
+    /* Fare amenities — sits inside the flight card after the timeline */
+    .itin-fare-divider {
+      border: 0; border-top: 1px solid var(--border);
+      margin: 18px 0 14px;
+    }
+    .itin-fare-class {
+      font-size: 15px; font-weight: 700; color: var(--ink);
+      margin-bottom: 10px;
+    }
+    .itin-fare-amenities {
+      list-style: none; padding: 0; margin: 0;
+      display: flex; flex-direction: column; gap: 6px;
+    }
+    .itin-fare-amenities li {
+      display: flex; align-items: center; gap: 10px;
+      font-size: 13px; color: var(--ink); font-weight: 500;
+      letter-spacing: 0.5px;
+      text-transform: uppercase;
+    }
+    .itin-fare-icon {
+      width: 18px; height: 18px;
+      display: inline-flex; align-items: center; justify-content: center;
+      color: var(--text-3);
+      flex-shrink: 0;
+    }
+    .itin-fare-icon.cost::before {
+      content: "$"; font-weight: 700; font-size: 14px;
+    }
+    .itin-fare-icon.cross::before {
+      content: "✕"; font-size: 14px; font-weight: 500;
+    }
+    .itin-operated-by {
+      font-size: 12px; color: var(--text-3);
+      margin-top: 14px;
+    }
+
+    /* Passengers card */
+    .itin-pax-title {
+      font-size: 16px; font-weight: 700; color: var(--ink);
+      margin: 0 0 16px;
+    }
+    .itin-pax-block + .itin-pax-block {
+      border-top: 1px solid var(--border);
+      margin-top: 18px; padding-top: 18px;
+    }
+    .itin-pax-name {
+      font-size: 15px; font-weight: 700; color: var(--ink);
+      margin: 0 0 10px;
+    }
+    .itin-pax-table {
+      width: 100%; border-collapse: collapse;
+      font-size: 13px;
+    }
+    .itin-pax-table thead th {
+      text-align: left;
+      font-size: 13px; font-weight: 700; color: var(--ink);
+      padding: 8px 12px 8px 0;
+      border-bottom: 1px solid var(--border);
+    }
+    .itin-pax-table tbody td {
+      padding: 12px 12px 12px 0;
+      vertical-align: top;
+      border-bottom: 1px solid var(--border);
+    }
+    .itin-pax-table tbody tr:last-child td { border-bottom: none; }
+    .itin-pax-segment {
+      font-size: 13px; font-weight: 600; color: var(--ink);
+    }
+    .itin-pax-segment-flight {
+      font-size: 12px; color: var(--text-2); font-weight: 400;
+      margin-top: 2px;
+    }
+    .itin-pax-seat {
+      color: var(--brand); font-weight: 500;
+    }
+    .itin-pax-ticket {
+      color: var(--ink); font-family: var(--mono); font-size: 12px;
+      letter-spacing: 0.5px;
+    }
     @media (max-width: 880px) {
       .itin-layout { grid-template-columns: 1fr; }
       .itin-title { font-size: 24px; }
@@ -13296,6 +13376,17 @@
       ? new Date(trip.createdAt).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })
       : '—';
 
+    // Pretty-print cabin_class for display. Duffel returns lowercase enum:
+    //   basic_economy / economy / premium_economy / business / first.
+    // fareBrandName takes precedence if the airline supplied one
+    // (e.g. "Saver", "Light", "Comfort Plus").
+    const cabinPretty = (c) => {
+      if (!c) return null;
+      const s = String(c).toLowerCase().replace(/_/g, ' ');
+      return s.replace(/\b\w/g, ch => ch.toUpperCase());
+    };
+    const fareLabel = trip.fareBrandName || cabinPretty(trip.cabinClass) || 'Economy';
+
     // Build a single flight card (one slice)
     const renderSlice = (s, label) => {
       const origin = s.origin?.iata_code || '—';
@@ -13335,6 +13426,119 @@
               <div class="trip-timeline-iata">${dest}</div>
             </div>
           </div>
+          ${airline ? `<div class="itin-operated-by">Operated by ${airline}</div>` : ''}
+          <hr class="itin-fare-divider">
+          <div class="itin-fare-class">${fareLabel}</div>
+          <ul class="itin-fare-amenities">
+            <li><span class="itin-fare-icon cost" aria-hidden="true"></span>Checked baggage</li>
+            <li><span class="itin-fare-icon cost" aria-hidden="true"></span>Seat selection</li>
+            <li><span class="itin-fare-icon cross" aria-hidden="true"></span>Changes</li>
+          </ul>
+        </div>`;
+    };
+
+    // Build the Passengers card. Prefer real `passengerDetails` from the
+    // bookings row (seat + ticket number per passenger per segment). Falls
+    // back to deriving rows from passenger_name + slices when the bookings
+    // row is from before we started capturing details.
+    const renderPassengers = () => {
+      const details = Array.isArray(trip.passengerDetails) ? trip.passengerDetails : null;
+
+      if (details && details.length) {
+        const blocks = details.map(p => {
+          const rows = (p.segments || []).map(seg => {
+            const origin = seg.origin || '—';
+            const dest   = seg.destination || '—';
+            const airlineLine = (seg.carrier && seg.flight)
+              ? `${seg.carrier} ${seg.flight}`
+              : '';
+            const seatDisplay = seg.seat
+              ? seg.seat
+              : `<span class="itin-pax-seat">Assigned at check-in</span>`;
+            const ticketDisplay = seg.ticket
+              ? `<span class="itin-pax-ticket">${seg.ticket}</span>`
+              : '—';
+            return `
+              <tr>
+                <td>
+                  <div class="itin-pax-segment">${origin} → ${dest}</div>
+                  ${airlineLine ? `<div class="itin-pax-segment-flight">${airlineLine}</div>` : ''}
+                </td>
+                <td>${seatDisplay}</td>
+                <td>${ticketDisplay}</td>
+              </tr>`;
+          }).join('');
+          return `
+            <div class="itin-pax-block">
+              <h3 class="itin-pax-name">${p.name || 'Passenger'}</h3>
+              <table class="itin-pax-table">
+                <thead>
+                  <tr>
+                    <th></th>
+                    <th>Seat</th>
+                    <th>Ticket Number</th>
+                  </tr>
+                </thead>
+                <tbody>${rows}</tbody>
+              </table>
+            </div>`;
+        }).join('');
+        return `
+          <div class="itin-card" style="margin-top:16px;">
+            <h2 class="itin-pax-title">Passengers and seats</h2>
+            ${blocks}
+          </div>`;
+      }
+
+      // Legacy fallback for bookings created before passenger_details was added
+      const passengerNames = (trip.passengerName || '')
+        .split(',')
+        .map(n => n.trim())
+        .filter(Boolean);
+      const passengerCount = trip.passengerCount || passengerNames.length || 1;
+      const finalNames = [];
+      for (let i = 0; i < passengerCount; i++) {
+        finalNames.push(passengerNames[i] || `Passenger ${i + 1}`);
+      }
+      if (!finalNames.length) return '';
+      const blocks = finalNames.map(name => {
+        const rows = slices.map(s => {
+          const origin = s.origin?.iata_code || '—';
+          const dest   = s.destination?.iata_code || '—';
+          const airline      = s.airline || '';
+          const flightNumber = s.flight_number || '';
+          const airlineLine = airline
+            ? `${airline}${flightNumber ? ' ' + flightNumber : ''}`
+            : '';
+          return `
+            <tr>
+              <td>
+                <div class="itin-pax-segment">${origin} → ${dest}</div>
+                ${airlineLine ? `<div class="itin-pax-segment-flight">${airlineLine}</div>` : ''}
+              </td>
+              <td class="itin-pax-seat">Assigned at check-in</td>
+              <td class="itin-pax-ticket">—</td>
+            </tr>`;
+        }).join('');
+        return `
+          <div class="itin-pax-block">
+            <h3 class="itin-pax-name">${name}</h3>
+            <table class="itin-pax-table">
+              <thead>
+                <tr>
+                  <th></th>
+                  <th>Seat</th>
+                  <th>Ticket Number</th>
+                </tr>
+              </thead>
+              <tbody>${rows}</tbody>
+            </table>
+          </div>`;
+      }).join('');
+      return `
+        <div class="itin-card" style="margin-top:16px;">
+          <h2 class="itin-pax-title">Passengers and seats</h2>
+          ${blocks}
         </div>`;
     };
 
@@ -13349,6 +13553,7 @@
         <div>
           ${renderSlice(out, isRound ? 'Outbound' : '')}
           ${isRound ? renderSlice(ret, 'Return') : ''}
+          ${renderPassengers()}
         </div>
         <aside>
           <div class="itin-card">
@@ -13405,6 +13610,10 @@
   }
 
   // ── Find booking (guest + account) ───────────────────────────
+  // Calls payment-status with PNR + last_name (server-side soft auth).
+  // Response: { booking: { ...bookings row + cabin/fare/passenger_details } }
+  // We reshape it into a _allTrips entry and navigate to the itinerary view
+  // so guest find-booking and signed-in My Trips share the same detail page.
   async function findBooking() {
     const pnr      = document.getElementById('fb-pnr').value.trim().toUpperCase();
     const lastName = document.getElementById('fb-last-name').value.trim().toLowerCase();
@@ -13417,12 +13626,60 @@
         headers: { 'Authorization': `Bearer ${SUPABASE_ANON_KEY}` }
       });
       const data = await res.json();
-      if (!res.ok || !data?.booking) throw new Error(data?.error || 'Booking not found');
-      // Navigate to success view
-      activeMerchantRef = pnr;
-      const refSlot = document.getElementById('success-ref');
-      if (refSlot && data.booking.booking_reference) refSlot.textContent = data.booking.booking_reference;
-      showView('success');
+      if (!res.ok || !data?.booking) throw new Error(data?.error || data?.message || 'Booking not found');
+
+      const b = data.booking;
+      // Reshape into the same shape as _allTrips entries so loadItinerary works.
+      const slices = [
+        {
+          origin:        { iata_code: b.origin },
+          destination:   { iata_code: b.destination },
+          departing_at:  b.departure_at,
+          airline:       b.airline,
+          flight_number: b.flight_number,
+        },
+      ];
+      if (b.trip_type === 'round_trip' && b.return_date) {
+        slices.push({
+          origin:        { iata_code: b.destination },
+          destination:   { iata_code: b.origin },
+          departing_at:  b.return_date,
+          airline:       b.return_airline || b.airline,
+          flight_number: b.return_flight_number || null,
+        });
+      }
+      const trip = {
+        id:                 b.id,
+        merchantReference:  b.booking_reference,
+        pnr:                b.booking_reference,
+        status:             'booked',
+        createdAt:          b.created_at,
+        totalKes:           b.total_paid_kes ?? null,
+        totalAmount:        b.total_amount,
+        totalCurrency:      b.total_currency,
+        airline:            b.airline,
+        flightNumber:       b.flight_number,
+        passengerName:      b.passenger_name,
+        passengerEmail:     b.passenger_email,
+        passengerCount:     b.passenger_count,
+        cabinClass:         b.cabin_class,
+        fareBrandName:      b.fare_brand_name,
+        passengerDetails:   b.passenger_details,
+        baseAmountKes:      null,   // payment-status doesn't return the breakdown for PNR lookups
+        serviceFeeKes:      b.service_fee_kes ?? null,
+        processingFeeKes:   b.processing_fee_kes ?? null,
+        paymentMethod:      b.payment_method,
+        tripType:           b.trip_type ?? 'one_way',
+        returnDate:         b.return_date,
+        returnAirline:      b.return_airline,
+        returnFlightNumber: b.return_flight_number,
+        offer: { slices },
+      };
+      // Stash in the same cache loadItinerary reads from. Append-or-replace
+      // by PNR so a returning guest user doesn't accumulate duplicates.
+      _allTrips = (_allTrips || []).filter(t => t.pnr !== trip.pnr);
+      _allTrips.push(trip);
+      viewTrip(trip.pnr);
     } catch (e) {
       errEl.textContent = 'Booking not found. Check your reference and last name.';
       errEl.classList.remove('hidden');
