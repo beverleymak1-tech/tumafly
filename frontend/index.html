@@ -712,6 +712,10 @@
     .itin-fare-icon.cross::before {
       content: "✕"; font-size: 14px; font-weight: 500;
     }
+    .itin-fare-icon.check::before {
+      content: "✓"; font-size: 14px; font-weight: 700;
+      color: var(--success, #16A34A);
+    }
     .itin-operated-by {
       font-size: 12px; color: var(--text-3);
       margin-top: 14px;
@@ -13393,6 +13397,30 @@
     };
     const fareLabel = trip.fareBrandName || cabinPretty(trip.cabinClass) || 'Economy';
 
+    // Dynamic fare amenities based on real flags from the bookings row.
+    // Three states per item:
+    //   ✓ (check)  — included or selected
+    //   $ (dollar) — available for extra cost (or selected & paid for)
+    //   ✕ (cross)  — not allowed
+    // When a flag is null (data not captured), we fall back to TumaFly's
+    // typical Basic-Economy defaults: paid bags, paid seats, no changes.
+    const amenityRow = (icon, label) =>
+      `<li><span class="itin-fare-icon ${icon}" aria-hidden="true"></span>${label}</li>`;
+    const bagIcon = trip.baggageIncluded === true ? 'check'
+                  : trip.baggageIncluded === false ? 'cost'
+                  : 'cost';   // null → default to "$"
+    const seatIcon = trip.seatsSelected === true ? 'check'
+                   : trip.seatsSelected === false ? 'cost'
+                   : 'cost';
+    const changeIcon = trip.changesAllowed === true ? 'check'
+                     : trip.changesAllowed === false ? 'cross'
+                     : 'cross';
+    const amenitiesHtml = [
+      amenityRow(bagIcon, 'Checked baggage'),
+      amenityRow(seatIcon, 'Seat selection'),
+      amenityRow(changeIcon, 'Changes'),
+    ].join('');
+
     // Build a single flight card (one slice)
     const renderSlice = (s, label) => {
       const origin = s.origin?.iata_code || '—';
@@ -13435,11 +13463,7 @@
           ${airline ? `<div class="itin-operated-by">Operated by ${airline}</div>` : ''}
           <hr class="itin-fare-divider">
           <div class="itin-fare-class">${fareLabel}</div>
-          <ul class="itin-fare-amenities">
-            <li><span class="itin-fare-icon cost" aria-hidden="true"></span>Checked baggage</li>
-            <li><span class="itin-fare-icon cost" aria-hidden="true"></span>Seat selection</li>
-            <li><span class="itin-fare-icon cross" aria-hidden="true"></span>Changes</li>
-          </ul>
+          <ul class="itin-fare-amenities">${amenitiesHtml}</ul>
         </div>`;
     };
 
@@ -13668,6 +13692,9 @@
         passengerCount:     b.passenger_count,
         cabinClass:         b.cabin_class,
         fareBrandName:      b.fare_brand_name,
+        baggageIncluded:    b.baggage_included,
+        seatsSelected:      b.seats_selected,
+        changesAllowed:     b.changes_allowed,
         passengerDetails:   b.passenger_details,
         baseAmountKes:      null,   // payment-status doesn't return the breakdown for PNR lookups
         serviceFeeKes:      b.service_fee_kes ?? null,
