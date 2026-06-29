@@ -7224,13 +7224,35 @@
   const _isPesapalCallback = _searchForCallback.has('OrderMerchantReference')
                           || _searchForCallback.has('OrderTrackingId')
                           || _searchForCallback.has('ref');
-  // _isPesapalCallback is retained (declared above) so the safeHistory
-  // guard below doesn't strip Pesapal's query params before the on-load
-  // handler can read them. The pre-render boot block that used to live
-  // here was removed — it was supposed to prevent the home flash by
-  // running before paint, but the script tag is too far down the page
-  // for that to work, so it added no real value. The on-load handler
-  // below now does all the post-redirect work.
+  if (_isPesapalCallback) {
+    // Pre-render the success view synchronously to avoid the home-view
+    // flash between page paint and the on-load handler running.
+    document.body.setAttribute('data-view', 'success');
+    const _homeView = document.getElementById('view-home');
+    if (_homeView) _homeView.classList.add('hidden');
+    const _successView = document.getElementById('view-success');
+    if (_successView) _successView.classList.remove('hidden');
+    // If pollOnce on the payment page already confirmed this merchant_ref
+    // BEFORE Pesapal's redirect fired, the PNR is stashed in sessionStorage
+    // — read it and render directly. Otherwise show "Confirming…" while
+    // the on-load handler kicks off the polling fallback.
+    const _refSlot = document.getElementById('success-ref');
+    if (_refSlot) {
+      let _stashedPnr = null, _stashedRef = null;
+      try {
+        _stashedPnr = sessionStorage.getItem('tumafly_post_pay_pnr');
+        _stashedRef = sessionStorage.getItem('tumafly_post_pay_ref');
+      } catch (_) {}
+      const _currentRef = _searchForCallback.get('OrderMerchantReference') || _searchForCallback.get('ref');
+      if (_stashedPnr && _stashedRef === _currentRef) {
+        _refSlot.textContent = _stashedPnr;
+        // Mark so the on-load handler can skip the loading/polling dance.
+        try { sessionStorage.setItem('tumafly_post_pay_consumed', '1'); } catch (_) {}
+      } else {
+        _refSlot.textContent = 'Confirming…';
+      }
+    }
+  }
   if (!initialState && !_isOAuthCallback && !_isPesapalCallback) {
     safeHistory('replace', { view: 'home' }, window.location.pathname);
   }
