@@ -9669,7 +9669,18 @@
         if (!sm.slices) continue;
         for (const slice of sm.slices) {
           for (const seg of slice.segments) {
-            if (seg.flight_number === leg.flight_number) {
+            // Match flight_number AND origin AND destination. Without the
+            // direction check, round-trips that use the same flight number
+            // both ways (e.g., NBO↔KIS, NBO↔MBA on a single-aircraft rotation)
+            // would match both Duffel segments to both legs — last write wins,
+            // so both seatMapsData entries end up pointing at the inbound
+            // segment, and outbound seat picks pull inbound service_ids. That
+            // produced R3: outbound seat designators were never saved because
+            // Duffel saw two seat assignments per passenger on the same
+            // segment and rejected the duplicates.
+            if (seg.flight_number === leg.flight_number &&
+                seg.origin === leg.origin &&
+                seg.destination === leg.destination) {
               // Re-key seatMapsData entry from synthetic key to real segment_id
               // (just ensure both keys point at the same object — selectedSeats
               // uses the synthetic key so we keep it consistent everywhere).
