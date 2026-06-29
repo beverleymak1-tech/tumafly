@@ -11822,14 +11822,14 @@
 
   async function pollOnce() {
     if (!activeMerchantRef) return;
-    if (Date.now() - pollStartedAt > POLL_TIMEOUT_MS) {
-      const p = document.getElementById('poll-area');
-      p.classList.remove('hidden');
-      p.innerHTML = `
-        <div class="alert alert-warn">Still waiting. If you completed the payment, please check your email — we'll send confirmation as soon as it goes through.</div>
-      `;
-      return;
-    }
+    // Previously: a 5-minute "Still waiting…" amber alert. Removed —
+    // it caused user confusion and the Pesapal iframe already explains
+    // the in-progress state. Polling continues silently until the
+    // server returns confirmed / failed / needs_support. If the user
+    // closes the tab before confirmation, the webhook still resolves
+    // the booking server-side and the confirmation email fires.
+    // POLL_TIMEOUT_MS and pollStartedAt are kept as no-ops in case
+    // other code references them.
 
     try {
       const res = await fetch(`${SUPABASE_URL}/functions/v1/payment-status?ref=${encodeURIComponent(activeMerchantRef)}`, {
