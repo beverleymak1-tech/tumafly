@@ -7035,11 +7035,34 @@
       stopFareTimer();
     }
     if (!opts.fromPopState) {
-      const state = { view: name };
+      // Encode any view-specific params into the URL hash so browser refresh
+      // can rebuild the view from URL alone. Trivial views (home, profile,
+      // my-trips, find-booking) carry no params; data-bearing views encode
+      // the minimum state needed by restoreFromUrl() — see that function
+      // for the per-view URL contract.
+      let url = '#' + name;
+      let paramsForState = null;
+      if (opts.params && typeof opts.params === 'object') {
+        const sp = new URLSearchParams();
+        for (const [k, v] of Object.entries(opts.params)) {
+          if (v != null && v !== '') sp.set(k, String(v));
+        }
+        const qs = sp.toString();
+        if (qs) {
+          url += '?' + qs;
+          paramsForState = Object.fromEntries(sp.entries());
+        }
+      }
+      const state = { view: name, params: paramsForState };
       let currentState = null;
       try { currentState = history.state; } catch (_) {}
-      if (!currentState || currentState.view !== name) {
-        safeHistory('push', state, '#' + name);
+      // Push when the view changes OR the URL changes (params differ). This
+      // lets two showView('results', {params: ...}) calls with different
+      // params produce two history entries, so the back button respects
+      // each navigation.
+      const currentUrl = (window.location.hash || '');
+      if (!currentState || currentState.view !== name || currentUrl !== url) {
+        safeHistory('push', state, url);
       }
     }
   }
@@ -7188,6 +7211,65 @@
     });
   }
 
+  // ============================================================
+  // REFRESH-RESTORE (URL → view)
+  // ============================================================
+  // Browser refresh (Cmd-R / F5 / address-bar reload) re-fetches the HTML and
+  // rebuilds JS state from scratch. The popstate event does NOT fire on
+  // initial page load, so the body renders as <body data-view="home"> by
+  // default — even if the URL is #booking?offer=…. parseHashUrl() pulls the
+  // view name + params from window.location.hash so the on-load handler can
+  // dispatch to the right restorer.
+  //
+  // URL contract per view (only views that carry data need params):
+  //   #home / #profile / #my-trips / #find-booking  → no params
+  //   #results?from=NBO&to=KIS&depart=...&return=...&adults=N
+  //   #booking?offer=off_xxx&p=<lastSeenKesPrice>
+  //   #payment?ref=<merchantReference>
+  //   #success?ref=<merchantReference>
+  //   #itinerary?ref=<pnr>
+  //
+  // Hash format is `#viewname` optionally followed by `?key=val&key2=val2`.
+  function parseHashUrl() {
+    const raw = (window.location.hash || '').replace(/^#/, '');
+    if (!raw) return { view: null, params: {} };
+    const qIdx = raw.indexOf('?');
+    const view = qIdx === -1 ? raw : raw.slice(0, qIdx);
+    const query = qIdx === -1 ? '' : raw.slice(qIdx + 1);
+    const params = {};
+    if (query) {
+      const sp = new URLSearchParams(query);
+      sp.forEach((v, k) => { params[k] = v; });
+    }
+    return { view: view || null, params };
+  }
+
+  // restoreFromUrl() returns true if it handled the URL (so the on-load wipe
+  // is skipped), false if the view name was unknown or the data-bearing
+  // restorer isn't wired up yet. Step 1 handles only parameterless views;
+  // results/booking/payment/success/itinerary restorers land in subsequent
+  // steps. Until then, those URLs fall through to the home-wipe so the user
+  // doesn't get stuck on a half-rendered view.
+  function restoreFromUrl() {
+    const { view, params } = parseHashUrl();
+    if (!view) return false;
+    const trivialViews = ['home', 'profile', 'my-trips', 'find-booking'];
+    if (trivialViews.includes(view)) {
+      // fromPopState: true → don't double-push history. The browser already
+      // has this URL in its address bar; we just render the matching view.
+      showView(view, { fromPopState: true });
+      return true;
+    }
+    // Data-bearing views — restorers not yet implemented in step 1.
+    // TODO step 2: results  → call restoreResults(params)
+    // TODO step 3: booking  → call restoreBooking(params)  (no drift yet)
+    // TODO step 4: booking  → add Priceline-style price-drift banner
+    // TODO step 5: payment  → safe branches (booked / abandoned / failed)
+    // TODO step 6: payment  → pending branch with waiting screen
+    // TODO step 7: success + itinerary
+    return false;
+  }
+
   // Handle the browser back/forward buttons
   window.addEventListener('popstate', (e) => {
     const view = e.state?.view || 'home';
@@ -7259,7 +7341,16 @@
     }
   }
   if (!initialState && !_isOAuthCallback && !_isPesapalCallback) {
-    safeHistory('replace', { view: 'home' }, window.location.pathname);
+    // Refresh-restore: if the URL already names a view (e.g., user pressed
+    // refresh on #booking?offer=…), try to restore it before wiping the URL
+    // to the clean home state. restoreFromUrl() returns true when it
+    // successfully rendered the matching view (step 1: only trivial views;
+    // later steps will add data-bearing restorers). When it returns false,
+    // we fall through to the historical wipe-to-home behavior.
+    const _restored = window.location.hash ? restoreFromUrl() : false;
+    if (!_restored) {
+      safeHistory('replace', { view: 'home' }, window.location.pathname);
+    }
   }
 
   function resetAndGoHome() {
