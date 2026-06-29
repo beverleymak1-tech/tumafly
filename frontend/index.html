@@ -12980,11 +12980,21 @@
     if (authCallback) { authCallback(user); authCallback = null; }
 
     // If user is on the booking view when sign-in completes (e.g. signed in
-    // mid-booking via the nav menu), re-run the contact pre-fill. The function
-    // is safe to call repeatedly — it only fills empty fields, never clobbers
-    // anything the user already typed.
-    if (document.body.getAttribute('data-view') === 'booking' && typeof prefillContactFromProfile === 'function') {
-      prefillContactFromProfile().catch(e => console.warn('[prefill] post-signin failed:', e));
+    // mid-booking via the nav menu), three things need to happen so the
+    // page reflects their new session without forcing a navigation:
+    //   1. Re-run the contact pre-fill (idempotent — only fills empty fields)
+    //   2. Fetch their saved travelers (populates the dropdown picker)
+    //   3. Re-render passenger forms so the dropdown actually appears
+    // Symmetric to the popstate-on-back-to-booking handler which does (2)+(3).
+    if (document.body.getAttribute('data-view') === 'booking') {
+      if (typeof prefillContactFromProfile === 'function') {
+        prefillContactFromProfile().catch(e => console.warn('[prefill] post-signin failed:', e));
+      }
+      if (typeof fetchSavedTravelers === 'function' && typeof renderPassengerForms === 'function') {
+        fetchSavedTravelers()
+          .then(() => renderPassengerForms())
+          .catch(e => console.warn('[saved_travelers] post-signin fetch failed:', e));
+      }
     }
 
     // If there's a pending post-booking link, hide the nudge banner
