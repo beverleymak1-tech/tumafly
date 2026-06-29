@@ -7224,19 +7224,6 @@
   const _isPesapalCallback = _searchForCallback.has('OrderMerchantReference')
                           || _searchForCallback.has('OrderTrackingId')
                           || _searchForCallback.has('ref');
-  if (_isPesapalCallback) {
-    // Pre-render the success view synchronously to avoid the "home flash"
-    // that would otherwise appear between page load and the on-load
-    // Pesapal handler running. The handler below will still fire to fetch
-    // the booking and fill in the real PNR.
-    document.body.setAttribute('data-view', 'success');
-    const _homeView = document.getElementById('view-home');
-    if (_homeView) _homeView.classList.add('hidden');
-    const _successView = document.getElementById('view-success');
-    if (_successView) _successView.classList.remove('hidden');
-    const _refSlot = document.getElementById('success-ref');
-    if (_refSlot) _refSlot.textContent = 'Confirming…';
-  }
   if (!initialState && !_isOAuthCallback && !_isPesapalCallback) {
     safeHistory('replace', { view: 'home' }, window.location.pathname);
   }
@@ -12730,14 +12717,10 @@
 
         activeMerchantRef = ref;
         const refSlot = document.getElementById('success-ref');
-        // Don't render merchant_ref upfront — that caused a visible text
-        // flicker (TF-... then real PNR). Keep the "Confirming…"
-        // placeholder set by the synchronous boot block until the fetch
-        // below resolves with either the real PNR or (fallback) the ref.
+        if (refSlot) refSlot.textContent = ref;
 
-        // Route to the success view. The synchronous boot block already
-        // pre-rendered success on Pesapal-callback detection, so this is
-        // a safety net + sets the hash.
+        // Route to the success view. Set both the hash and call showView so
+        // either routing mechanism picks it up.
         location.hash = 'success';
         if (typeof showView === 'function') showView('success');
 
@@ -12748,18 +12731,11 @@
         fetch(`${SUPABASE_URL}/functions/v1/payment-status?ref=${encodeURIComponent(ref)}`, {
           headers: { 'Authorization': `Bearer ${SUPABASE_ANON_KEY}` },
         })
+          .then(r => r.json())
           .then(data => {
             console.log('[Pesapal] payment-status =', data?.state, 'pnr=', data?.booking?.booking_reference);
-            if (refSlot) {
-              if (data?.booking?.booking_reference) {
-                refSlot.textContent = data.booking.booking_reference;
-              } else {
-                // Booking not yet committed — fall back to the merchant
-                // ref so the user has something to reference for support.
-                // Polling continues server-side and email confirmation
-                // will fire when the webhook lands.
-                refSlot.textContent = ref;
-              }
+            if (data?.booking?.booking_reference && refSlot) {
+              refSlot.textContent = data.booking.booking_reference;
             }
           })
           .catch(err => console.warn('[Pesapal] payment-status fetch failed:', err));
@@ -13029,15 +13005,14 @@
     }
   }
   function closeAuthModal() {
-    // A2/D7: Sign out only if profile-capture is still pending — meaning
-    // the user X'd out before completing. _pendingProfileCapture is the
-    // source of truth: maybeShowProfileStepOrClose sets it true, success
-    // paths (completeProfile + hasName branch) set it false BEFORE
-    // calling us. The previous DOM-visibility check (`auth-step-profile`
-    // not hidden) was wrong because on success the profile step is still
-    // visible at the moment closeAuthModal is called — leading to a
-    // spurious signOut and the "logged out after profile capture" bug.
-    if (_pendingProfileCapture) {
+    // A2: If the profile-capture step is visible, the user has verified OTP
+    // but hasn't given us their name. X-ing out at this point shouldn't leave
+    // them as a nameless "Account" — revert them to guest by signing out.
+    // The auth.users row stays (Supabase doesn't expose user deletion from
+    // client-side), so re-OTP'ing the same phone later will pick up the
+    // existing user and re-show the profile-capture step naturally.
+    const profileStep = document.getElementById('auth-step-profile');
+    if (profileStep && !profileStep.classList.contains('hidden')) {
       _pendingProfileCapture = false;
       (async () => {
         try {
@@ -13253,12 +13228,6 @@
     if (token.length < 6) return;
     const btn = document.getElementById('auth-verify-btn');
     btn.disabled = true; btn.textContent = 'Verifying…';
-    // D2: Pre-set the flag BEFORE verifyOtp resolves. Without this, the
-    // SIGNED_IN event fires onSignedIn before maybeShowProfileStepOrClose
-    // can set the flag — causing a brief "Account" pill flash before
-    // reverting to "Sign in". The flag is cleared in either branch of
-    // maybeShowProfileStepOrClose (returning user / first-time signup).
-    _pendingProfileCapture = true;
     try {
       const sb = await getSupabase();
       const { error } = await sb.auth.verifyOtp({ phone: pendingPhone, token, type: 'sms' });
@@ -13296,16 +13265,7 @@
         || user.user_metadata?.first_name
         || user.user_metadata?.full_name;
 
-      if (hasName) {
-        // Returning user — capture not needed. Clear the flag BEFORE
-        // closeAuthModal so closeAuthModal doesn't sign them out.
-        _pendingProfileCapture = false;
-        // onSignedIn was deferred earlier (flag was true) — now that
-        // we know they have a name, run the nav update it would have done.
-        if (currentUser && typeof updateNavForUser === 'function') updateNavForUser(currentUser);
-        closeAuthModal();
-        return;
-      }
+      if (hasName) { closeAuthModal(); return; }
 
       // ── Pre-flight: phone already in another profile (orphan-account guard) ──
       // If the phone we just verified is already claimed by a different
