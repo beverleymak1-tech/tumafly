@@ -194,23 +194,35 @@ function renderSliceCard(slice: any, label: string): string {
              with airline on the left and Class right-justified — same edge
              alignment as the city names directly above (departure left,
              arrival right). -->
-        <table width="100%" cellpadding="0" cellspacing="0" style="background:#e8f3ff;border-radius:8px;">
+        <table width="100%" cellpadding="0" cellspacing="0" style="width:100%;background:#e8f3ff;border-radius:8px;">
                   <tr>
-                    <td width="100%" style="padding:10px 14px;font-size:14px;color:${TEXT_DARK};font-weight:600;">
-                      ${escapeHtml(carrier)}${flightNum ? ` · ${escapeHtml(flightNum)}` : ""}
+                    <td style="padding:10px 14px;">
+                      <!-- Two floated tables inside one cell — canonical email
+                           pattern for full-width-background + edge-aligned content.
+                           The outer table holds the alpha (always 100% wide).
+                           The two inner tables align left + right via the HTML
+                           align attribute; their cells use nowrap so the text
+                           never breaks into a column. -->
+                      <table cellpadding="0" cellspacing="0" border="0" align="left" style="margin:0;">
+                        <tr><td style="font-size:14px;color:${TEXT_DARK};font-weight:600;white-space:nowrap;">
+                          ${escapeHtml(carrier)}${flightNum ? ` · ${escapeHtml(flightNum)}` : ""}
+                        </td></tr>
+                      </table>
+                      <table cellpadding="0" cellspacing="0" border="0" align="right" style="margin:0;">
+                        <tr><td style="font-size:13px;color:${BRAND_BLUE};font-weight:500;white-space:nowrap;">
+                          ${(() => {
+                            if (!cabin) return "";
+                            const fareCode = cabinPax?.fare_basis_code || "";
+                            const marker = fareCode ? ` (${escapeHtml(fareCode)})` : "";
+                            return `Class: ${escapeHtml(carrier)} ${escapeHtml(cabin)}${marker}`;
+                          })()}
+                        </td></tr>
+                      </table>
+                      <!-- Clearfix so the parent cell heights correctly with the floats. -->
+                      <div style="clear:both;height:0;font-size:0;line-height:0;">&nbsp;</div>
                     </td>
-                    <td align="right" style="padding:10px 14px;font-size:13px;color:${BRAND_BLUE};font-weight:500;white-space:nowrap;">
-              ${(() => {
-                // Right-justified "Class:" caption. Only the word "Class" is hardcoded —
-                // airline, cabin, and the (fare-basis) marker all come from the offer.
-                if (!cabin) return "";
-                const fareCode = cabinPax?.fare_basis_code || "";
-                const marker = fareCode ? ` (${escapeHtml(fareCode)})` : "";
-                return `Class: ${escapeHtml(carrier)} ${escapeHtml(cabin)}${marker}`;
-              })()}
-            </td>
-          </tr>
-        </table>
+                  </tr>
+                </table>
         ${aircraft ? `<div style="font-size:12px;color:${TEXT_LITE};margin-top:6px;">Aircraft: ${escapeHtml(aircraft)}</div>` : ""}
         <table width="100%" cellpadding="0" cellspacing="0" style="margin-top:8px;">
           <tr>
