@@ -12707,16 +12707,137 @@
     else turnstilePaymentToken = '';
   }
 
-  // ── Pesapal callback handler ───────────────────────────────────────────
-  // After payment, Pesapal forces a top-level browser redirect to our
-  // callback_url. We point that at `/?ref=...` (root path, never 404s).
-  // On boot, detect Pesapal's appended params and rehydrate the success
-  // view from the merchant reference.
+  // ── Pesapal callback handler — post-redirect flow ──────────────────────
   //
-  // We use `window.addEventListener('load', ...)` instead of an IIFE so the
-  // handler runs AFTER all SPA init (default view, hashchange listeners,
-  // etc.) — an immediate IIFE was racing those and getting its showView
-  // call overridden, dumping the user back on the home view.
+  // After successful payment Pesapal does a top-level browser redirect to
+  // our callback_url with ?OrderMerchantReference=TF-... appended. At the
+  // moment of redirect the booking row is NOT guaranteed to be committed
+  // yet — Pesapal's IPN to pesapal-webhook (which creates the Duffel order
+  // + updates bookings) often hasn't completed. A single fetch races that
+  // work and frequently comes back with no PNR, leaving the user stuck on
+  // a merchant_ref forever.
+  //
+  // Architecture: poll payment-status every 2s until a terminal state
+  // (confirmed / failed / needs_support) or a 60s soft-timeout. During
+  // polling the user sees a "Confirming your payment…" spinner. Terminal
+  // states render their own UI (PNR / failure / "we'll email you").
+
+  const POST_REDIRECT_POLL_INTERVAL_MS = 2000;
+  const POST_REDIRECT_POLL_TIMEOUT_MS  = 60 * 1000;
+
+  let _postRedirectPollHandle  = null;
+  let _postRedirectPollStarted = null;
+
+  // Swap the contents of #view-success's hero block to reflect the current
+  // post-redirect state. Each branch is fully self-contained markup.
+  function renderPostRedirectSuccess(state, payload) {
+    const hero = document.querySelector('#view-success .success-hero');
+    if (!hero) return;
+
+    if (state === 'loading') {
+      hero.innerHTML = `
+        <div style="display:flex;justify-content:center;margin-bottom:20px;">
+          <div class="spinner" style="width:36px;height:36px;border-width:3px;"></div>
+        </div>
+        <div class="success-title">Confirming your payment…</div>
+        <p style="color:var(--text-2);max-width:42ch;margin:8px auto 0;">This usually takes a few seconds.</p>
+      `;
+      return;
+    }
+
+    if (state === 'confirmed') {
+      const pnr = payload?.booking?.booking_reference || '';
+      hero.innerHTML = `
+        <div class="success-check">✓</div>
+        <div class="success-title">You're booked.</div>
+        <p style="color:var(--text-2);max-width:42ch;margin:8px auto 0;">A confirmation is on its way to your email. Your booking reference:</p>
+        <div class="success-ref" id="success-ref">${escapeHtml(pnr)}</div>
+      `;
+      return;
+    }
+
+    if (state === 'still-processing') {
+      // Soft-fallback after 60s without a terminal state: payment likely
+      // succeeded, ticketing is taking longer than expected. Calm "we'll
+      // email you" state with merchant ref for support.
+      const mref = payload?.merchantRef || '';
+      hero.innerHTML = `
+        <div class="success-check" style="background:var(--warning-soft,#FEF6E7);color:var(--warning,#B45309);">
+          <svg width="26" height="26" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+            <path d="M12 7v5l3 2" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+            <circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="2"/>
+          </svg>
+        </div>
+        <div class="success-title">Finalizing your ticket…</div>
+        <p style="color:var(--text-2);max-width:46ch;margin:8px auto 0;">Your payment went through. The airline is issuing your ticket now. We'll email your confirmation within a few minutes.</p>
+        <div class="success-ref" id="success-ref" style="margin-top:14px;">${escapeHtml(mref)}</div>
+        <p style="font-size:13px;color:var(--text-3);max-width:42ch;margin:8px auto 0;">Save this reference in case you need it for support.</p>
+      `;
+      return;
+    }
+
+    if (state === 'failed') {
+      hero.innerHTML = `
+        <div class="success-check" style="background:var(--danger-soft,#FDE8E8);color:var(--danger,#c0392b);">
+          <svg width="26" height="26" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+            <path d="M15 9l-6 6M9 9l6 6" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"/>
+            <circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="2"/>
+          </svg>
+        </div>
+        <div class="success-title">Payment didn't complete</div>
+        <p style="color:var(--text-2);max-width:42ch;margin:8px auto 0;">${escapeHtml(payload?.message || 'Your payment was not processed. No charge was made.')}</p>
+        <div style="margin-top:18px;">
+          <button class="btn btn-primary" onclick="resetAndGoHome()">Start over</button>
+        </div>
+      `;
+      return;
+    }
+  }
+
+  async function pollPostRedirect(merchantRef) {
+    if (Date.now() - _postRedirectPollStarted > POST_REDIRECT_POLL_TIMEOUT_MS) {
+      // 60s without terminal state → soft-fallback rather than spin forever.
+      // Server-side webhook + email confirmation continue independently.
+      renderPostRedirectSuccess('still-processing', { merchantRef });
+      return;
+    }
+
+    try {
+      const res = await fetch(
+        `${SUPABASE_URL}/functions/v1/payment-status?ref=${encodeURIComponent(merchantRef)}`,
+        { headers: { 'Authorization': `Bearer ${SUPABASE_ANON_KEY}` } }
+      );
+      const data = await res.json();
+      console.log('[Pesapal callback poll] state=', data?.state, 'pnr=', data?.booking?.booking_reference);
+
+      if (data?.state === 'confirmed' && data?.booking?.booking_reference) {
+        renderPostRedirectSuccess('confirmed', data);
+        return;
+      }
+      if (data?.state === 'failed') {
+        renderPostRedirectSuccess('failed', data);
+        return;
+      }
+      if (data?.state === 'needs_support') {
+        renderPostRedirectSuccess('still-processing', { merchantRef });
+        return;
+      }
+      // 'pending' / 'processing' / undefined / network blip → keep polling
+    } catch (e) {
+      console.warn('[Pesapal callback poll] fetch failed:', e);
+      // Network blip — keep polling (don't terminate on transient errors)
+    }
+
+    _postRedirectPollHandle = setTimeout(
+      () => pollPostRedirect(merchantRef),
+      POST_REDIRECT_POLL_INTERVAL_MS
+    );
+  }
+
+  // Boot-time hook. Runs on `load` (after SPA init) so it doesn't race the
+  // default view setup. The synchronous boot block already flipped the
+  // visible view to success with a "Confirming…" placeholder text — this
+  // handler renders the proper spinner state and starts the poll.
   window.addEventListener('load', () => {
     setTimeout(() => {
       try {
@@ -12725,44 +12846,20 @@
         if (!ref) return;
         console.log('[Pesapal] Detected callback, merchant_ref=', ref);
 
-        // Clean URL so refresh doesn't re-trigger. Preserve any hash we set below.
+        // Clean URL so refresh doesn't re-trigger this handler
         history.replaceState(null, '', location.pathname);
 
         activeMerchantRef = ref;
-        const refSlot = document.getElementById('success-ref');
-        // Don't render merchant_ref upfront — that caused a visible text
-        // flicker (TF-... then real PNR). Keep the "Confirming…"
-        // placeholder set by the synchronous boot block until the fetch
-        // below resolves with either the real PNR or (fallback) the ref.
-
-        // Route to the success view. The synchronous boot block already
-        // pre-rendered success on Pesapal-callback detection, so this is
-        // a safety net + sets the hash.
         location.hash = 'success';
         if (typeof showView === 'function') showView('success');
 
-        // Fetch the booking so we can display the real PNR (booking_reference)
-        // instead of the merchant ref. If still in 'paid' state (booking not
-        // committed yet), the user sees the merchant ref temporarily — they
-        // can refresh to re-fetch.
-        fetch(`${SUPABASE_URL}/functions/v1/payment-status?ref=${encodeURIComponent(ref)}`, {
-          headers: { 'Authorization': `Bearer ${SUPABASE_ANON_KEY}` },
-        })
-          .then(data => {
-            console.log('[Pesapal] payment-status =', data?.state, 'pnr=', data?.booking?.booking_reference);
-            if (refSlot) {
-              if (data?.booking?.booking_reference) {
-                refSlot.textContent = data.booking.booking_reference;
-              } else {
-                // Booking not yet committed — fall back to the merchant
-                // ref so the user has something to reference for support.
-                // Polling continues server-side and email confirmation
-                // will fire when the webhook lands.
-                refSlot.textContent = ref;
-              }
-            }
-          })
-          .catch(err => console.warn('[Pesapal] payment-status fetch failed:', err));
+        // Render proper spinner UI (replaces the text placeholder from the
+        // synchronous boot block).
+        renderPostRedirectSuccess('loading');
+
+        // Kick off the poll. Terminates on confirmed / failed / soft-timeout.
+        _postRedirectPollStarted = Date.now();
+        pollPostRedirect(ref);
       } catch (e) {
         console.error('[Pesapal] callback handler failed:', e);
       }
