@@ -10543,6 +10543,13 @@
     s.showRequiredErrors = false;
     s.openSections.clear();
     renderPassengerForms();
+    // Bag/seat rows are gated on saved===true (see renderSeatsList +
+    // renderBaggageList). Without these re-renders here, those sections
+    // would stay empty after the user saves a traveler — since the only
+    // other render trigger fires on initial section load (before saves).
+    if (typeof renderSeatsList === 'function') renderSeatsList();
+    if (typeof renderBaggageList === 'function') renderBaggageList();
+    if (typeof renderBookingSummary === 'function') renderBookingSummary();
     const alertBox = document.getElementById('booking-alert');
     if (alertBox) alertBox.innerHTML = '';
 
