@@ -7204,6 +7204,11 @@
     // state of each traveler card.
     if (view === 'booking' && currentUser) {
       fetchSavedTravelers().then(() => {
+        // A26: also reconcile any picked-into-slot saved travelers — if the
+        // user edited their Account record in another tab, the collapsed
+        // saved card here would otherwise still show the old data until
+        // the user picked them again.
+        if (typeof reconcileSavedTravelerData === 'function') reconcileSavedTravelerData();
         renderPassengerForms();
       }).catch(e => console.warn('[saved_travelers] popstate refresh failed:', e));
     }
@@ -10568,6 +10573,48 @@
   // an unauthenticated fetch returns an empty array.
   let _savedTravelers = [];
 
+  // A26: After a fetchSavedTravelers refresh (popstate back to booking,
+  // or mid-booking sign-in), walk every traveler slot that's already saved
+  // AND linked to a saved_travelers row. Copy the fresh record into s.data
+  // so the collapsed card reflects any edits the user made in Account.
+  // Skips slots that are still in edit-form mode (s.saved=false) — those
+  // contain in-progress user input we must not clobber.
+  function reconcileSavedTravelerData() {
+    if (typeof _savedTravelers === 'undefined' || !Array.isArray(_savedTravelers)) return;
+    if (typeof travelerStates === 'undefined' || !Array.isArray(travelerStates)) return;
+    const byId = new Map(_savedTravelers.map(t => [t.id, t]));
+    travelerStates.forEach((s) => {
+      if (!s || !s.saved) return;
+      const linkedId = s.data?._saved_traveler_id;
+      if (!linkedId) return;
+      const fresh = byId.get(linkedId);
+      if (!fresh) return;  // record deleted in Account — keep local copy
+      // Preserve link metadata across the swap.
+      const preservedSavedId = s.data._saved_traveler_id;
+      const preservedOriginalPicked = s.data._original_picked;
+      // Re-map fields. Names match what applySavedTraveler reads — keep in
+      // sync with that function if its mapping changes.
+      s.data.title              = fresh.title || s.data.title || 'mr';
+      s.data.gender             = fresh.gender || '';
+      s.data.given_name         = fresh.given_name || '';
+      s.data.middle_name        = fresh.middle_name || '';
+      s.data.family_name        = fresh.family_name || '';
+      s.data.born_on            = fresh.born_on || '';
+      s.data.nationality        = fresh.nationality || '';
+      s.data.passport = {
+        country: fresh.passport_country || '',
+        number:  fresh.passport_number  || '',
+        expires: fresh.passport_expires || '',
+      };
+      s.data.frequent_flyer     = Array.isArray(fresh.frequent_flyer) ? fresh.frequent_flyer : [];
+      s.data.known_traveler_id  = fresh.known_traveler_id || '';
+      s.data.redress_number     = fresh.redress_number || '';
+      s.data.special_assistance = fresh.special_assistance || '';
+      s.data._saved_traveler_id = preservedSavedId;
+      s.data._original_picked   = preservedOriginalPicked;
+    });
+  }
+
   async function fetchSavedTravelers() {
     if (!currentUser) { _savedTravelers = []; return; }
     try {
@@ -13039,7 +13086,10 @@
       }
       if (typeof fetchSavedTravelers === 'function' && typeof renderPassengerForms === 'function') {
         fetchSavedTravelers()
-          .then(() => renderPassengerForms())
+          .then(() => {
+            if (typeof reconcileSavedTravelerData === 'function') reconcileSavedTravelerData();
+            renderPassengerForms();
+          })
           .catch(e => console.warn('[saved_travelers] post-signin fetch failed:', e));
       }
     }
@@ -13564,15 +13614,15 @@
         <div style="font-size:18px;font-weight:600;color:var(--ink,#0F1923);margin-bottom:12px;text-align:center;">
           Google sign-in unavailable
         </div>
-        <div style="font-size:14px;color:var(--text-2,#4A5568);margin-bottom:14px;line-height:1.5;">
+        <div style="font-size:14px;color:var(--text-2,#4A5568);margin-bottom:14px;line-height:1.5;text-align:left;">
           This browser is blocking third-party sign-in. To continue:
         </div>
-        <ul style="font-size:14px;color:var(--text-2,#4A5568);margin:0 0 14px;padding-left:20px;line-height:1.6;">
+        <ul style="font-size:14px;color:var(--text-2,#4A5568);margin:0 0 14px;padding-left:20px;line-height:1.6;text-align:left;">
           <li>Allow it in <strong style="color:var(--ink,#0F1923);">Site settings</strong>, or</li>
           <li>Try a different browser, or</li>
           <li>Use phone sign-in if your number is linked to your TumaFly profile</li>
         </ul>
-        <div style="font-size:13px;color:var(--text-3,#717A86);margin-bottom:20px;line-height:1.5;">
+        <div style="font-size:13px;color:var(--text-3,#717A86);margin-bottom:20px;line-height:1.5;text-align:left;">
           Note: in incognito or private mode, you also need to be signed into Google in this window first.
         </div>
         <button type="button" id="fedcm-blocked-ok" style="width:100%;padding:12px 16px;border-radius:10px;border:none;background:var(--brand,#3D95F5);color:#fff;font-weight:600;cursor:pointer;font-size:14px;">
