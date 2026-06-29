@@ -9479,33 +9479,11 @@
       }
     });
 
-    // Check if any (pax × leg) has no seat AND seat maps are available.
-    // Only counts saved travelers — unsaved slots have no visible row.
-    const anyUnselected = legs.some(leg => {
-      if (seatMapsData[leg.segment_id]?.unavailable) return false;
-      for (let p = 0; p < passengerCount; p++) {
-        if (!travelerStates[p]?.saved) continue;
-        if (!selectedSeats[p]?.[leg.segment_id]) return true;
-      }
-      return false;
-    });
-
-    const ctaGroup = anyUnselected ? (seatCTACollapsed ? `
-      <button type="button" class="cta-collapsed-link" onclick="expandSeatsCTA()">+ Add seats now</button>
-    ` : `
-      <div class="seat-upsell">
-        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-          <path d="M7 7h10M7 12h6" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
-          <circle cx="18" cy="18" r="5" fill="var(--brand)" stroke="none"/>
-          <path d="M18 15v3l2 1" stroke="white" stroke-width="1.5" stroke-linecap="round"/>
-        </svg>
-        <span>Save time and money by adding seats now vs. at the airport.</span>
-      </div>
-      <button type="button" class="btn btn-primary seat-cta-btn" onclick="openSeatModal(0)">Select seats now</button>
-      <button type="button" class="btn btn-secondary seat-cta-btn" onclick="skipSeats()">Continue without seats</button>
-    `) : '';
-
-    slot.innerHTML = rows.join('') + ctaGroup;
+    // The per-row "Select" / "Change" buttons handle all seat picking. No
+    // bottom CTA group needed (the previous "Select seats now" was
+    // redundant). skipSeats / expandSeatsCTA / seatCTACollapsed are kept
+    // as no-ops in case other call sites still reference them.
+    slot.innerHTML = rows.join('');
   }
 
   // Walks the selected outbound + inbound offers and produces a flat list of
@@ -10084,7 +10062,7 @@
       } else if (opts.length === 0) {
         statusHtml = `<div class="bag-row-status empty">Not available</div>`;
       } else {
-        statusHtml = `<span class="seat-row-dash">—</span>`;
+        statusHtml = `<button type="button" class="bag-row-cta" onclick="openBaggageModal(${i})">Add</button>`;
       }
 
       return `
@@ -10104,31 +10082,11 @@
       `;
     }).join('');
 
-    // Show CTA group only if at least one pax has options + no selection yet
-    const anyWithOptionsUnpicked = Array.from({ length: passengerCount }).some((_, i) => {
-      if (!travelerStates[i]?.saved) return false;
-      const opts = baggageOptionsByPax[i] || [];
-      const sel = selectedBaggages[i] || {};
-      const count = Object.values(sel).reduce((a, b) => a + b, 0);
-      return opts.length > 0 && count === 0;
-    });
-
-    const ctaGroup = anyWithOptionsUnpicked ? (baggageCTACollapsed ? `
-      <button type="button" class="cta-collapsed-link" onclick="expandBaggageCTA()">+ Add bags now</button>
-    ` : `
-      <div class="bag-upsell">
-        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-          <path d="M7 7h10M7 12h6" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
-          <circle cx="18" cy="18" r="5" fill="var(--brand)" stroke="none"/>
-          <path d="M18 15v3l2 1" stroke="white" stroke-width="1.5" stroke-linecap="round"/>
-        </svg>
-        <span>Add checked or carry-on bags now — often cheaper than at the airport.</span>
-      </div>
-      <button type="button" class="btn btn-primary bag-cta-btn" onclick="openBaggageModal(0)">Add bags now</button>
-      <button type="button" class="btn btn-secondary bag-cta-btn" onclick="skipBags()">Continue without bags</button>
-    `) : '';
-
-    slot.innerHTML = rows + ctaGroup;
+    // The per-row "Add" / "Change" buttons handle all bag picking. No
+    // bottom CTA group needed. skipBags / expandBaggageCTA /
+    // baggageCTACollapsed remain in the file as no-ops in case other
+    // sites reference them.
+    slot.innerHTML = rows;
   }
 
   // "Continue without bags" — collapse the upsell + 2 buttons into a subtle
