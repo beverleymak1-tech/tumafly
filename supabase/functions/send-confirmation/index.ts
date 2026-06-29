@@ -181,7 +181,7 @@ function renderSliceCard(slice: any, label: string): string {
       const layoverMm = layoverMin % 60;
       const layoverTxt = layoverHrs > 0 ? `${layoverHrs}h ${layoverMm}m` : `${layoverMm}m`;
       return `
-        <tr><td style="padding:8px 0 8px 0;">
+        <tr><td colspan="2" style="padding:8px 0 8px 0;">
           <div style="font-size:12px;color:${TEXT_LITE};border-top:1px dashed ${HAIR};padding-top:8px;">
             ↓ ${layoverTxt} layover at ${escapeHtml(seg.destination?.iata_code || "")}
           </div>
@@ -189,7 +189,7 @@ function renderSliceCard(slice: any, label: string): string {
     })() : "";
 
     return `
-      <tr><td style="padding:10px 0 ${idx < slice.segments.length - 1 ? '0' : '10'}px 0;">
+      <tr><td colspan="2" style="padding:10px 0 ${idx < slice.segments.length - 1 ? '0' : '10'}px 0;">
         <!-- Airline + class row. The tinted strip spans the full card width
              with airline on the left and Class right-justified — same edge
              alignment as the city names directly above (departure left,
@@ -237,7 +237,7 @@ function renderSliceCard(slice: any, label: string): string {
   }).join("");
 
   const baggageLine = (inc.checked + inc.carry > 0) ? `
-    <tr><td style="padding:12px 0 0 0;border-top:1px solid ${HAIR};">
+    <tr><td colspan="2" style="padding:12px 0 0 0;border-top:1px solid ${HAIR};">
       <div style="font-size:12px;color:${TEXT_LITE};font-weight:600;text-transform:uppercase;letter-spacing:0.05em;">Included baggage</div>
       <div style="font-size:13px;color:${TEXT_MED};margin-top:4px;">
         ${inc.checked > 0 ? `${inc.checked} checked bag${inc.checked > 1 ? "s" : ""}` : ""}
