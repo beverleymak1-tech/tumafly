@@ -7225,17 +7225,33 @@
                           || _searchForCallback.has('OrderTrackingId')
                           || _searchForCallback.has('ref');
   if (_isPesapalCallback) {
-    // Pre-render the success view synchronously to avoid the "home flash"
-    // that would otherwise appear between page load and the on-load
-    // Pesapal handler running. The handler below will still fire to fetch
-    // the booking and fill in the real PNR.
+    // Pre-render the success view synchronously to avoid the home-view
+    // flash between page paint and the on-load handler running.
     document.body.setAttribute('data-view', 'success');
     const _homeView = document.getElementById('view-home');
     if (_homeView) _homeView.classList.add('hidden');
     const _successView = document.getElementById('view-success');
     if (_successView) _successView.classList.remove('hidden');
+    // If pollOnce on the payment page already confirmed this merchant_ref
+    // BEFORE Pesapal's redirect fired, the PNR is stashed in sessionStorage
+    // — read it and render directly. Otherwise show "Confirming…" while
+    // the on-load handler kicks off the polling fallback.
     const _refSlot = document.getElementById('success-ref');
-    if (_refSlot) _refSlot.textContent = 'Confirming…';
+    if (_refSlot) {
+      let _stashedPnr = null, _stashedRef = null;
+      try {
+        _stashedPnr = sessionStorage.getItem('tumafly_post_pay_pnr');
+        _stashedRef = sessionStorage.getItem('tumafly_post_pay_ref');
+      } catch (_) {}
+      const _currentRef = _searchForCallback.get('OrderMerchantReference') || _searchForCallback.get('ref');
+      if (_stashedPnr && _stashedRef === _currentRef) {
+        _refSlot.textContent = _stashedPnr;
+        // Mark so the on-load handler can skip the loading/polling dance.
+        try { sessionStorage.setItem('tumafly_post_pay_consumed', '1'); } catch (_) {}
+      } else {
+        _refSlot.textContent = 'Confirming…';
+      }
+    }
   }
   if (!initialState && !_isOAuthCallback && !_isPesapalCallback) {
     safeHistory('replace', { view: 'home' }, window.location.pathname);
@@ -11853,6 +11869,17 @@
       if (data.state === 'confirmed' && data.booking) {
         const ref = data.booking.booking_reference || activeMerchantRef;
         document.getElementById('success-ref').textContent = ref;
+        // Stash for the inevitable Pesapal top-level redirect that follows.
+        // Pesapal redirects the browser to /?OrderMerchantReference=... a few
+        // seconds after payment confirms. That redirect blows away our JS
+        // state. Without this stash, the fresh post-redirect page wouldn't
+        // know we'd already confirmed — and would render a "Confirming…"
+        // spinner state that wipes the hero. With it, the boot block reads
+        // the stash and renders the PNR directly. No spinner, no flash.
+        try {
+          sessionStorage.setItem('tumafly_post_pay_pnr', ref);
+          sessionStorage.setItem('tumafly_post_pay_ref', activeMerchantRef || '');
+        } catch (_) {}
         showView('success');
         return;
       }
@@ -12853,11 +12880,31 @@
         location.hash = 'success';
         if (typeof showView === 'function') showView('success');
 
-        // Render proper spinner UI (replaces the text placeholder from the
-        // synchronous boot block).
-        renderPostRedirectSuccess('loading');
+        // If the boot block already populated the success-ref from a stash
+        // (pollOnce had confirmed before Pesapal redirected), skip the
+        // loading state + poll entirely — the page is already showing the
+        // PNR. Clear the consumed flag and stash so we don't re-use it
+        // for a future booking in the same tab.
+        let _alreadyConfirmed = false;
+        try {
+          _alreadyConfirmed = sessionStorage.getItem('tumafly_post_pay_consumed') === '1';
+        } catch (_) {}
+        if (_alreadyConfirmed) {
+          try {
+            sessionStorage.removeItem('tumafly_post_pay_pnr');
+            sessionStorage.removeItem('tumafly_post_pay_ref');
+            sessionStorage.removeItem('tumafly_post_pay_consumed');
+          } catch (_) {}
+          // Promote the PNR-bearing hero to the proper "confirmed" markup
+          // (the boot block only changed text content of #success-ref, but
+          // the static markup uses the right structure already — nothing
+          // more to do here visually).
+          return;
+        }
 
-        // Kick off the poll. Terminates on confirmed / failed / soft-timeout.
+        // No stash → fall through to the loading state + poll for the
+        // (rarer) case where Pesapal redirected before pollOnce confirmed.
+        renderPostRedirectSuccess('loading');
         _postRedirectPollStarted = Date.now();
         pollPostRedirect(ref);
       } catch (e) {
