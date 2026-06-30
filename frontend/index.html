@@ -7142,6 +7142,59 @@
     } else {
       stopFareTimer();
     }
+
+    // Step 2 home preservation hierarchy. On EVERY showView('home') call
+    // (including fromPopState=true triggered by browser back/forward), try
+    // to populate the form in this priority order:
+    //   1. sessionStorage shadow (restoreHomeForm) — most recent typing,
+    //      including in-progress unsubmitted state. Survives refresh.
+    //   2. lastSearchParams (Pattern B fallback) — last committed search,
+    //      used when sessionStorage is empty (e.g. fresh tab with a
+    //      stale-but-valid lastSearchParams from a prior runSearch).
+    //   3. No-op — leave the HTML defaults / current DOM values.
+    // Moved OUT of the !fromPopState block because browser back from results
+    // fires popstate → showView('home', {fromPopState:true}), and the form
+    // was ending up empty even when sessionStorage / lastSearchParams had
+    // data. Within-session it appeared to work only because the DOM inputs
+    // retained their values across showView toggles (DOM was never reset);
+    // after a refresh, the DOM IS reset, so this branch needs to run.
+    if (name === 'home') {
+      let _restoredHome = false;
+      try { _restoredHome = restoreHomeForm(); } catch (_) {}
+      if (!_restoredHome && lastSearchParams) {
+        try {
+          const _o = document.getElementById('origin');
+          const _d = document.getElementById('destination');
+          const _dt = document.getElementById('date');
+          const _rt = document.getElementById('return-date');
+          if (_o  && lastSearchParams.origin)      _o.value  = lastSearchParams.origin;
+          if (_d  && lastSearchParams.destination) _d.value  = lastSearchParams.destination;
+          if (_dt && lastSearchParams.date)        _dt.value = lastSearchParams.date;
+          if (_rt) _rt.value = lastSearchParams.returnDate || '';
+          const _to = document.getElementById('tab-oneway');
+          const _tr = document.getElementById('tab-round');
+          if (_to) _to.classList.toggle('active', tripType === 'one');
+          if (_tr) _tr.classList.toggle('active', tripType === 'round');
+          const _rf = document.getElementById('return-field');
+          if (_rf) _rf.style.display = tripType === 'round' ? '' : 'none';
+        } catch (e) {
+          console.warn('[showView home] Pattern B fallback failed:', e);
+        }
+      }
+    }
+
+    // Step 2: clear any stale results-alert banner when entering results.
+    // Previously a failed runSearch (e.g., 403, network error, no offers)
+    // would set an alert via showAlert('results-alert', ...); subsequent
+    // navigation away + back left the banner in the DOM. Clearing on view
+    // entry gives a clean slate; if the imminent runSearch also fails,
+    // it'll set a fresh banner.
+    if (name === 'results') {
+      try {
+        if (typeof clearAlert === 'function') clearAlert('results-alert');
+      } catch (_) {}
+    }
+
     if (!opts.fromPopState) {
       // Step 2: every showView('results', ...) should encode the search
       // params so refresh-restore can re-run the search. If the caller
@@ -7162,42 +7215,6 @@
             pax:    passengerCount,
           },
         };
-      }
-
-      // Step 2 home preservation hierarchy. On showView('home'), try to
-      // populate the form in this priority order:
-      //   1. sessionStorage shadow (restoreHomeForm) — most recent typing,
-      //      including in-progress unsubmitted state. Survives refresh.
-      //   2. lastSearchParams (Pattern B fallback) — last committed search,
-      //      used when sessionStorage is empty (e.g. fresh tab with a
-      //      stale-but-valid lastSearchParams from a prior runSearch).
-      //   3. No-op — leave the HTML defaults / current DOM values.
-      // Within-session navigation hits (1) which writes back the same values
-      // the DOM already retains, so it's an idempotent no-op. The visible
-      // win is after refresh, when the DOM has been rebuilt empty.
-      if (name === 'home') {
-        let _restoredHome = false;
-        try { _restoredHome = restoreHomeForm(); } catch (_) {}
-        if (!_restoredHome && lastSearchParams) {
-          try {
-            const _o = document.getElementById('origin');
-            const _d = document.getElementById('destination');
-            const _dt = document.getElementById('date');
-            const _rt = document.getElementById('return-date');
-            if (_o  && lastSearchParams.origin)      _o.value  = lastSearchParams.origin;
-            if (_d  && lastSearchParams.destination) _d.value  = lastSearchParams.destination;
-            if (_dt && lastSearchParams.date)        _dt.value = lastSearchParams.date;
-            if (_rt) _rt.value = lastSearchParams.returnDate || '';
-            const _to = document.getElementById('tab-oneway');
-            const _tr = document.getElementById('tab-round');
-            if (_to) _to.classList.toggle('active', tripType === 'one');
-            if (_tr) _tr.classList.toggle('active', tripType === 'round');
-            const _rf = document.getElementById('return-field');
-            if (_rf) _rf.style.display = tripType === 'round' ? '' : 'none';
-          } catch (e) {
-            console.warn('[showView home] Pattern B fallback failed:', e);
-          }
-        }
       }
 
       // Encode any view-specific params into the URL hash so browser refresh
