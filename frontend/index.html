@@ -8659,7 +8659,19 @@
   }
 
   // Shared search engine — used by home form, results "Update" button, and live edits in results summary bar
+  // Step 2: concurrent-runSearch race guard. When the user rapidly fires
+  // multiple searches (typical pattern: hand-edit URL → restoreResults fires
+  // runSearch A; click back → popstate fires runSearch B before A resolves),
+  // two fetches race. Without this counter, whichever fetch resolves first
+  // mutates allOffers + calls showView('results'), and the other one then
+  // overwrites those side effects with stale data — producing the "CPT
+  // offers shown at KIS URL" symptom Bev reported. Each invocation captures
+  // its generation number on entry; after each `await`, it checks if it's
+  // still the latest and silently drops if superseded.
+  let _runSearchInvocation = 0;
+
   async function runSearch({ origin, destination, date, returnDate, fromButton, alertContainer }) {
+    const myInvocation = ++_runSearchInvocation;
     // Stash the params so the fare-timer's "Search again" button can re-run the
     // same search after an offer expires mid-checkout.
     lastSearchParams = { origin, destination, date, returnDate };
@@ -8670,6 +8682,8 @@
     // Bot-protection: get a Turnstile token (no-op if widget isn't loaded yet —
     // backend fails open when TURNSTILE_SECRET isn't configured).
     const turnstileToken = await ensureTurnstileToken('search');
+    // Superseded by a newer runSearch while we waited for Turnstile? Bail.
+    if (_runSearchInvocation !== myInvocation) return;
     try {
       const res = await fetch(`${SUPABASE_URL}/functions/v1/search-flights`, {
         method: 'POST',
@@ -8681,7 +8695,9 @@
           turnstile_token: turnstileToken,
         }),
       });
+      if (_runSearchInvocation !== myInvocation) return;
       const data = await res.json();
+      if (_runSearchInvocation !== myInvocation) return;
       if (!res.ok || data.error) {
         const msg = data.error?.errors?.[0]?.message || data.error?.message || 'Search failed. Try different airports or dates.';
         return showAlert(alertContainer, msg);
@@ -8784,10 +8800,17 @@
       renderResults();
       showView('results');
     } catch (e) {
+      if (_runSearchInvocation !== myInvocation) return;
       showAlert(alertContainer, 'Could not connect. Please check your network and try again.');
     } finally {
-      hideSearchLoading();
-      if (fromButton) { fromButton.classList.remove('btn-loading'); fromButton.disabled = false; }
+      // Only clean up loading UI if we're still the latest invocation. If a
+      // newer runSearch superseded us, IT will hide the loading on its own
+      // completion — hiding now would prematurely close the modal while
+      // the newer fetch is still in flight.
+      if (_runSearchInvocation === myInvocation) {
+        hideSearchLoading();
+        if (fromButton) { fromButton.classList.remove('btn-loading'); fromButton.disabled = false; }
+      }
     }
   }
 
