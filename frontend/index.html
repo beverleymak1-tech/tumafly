@@ -13212,6 +13212,21 @@
   let turnstileSearchWidgetId = null;
   let turnstilePaymentWidgetId = null;
 
+  // Promise-based waiters for the next token to arrive via Turnstile's
+  // callback. Used by ensureTurnstileToken when a search/payment fires
+  // before the widget's auto-challenge has completed (refresh-restore
+  // hits this; normal user flows usually have a token cached already).
+  const _turnstileSearchTokenWaiters = [];
+  const _turnstilePaymentTokenWaiters = [];
+
+  function _flushTurnstileWaiters(which, token) {
+    const waiters = which === 'search' ? _turnstileSearchTokenWaiters : _turnstilePaymentTokenWaiters;
+    while (waiters.length) {
+      const resolve = waiters.shift();
+      try { resolve(token); } catch (_) {}
+    }
+  }
+
   // Called by Cloudflare's script after it loads (see onload=onTurnstileLoad in <head>).
   function realOnTurnstileLoad() {
     if (typeof turnstile === 'undefined') return;
@@ -13219,15 +13234,27 @@
       turnstileSearchWidgetId = turnstile.render('#turnstile-host-search', {
         sitekey: TURNSTILE_SITEKEY,
         action: 'search',
-        callback: (token) => { turnstileSearchToken = token; },
-        'error-callback': () => { turnstileSearchToken = ''; },
+        callback: (token) => {
+          turnstileSearchToken = token;
+          _flushTurnstileWaiters('search', token);
+        },
+        'error-callback': () => {
+          turnstileSearchToken = '';
+          _flushTurnstileWaiters('search', '');
+        },
         'expired-callback': () => { turnstileSearchToken = ''; },
       });
       turnstilePaymentWidgetId = turnstile.render('#turnstile-host-payment', {
         sitekey: TURNSTILE_SITEKEY,
         action: 'payment',
-        callback: (token) => { turnstilePaymentToken = token; },
-        'error-callback': () => { turnstilePaymentToken = ''; },
+        callback: (token) => {
+          turnstilePaymentToken = token;
+          _flushTurnstileWaiters('payment', token);
+        },
+        'error-callback': () => {
+          turnstilePaymentToken = '';
+          _flushTurnstileWaiters('payment', '');
+        },
         'expired-callback': () => { turnstilePaymentToken = ''; },
       });
     } catch (e) {
@@ -13242,10 +13269,9 @@
     realOnTurnstileLoad();
   }
 
-  // Wait up to timeoutMs for a Turnstile token to be available for the given
-  // widget. If turnstile.execute is supported (invisible widgets), trigger it.
-  // Returns the token, or empty string if we time out — the backend will then
-  // decide whether to fail-open (no secret configured) or fail-closed.
+  // Wait for a Turnstile token to be available for the given widget.
+  // Returns the token, or empty string if we time out — the backend will
+  // then 403 the request so the user sees a clear error.
   async function ensureTurnstileToken(which) {
     const get = () => which === 'search' ? turnstileSearchToken : turnstilePaymentToken;
     if (get()) return get();
@@ -13257,9 +13283,6 @@
     // step-2 restoreResults fires at setTimeout(0) before the deferred
     // Turnstile <script> has finished executing), we wait up to 8s for
     // the script to load AND realOnTurnstileLoad to register the widget.
-    // The previous early-exit ("return '' when typeof turnstile is
-    // undefined") sent tokenless requests to search-flights, which the
-    // backend rejected with 403 because TURNSTILE_SECRET is enforced.
     const setupDeadline = Date.now() + 8000;
     while (Date.now() < setupDeadline) {
       if (typeof turnstile !== 'undefined') {
@@ -13272,14 +13295,26 @@
     if (typeof turnstile === 'undefined') return '';
     const widgetId = which === 'search' ? turnstileSearchWidgetId : turnstilePaymentWidgetId;
     if (widgetId == null) return '';
-    try { turnstile.execute(widgetId); } catch {}
-    // Poll for token (token arrives via callback)
-    const deadline = Date.now() + 4000;
-    while (Date.now() < deadline) {
-      await new Promise(r => setTimeout(r, 100));
-      if (get()) return get();
-    }
-    return '';
+
+    // The widget auto-runs its challenge on render (managed mode). Calling
+    // execute() here would just generate the "already executing" console
+    // warning without speeding up the token. Instead, register a Promise
+    // waiter and let realOnTurnstileLoad's callback resolve us when the
+    // challenge completes. Total token wait: 15s, covers slow Cloudflare
+    // challenge endpoints (we saw ERR_NAME_NOT_RESOLVED on brunhild.* and
+    // 401s on /cdn-cgi/challenge-platform/ — those make first-token slow).
+    if (get()) return get();
+    const waiters = which === 'search' ? _turnstileSearchTokenWaiters : _turnstilePaymentTokenWaiters;
+    return new Promise((resolve) => {
+      let settled = false;
+      const settle = (v) => { if (settled) return; settled = true; resolve(v); };
+      waiters.push(settle);
+      setTimeout(() => {
+        const idx = waiters.indexOf(settle);
+        if (idx > -1) waiters.splice(idx, 1);
+        settle(get() || '');
+      }, 15000);
+    });
   }
 
   function resetTurnstile(which) {
