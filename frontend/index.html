@@ -7480,13 +7480,22 @@
     const pax = Math.max(1, Math.min(9, isNaN(paxRaw) ? 1 : paxRaw));
 
     // Sync the global state runSearch reads. tripType is global; passengerCount
-    // is also global and is normally derived from the travelers picker, but for
-    // URL restore we set it directly. The picker UI will reflect 1 adult by
-    // default until the user opens it — acceptable for step 2; child/infant
-    // breakdown isn't encoded in the URL anyway (only total pax matters for
-    // the Duffel search).
+    // is DERIVED state — recomputeTravelers() sets it from travelers.adults +
+    // travelers.children. Writing passengerCount = pax directly here gets
+    // clobbered the next time recomputeTravelers fires (label render, picker
+    // open, etc.) back to the default 1+0=1. So we set the SOURCE of truth
+    // (travelers.adults = pax, other categories cleared) and let
+    // recomputeTravelers derive passengerCount + update the visible
+    // "N travelers" labels everywhere. The URL only carries total pax, not
+    // child/infant breakdown, so attributing all to adults is the safe
+    // default — the Duffel search uses total passenger count regardless,
+    // and the user can re-open the picker to redistribute if they want.
     tripType = ret ? 'round' : 'one';
-    passengerCount = pax;
+    travelers.adults = pax;
+    travelers.children = 0;
+    travelers.infantsSeat = 0;
+    travelers.infantsLap = 0;
+    recomputeTravelers();
 
     // Show the results view immediately so the user isn't staring at home
     // while the search loading modal runs. The fromPopState flag prevents
@@ -7630,11 +7639,36 @@
 
   // Handle the browser back/forward buttons
   window.addEventListener('popstate', (e) => {
-    const view = e.state?.view || 'home';
     if (pollHandle) {
       clearTimeout(pollHandle);
       pollHandle = null;
     }
+    // The state object is set when WE push history (via showView with params),
+    // but it's null/incomplete for cases the user controls directly: manually
+    // editing the URL bar's hash, or some browsers' back/forward across
+    // sessions. The URL hash is the only thing both cases share, so we read
+    // it as the authoritative source and use the state object as a hint.
+    const { view: hashView, params: hashParams } = parseHashUrl();
+    const view   = e.state?.view   || hashView   || 'home';
+    const params = (e.state?.params && Object.keys(e.state.params).length) ? e.state.params
+                  : (hashParams && Object.keys(hashParams).length) ? hashParams
+                  : {};
+
+    // Data-bearing views: dispatch to their restorer (deferred for the same
+    // reason as restoreFromUrl — restoreResults / runSearch touch late-init
+    // bindings like turnstileSearchToken). The restorer will showView its
+    // own target view. Manual URL edit on results was hitting the
+    // `view = 'home'` default and bouncing the user home; this branch fixes
+    // that by routing to restoreResults when params indicate a real search.
+    if (view === 'results' && params.from && params.to && params.depart) {
+      showView('results', { fromPopState: true });
+      setTimeout(() => {
+        try { restoreResults(params); }
+        catch (err) { console.warn('[restoreResults popstate] failed:', err); }
+      }, 0);
+      return;
+    }
+
     showView(view, { fromPopState: true });
     // Q3: When the user navigates back to booking (e.g., Account → edit
     // a saved traveler → browser back), refresh _savedTravelers so the
