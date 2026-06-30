@@ -13249,6 +13249,26 @@
   async function ensureTurnstileToken(which) {
     const get = () => which === 'search' ? turnstileSearchToken : turnstilePaymentToken;
     if (get()) return get();
+
+    // Wait for the Turnstile script to load and the widget to register.
+    // On normal user-initiated searches this is instant (Turnstile has
+    // loaded long before the user finishes typing/clicking), so the loop
+    // exits on its first check. On refresh-restore flows (where the
+    // step-2 restoreResults fires at setTimeout(0) before the deferred
+    // Turnstile <script> has finished executing), we wait up to 8s for
+    // the script to load AND realOnTurnstileLoad to register the widget.
+    // The previous early-exit ("return '' when typeof turnstile is
+    // undefined") sent tokenless requests to search-flights, which the
+    // backend rejected with 403 because TURNSTILE_SECRET is enforced.
+    const setupDeadline = Date.now() + 8000;
+    while (Date.now() < setupDeadline) {
+      if (typeof turnstile !== 'undefined') {
+        const widgetId = which === 'search' ? turnstileSearchWidgetId : turnstilePaymentWidgetId;
+        if (widgetId != null) break;
+      }
+      await new Promise(r => setTimeout(r, 100));
+    }
+
     if (typeof turnstile === 'undefined') return '';
     const widgetId = which === 'search' ? turnstileSearchWidgetId : turnstilePaymentWidgetId;
     if (widgetId == null) return '';
