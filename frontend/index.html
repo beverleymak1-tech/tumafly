@@ -5679,7 +5679,7 @@
   <section class="hero">
     <div class="hero-inner">
       <h1 class="hero-title">Book flights from Nairobi. <em>Pay with M-Pesa or card.</em></h1>
-      <p class="hero-sub">Real prices in KES. Tickets issued in seconds. Across Africa. Around the world.</p>
+      <p class="hero-sub">Transparent Pricing. Tickets issued in seconds. Across Africa. Around the world.</p>
 
       <div class="search">
         <div class="search-tabs">
@@ -7101,6 +7101,11 @@
 
     // On results page, trigger a fresh search now that route flipped
     if (isResults) onSummaryChange();
+    // On home, the swap is a state mutation with no search trigger, so the
+    // sessionStorage shadow would stay at the pre-swap values and refresh
+    // would undo the swap. Persist immediately. (Results path: runSearch
+    // via onSummaryChange calls syncHomeFormShadowFromSearch.)
+    if (!isResults && typeof stashHomeForm === 'function') stashHomeForm();
   }
 
   // ============================================================
