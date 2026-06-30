@@ -23,6 +23,90 @@
   <script src="https://challenges.cloudflare.com/turnstile/v0/api.js?onload=onTurnstileLoad" defer></script>
   <!-- Google Identity Services — popup sign-in, no page redirect -->
   <script src="https://accounts.google.com/gsi/client" async></script>
+  <!-- ============================================================
+       REFRESH-RESTORE EARLY-PAINT GUARD
+       ============================================================
+       Runs synchronously in <head>, before any body content paints. Its
+       sole job is to prevent the brief home-view flash that otherwise
+       happens between HTML paint and JS view-swap on any full page load
+       where the target view ISN'T home. Two scenarios hit this path:
+
+         1. Browser refresh on any non-home URL (e.g. #profile, #my-trips,
+            #success?ref=...). HTML default body data-view="home" paints
+            momentarily before restoreFromUrl() swaps to the target.
+
+         2. Pesapal's post-payment top-level redirect to /?OrderMerchantReference=...
+            which is a full page reload — same paint-then-swap pattern,
+            visible to the customer ~10-15s after they pay.
+
+       Approach: read URL state synchronously, determine target view, inject
+       a <style> rule that hides every #view-* except the target. Higher
+       specificity (#id + !important) overrides the .hidden default class
+       on non-home views, so we can ALSO un-hide the target view from the
+       same rule. Body's data-view attribute is updated by the small inline
+       script immediately after <body> opens, so body[data-view=...] CSS is
+       correct from first paint.
+
+       Conservative by design: ONLY intervenes when URL state demands it.
+       Fresh-tab-to-/ with no hash and no callback params produces no style
+       injection — the page loads exactly as before. So this head script
+       cannot regress the normal-load path; only paths it specifically
+       targets are touched.
+
+       The injected style is removed by showView() on its first call, so
+       subsequent in-app navigation isn't constrained by the head guard.
+       window.__tfRestoreTarget is set as a hint for the body-side script. -->
+  <script>
+    (function() {
+      try {
+        var search = new URLSearchParams(window.location.search);
+        var hash   = (window.location.hash || '').replace(/^#/, '');
+        var isPesapal = search.has('OrderMerchantReference')
+                     || search.has('OrderTrackingId')
+                     || search.has('ref');
+        var isOAuth   = hash.indexOf('access_token=') > -1
+                     || hash.indexOf('error=') > -1;
+
+        var allViews = ['home','results','booking','payment','success','profile','my-trips','find-booking','itinerary'];
+        var target = null;
+
+        if (isPesapal) {
+          // Pesapal redirect always lands on success.
+          target = 'success';
+        } else if (isOAuth) {
+          // GSI doesn't redirect, so this path is dead in current builds.
+          // If it ever fires (legacy / config drift), Supabase parses the
+          // token and onSignedIn updates nav; the user's view doesn't change.
+          // Don't inject any style — let the default home view show.
+          target = null;
+        } else if (hash) {
+          var qIdx = hash.indexOf('?');
+          var viewName = qIdx === -1 ? hash : hash.slice(0, qIdx);
+          if (allViews.indexOf(viewName) > -1) {
+            target = viewName;
+          }
+        }
+
+        // Only inject style when we need to override the home default.
+        if (target && target !== 'home') {
+          window.__tfRestoreTarget = target;
+          var rules = '';
+          for (var i = 0; i < allViews.length; i++) {
+            var rule = '#view-' + allViews[i] + '{display:' + (allViews[i] === target ? 'block' : 'none') + ' !important;}';
+            rules += rule;
+          }
+          var style = document.createElement('style');
+          style.setAttribute('data-tf-restore-guard', '1');
+          style.textContent = rules;
+          document.head.appendChild(style);
+        }
+      } catch (e) {
+        // Defensive — never block page render on this guard.
+        // If anything throws, fall through to the existing body-side
+        // pre-render logic (Pesapal block + restoreFromUrl).
+      }
+    })();
+  </script>
   <style>
     :root {
       --brand: #3D95F5;
@@ -5421,6 +5505,21 @@
   </style>
 </head>
 <body data-view="home">
+<script>
+  // Companion to the <head> restore-guard. The head script already injected
+  // a <style> hiding non-target views, but body's data-view attribute is
+  // still "home" at this point (the static HTML default above). Some CSS
+  // rules key on body[data-view="..."] (e.g. nav-currency visibility), so
+  // we update body.dataset.view here — synchronously, before any view divs
+  // parse — to match the head-determined target. Runs only when the head
+  // script flagged a target via window.__tfRestoreTarget.
+  (function() {
+    try {
+      var t = window.__tfRestoreTarget;
+      if (t && t !== 'home') document.body.setAttribute('data-view', t);
+    } catch (e) {}
+  })();
+</script>
 
 <nav class="nav">
   <div class="nav-inner">
@@ -7018,6 +7117,15 @@
   }
 
   function showView(name, opts = {}) {
+    // Head-script flash guard cleanup. The <head> script may have injected
+    // a <style data-tf-restore-guard> rule to pre-hide views during the
+    // first paint. Now that JS is driving view visibility (via the
+    // classList toggle below), remove the guard so subsequent showView
+    // calls aren't constrained by it.
+    var _guard = document.querySelector('style[data-tf-restore-guard]');
+    if (_guard) _guard.remove();
+    try { delete window.__tfRestoreTarget; } catch (_) {}
+
     ['home','results','booking','payment','success','profile','my-trips','find-booking','itinerary'].forEach(n => {
       document.getElementById('view-' + n).classList.toggle('hidden', n !== name);
     });
@@ -13148,7 +13256,20 @@
     try {
       const sb = await getSupabase();
       const { data: { session } } = await sb.auth.getSession();
-      if (session?.user) onSignedIn(session.user);
+      if (session?.user) {
+        onSignedIn(session.user);
+      } else {
+        // Refresh-restore (#4 step 1): when restoreFromUrl() lands the user
+        // on an auth-gated view (#profile, #my-trips) but no session was
+        // restored, bounce to home + open the auth modal. Matches the
+        // click-flow guard at the top of loadProfile() / loadMyTrips() that
+        // catches the same case when those functions are called normally.
+        const _dv = document.body.getAttribute('data-view');
+        if ((_dv === 'profile' || _dv === 'my-trips') && typeof showView === 'function') {
+          showView('home');
+          if (typeof openAuthModal === 'function') openAuthModal();
+        }
+      }
 
       sb.auth.onAuthStateChange((_event, session) => {
         if (session?.user) onSignedIn(session.user);
@@ -13202,6 +13323,22 @@
           })
           .catch(e => console.warn('[saved_travelers] post-signin fetch failed:', e));
       }
+    }
+
+    // Refresh-restore (#4 step 1): on a browser reload of #profile or
+    // #my-trips, restoreFromUrl() has already shown the view but couldn't
+    // populate it — currentUser was still null at that point (Supabase
+    // session restoration is async). Now that we have the user, fire the
+    // loader that the showView wrapper would normally trigger. Mirrors the
+    // booking-view block above. Idempotent: if loadProfile already ran via
+    // the normal click flow, re-running it just refetches the same data
+    // and overwrites the same form fields with identical values.
+    const _dvForRestore = document.body.getAttribute('data-view');
+    if (_dvForRestore === 'profile' && typeof loadProfile === 'function') {
+      loadProfile().catch(e => console.warn('[profile] post-signin restore-load failed:', e));
+    }
+    if (_dvForRestore === 'my-trips' && typeof loadMyTrips === 'function') {
+      loadMyTrips().catch(e => console.warn('[my-trips] post-signin restore-load failed:', e));
     }
 
     // If there's a pending post-booking link, hide the nudge banner
