@@ -7433,7 +7433,22 @@
     // TODO step 6: payment  → pending branch with waiting screen
     // TODO step 7: success + itinerary
     if (view === 'results') {
-      return restoreResults(params);
+      // Defer to next tick — restoreResults calls runSearch which touches
+      // top-level let-bindings (e.g. turnstileSearchToken at line ~13234)
+      // that haven't been initialized yet when restoreFromUrl fires during
+      // initial script parsing. Reading them inside the TDZ throws. The
+      // head-script flash guard has already shown the results view and the
+      // body-side scripts have set data-view="results", so the visible
+      // state stays correct while we wait one tick for the rest of the
+      // script to finish loading. This pattern applies to every data-bearing
+      // restorer (booking/payment/success/itinerary in later steps) since
+      // they all reach into runSearch / fetch helpers / auth helpers that
+      // are similarly declared late in the file.
+      setTimeout(() => {
+        try { restoreResults(params); }
+        catch (e) { console.warn('[restoreResults] deferred failed:', e); }
+      }, 0);
+      return true;
     }
     return false;
   }
