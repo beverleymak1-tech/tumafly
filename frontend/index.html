@@ -7686,12 +7686,35 @@
     // own target view. Manual URL edit on results was hitting the
     // `view = 'home'` default and bouncing the user home; this branch fixes
     // that by routing to restoreResults when params indicate a real search.
-    if (view === 'results' && params.from && params.to && params.depart) {
+    if (view === 'results') {
+      // Three sub-cases:
+      //   1. Required params missing (e.g., hand-edited to #results?from=XYZ
+      //      with no to/depart) → bounce home + wipe URL. Mirrors what
+      //      restoreResults' validation does for the refresh path.
+      //   2. Valid params that match lastSearchParams exactly → just showView,
+      //      no re-search (the typical back-from-booking nav — offers are
+      //      still in memory, no need to refetch).
+      //   3. Valid params that DIFFER from lastSearchParams → dispatch
+      //      restoreResults to re-run the search (the hand-edit-then-back
+      //      scenario, or forward to a stale-in-memory results URL).
+      if (!params.from || !params.to || !params.depart) {
+        console.warn('[popstate results] invalid params, bouncing home', params);
+        showView('home');
+        try { safeHistory('replace', { view: 'home' }, window.location.pathname); } catch (_) {}
+        return;
+      }
+      const sameAsCurrent = lastSearchParams
+        && lastSearchParams.origin      === params.from
+        && lastSearchParams.destination === params.to
+        && lastSearchParams.date        === params.depart
+        && (lastSearchParams.returnDate || null) === (params.return || null);
       showView('results', { fromPopState: true });
-      setTimeout(() => {
-        try { restoreResults(params); }
-        catch (err) { console.warn('[restoreResults popstate] failed:', err); }
-      }, 0);
+      if (!sameAsCurrent) {
+        setTimeout(() => {
+          try { restoreResults(params); }
+          catch (err) { console.warn('[restoreResults popstate] failed:', err); }
+        }, 0);
+      }
       return;
     }
 
