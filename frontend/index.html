@@ -7143,6 +7143,63 @@
       stopFareTimer();
     }
     if (!opts.fromPopState) {
+      // Step 2: every showView('results', ...) should encode the search
+      // params so refresh-restore can re-run the search. If the caller
+      // didn't pass params explicitly (e.g. the "← Back to results" inline
+      // onclick handlers at lines 5941/6014/6019 that just say showView('results')),
+      // derive them from lastSearchParams + passengerCount. This means every
+      // path to results — initial search, back-from-booking, fare-timer rerun
+      // — produces a refresh-survivable URL automatically, without touching
+      // each call site.
+      if (name === 'results' && !opts.params && lastSearchParams) {
+        opts = {
+          ...opts,
+          params: {
+            from:   lastSearchParams.origin,
+            to:     lastSearchParams.destination,
+            depart: lastSearchParams.date,
+            return: lastSearchParams.returnDate || undefined,
+            pax:    passengerCount,
+          },
+        };
+      }
+
+      // Step 2 home preservation hierarchy. On showView('home'), try to
+      // populate the form in this priority order:
+      //   1. sessionStorage shadow (restoreHomeForm) — most recent typing,
+      //      including in-progress unsubmitted state. Survives refresh.
+      //   2. lastSearchParams (Pattern B fallback) — last committed search,
+      //      used when sessionStorage is empty (e.g. fresh tab with a
+      //      stale-but-valid lastSearchParams from a prior runSearch).
+      //   3. No-op — leave the HTML defaults / current DOM values.
+      // Within-session navigation hits (1) which writes back the same values
+      // the DOM already retains, so it's an idempotent no-op. The visible
+      // win is after refresh, when the DOM has been rebuilt empty.
+      if (name === 'home') {
+        let _restoredHome = false;
+        try { _restoredHome = restoreHomeForm(); } catch (_) {}
+        if (!_restoredHome && lastSearchParams) {
+          try {
+            const _o = document.getElementById('origin');
+            const _d = document.getElementById('destination');
+            const _dt = document.getElementById('date');
+            const _rt = document.getElementById('return-date');
+            if (_o  && lastSearchParams.origin)      _o.value  = lastSearchParams.origin;
+            if (_d  && lastSearchParams.destination) _d.value  = lastSearchParams.destination;
+            if (_dt && lastSearchParams.date)        _dt.value = lastSearchParams.date;
+            if (_rt) _rt.value = lastSearchParams.returnDate || '';
+            const _to = document.getElementById('tab-oneway');
+            const _tr = document.getElementById('tab-round');
+            if (_to) _to.classList.toggle('active', tripType === 'one');
+            if (_tr) _tr.classList.toggle('active', tripType === 'round');
+            const _rf = document.getElementById('return-field');
+            if (_rf) _rf.style.display = tripType === 'round' ? '' : 'none';
+          } catch (e) {
+            console.warn('[showView home] Pattern B fallback failed:', e);
+          }
+        }
+      }
+
       // Encode any view-specific params into the URL hash so browser refresh
       // can rebuild the view from URL alone. Trivial views (home, profile,
       // my-trips, find-booking) carry no params; data-bearing views encode
@@ -7375,7 +7432,185 @@
     // TODO step 5: payment  → safe branches (booked / abandoned / failed)
     // TODO step 6: payment  → pending branch with waiting screen
     // TODO step 7: success + itinerary
+    if (view === 'results') {
+      return restoreResults(params);
+    }
     return false;
+  }
+
+  // Step 2: restore the results view from URL params. The URL is the source
+  // of truth — we re-run the search using the params it carries, regardless
+  // of any stale in-memory state. Validation rules:
+  //   - from, to, depart, pax are required (all four must parse cleanly)
+  //   - return is optional (presence → round trip, absence → one way)
+  //   - pax is clamped to 1..9 (Duffel-side max is 9)
+  //   - dates must match YYYY-MM-DD format
+  // On any validation failure, bounce home with a console warn (we don't
+  // surface a toast — the URL was probably mistyped or hand-edited and
+  // the user lands somewhere sensible).
+  function restoreResults(params) {
+    const from   = (params.from || '').toUpperCase().trim();
+    const to     = (params.to   || '').toUpperCase().trim();
+    const depart = (params.depart || '').trim();
+    const ret    = (params.return || '').trim() || null;
+    const paxRaw = parseInt(params.pax || '1', 10);
+
+    const dateOk = (s) => /^\d{4}-\d{2}-\d{2}$/.test(s);
+    const iataOk = (s) => /^[A-Z]{3}$/.test(s);
+
+    if (!iataOk(from) || !iataOk(to) || !dateOk(depart) || (ret && !dateOk(ret))) {
+      console.warn('[restoreResults] invalid params, falling back to home', params);
+      return false;
+    }
+    const pax = Math.max(1, Math.min(9, isNaN(paxRaw) ? 1 : paxRaw));
+
+    // Sync the global state runSearch reads. tripType is global; passengerCount
+    // is also global and is normally derived from the travelers picker, but for
+    // URL restore we set it directly. The picker UI will reflect 1 adult by
+    // default until the user opens it — acceptable for step 2; child/infant
+    // breakdown isn't encoded in the URL anyway (only total pax matters for
+    // the Duffel search).
+    tripType = ret ? 'round' : 'one';
+    passengerCount = pax;
+
+    // Show the results view immediately so the user isn't staring at home
+    // while the search loading modal runs. The fromPopState flag prevents
+    // a duplicate history push — the browser already has this URL.
+    showView('results', { fromPopState: true });
+
+    // Fire the actual search. runSearch will set lastSearchParams, render
+    // results, and call showView('results') on success (which is a no-op
+    // visually since we already showed it, but updates the URL via the
+    // auto-derive in showView — keeping URL in sync if any param was
+    // canonicalized along the way).
+    runSearch({
+      origin: from,
+      destination: to,
+      date: depart,
+      returnDate: ret,
+      fromButton: null,
+      alertContainer: 'results-alert',
+    }).catch(e => console.warn('[restoreResults] search failed:', e));
+
+    return true;
+  }
+
+  // ============================================================
+  // STEP 2 — HOME FORM SESSIONSTORAGE SHADOW (Pattern A persistence)
+  // ============================================================
+  // Persists every keystroke + autocomplete pick + trip-type toggle on the
+  // home search form to sessionStorage, so a browser refresh while on home
+  // restores whatever the user had on screen. Scoped to the browser tab
+  // (sessionStorage, not localStorage) — closing the tab clears it, matching
+  // user expectations that "starting fresh" means a clean form.
+  //
+  // The shadow stores BOTH the display value (e.g. "Nairobi (NBO)") and the
+  // IATA code separately. This is necessary because the search submit at
+  // searchFlights() reads originSelectedIata / apSelections['origin'] first
+  // (which hold the IATA), falling back to parsing the input's .value as a
+  // 3-letter IATA. Restoring only .value would leave a "Nairobi (NBO)" string
+  // in the input, which wouldn't pass the regex fallback and the search
+  // would fail with no origin. So we restore both buckets simultaneously.
+  //
+  // Stash priority versus the lastSearchParams fallback: sessionStorage wins.
+  // The shadow captures whatever's on screen RIGHT NOW (including partial
+  // typing), while lastSearchParams only captures the last committed search.
+  // After refresh, sessionStorage gives the user back exactly what they were
+  // looking at; lastSearchParams is the second-best fallback if the user has
+  // never typed but has a prior search in memory (e.g. results-restore
+  // re-populated lastSearchParams but never wrote to the home form).
+
+  const TF_HOME_FORM_KEY = 'tf_home_form_v1';
+
+  function stashHomeForm() {
+    try {
+      const data = {
+        originValue:            document.getElementById('origin')?.value || '',
+        originIata:             originSelectedIata || apSelections?.origin || null,
+        originIsCityGroup:      !!apSelectionIsCityGroup?.origin,
+        destinationValue:       document.getElementById('destination')?.value || '',
+        destinationIata:        destinationSelectedIata || apSelections?.destination || null,
+        destinationIsCityGroup: !!apSelectionIsCityGroup?.destination,
+        date:                   document.getElementById('date')?.value || '',
+        returnDate:             document.getElementById('return-date')?.value || '',
+        tripType:               tripType,
+      };
+      sessionStorage.setItem(TF_HOME_FORM_KEY, JSON.stringify(data));
+    } catch (e) {
+      // sessionStorage disabled (Safari private browsing) or quota exceeded.
+      // Drop silently — refresh-restore degrades to the lastSearchParams
+      // fallback in showView('home'), which is still better than nothing.
+    }
+  }
+
+  function restoreHomeForm() {
+    try {
+      const raw = sessionStorage.getItem(TF_HOME_FORM_KEY);
+      if (!raw) return false;
+      const data = JSON.parse(raw);
+      if (!data || typeof data !== 'object') return false;
+
+      const _o  = document.getElementById('origin');
+      const _d  = document.getElementById('destination');
+      const _dt = document.getElementById('date');
+      const _rt = document.getElementById('return-date');
+
+      // Always restore .value verbatim — could be a partial like "Nai" or a
+      // full display label like "Nairobi (NBO)". Whatever the user last saw.
+      if (_o)  _o.value  = data.originValue      || '';
+      if (_d)  _d.value  = data.destinationValue || '';
+      if (_dt) _dt.value = data.date             || '';
+      if (_rt) _rt.value = data.returnDate       || '';
+
+      // Restore the autocomplete-tracked IATA state so searchFlights() can
+      // submit without the user needing to re-pick from the dropdown.
+      if (data.originIata) {
+        originSelectedIata = data.originIata;
+        apSelections.origin = data.originIata;
+        apSelectionIsCityGroup.origin = !!data.originIsCityGroup;
+      }
+      if (data.destinationIata) {
+        destinationSelectedIata = data.destinationIata;
+        apSelections.destination = data.destinationIata;
+        apSelectionIsCityGroup.destination = !!data.destinationIsCityGroup;
+      }
+
+      // Restore tripType + tab UI. Tab classes are visual only — tripType
+      // is what searchFlights() and validateDates() read.
+      if (data.tripType === 'one' || data.tripType === 'round') {
+        tripType = data.tripType;
+        const _to = document.getElementById('tab-oneway');
+        const _tr = document.getElementById('tab-round');
+        if (_to) _to.classList.toggle('active', tripType === 'one');
+        if (_tr) _tr.classList.toggle('active', tripType === 'round');
+        const _rf = document.getElementById('return-field');
+        if (_rf) _rf.style.display = tripType === 'round' ? '' : 'none';
+      }
+
+      return true;
+    } catch (e) {
+      return false;
+    }
+  }
+
+  // Wires input/change listeners on the home-form fields. Debounced so a
+  // rapid burst of keystrokes only writes once at the tail. Idempotent: the
+  // dataset flag prevents double-binding on re-invocation (defensive — we
+  // only call this once from DOMContentLoaded today, but if a future caller
+  // re-runs it after a partial-rebuild this prevents duplicate listeners).
+  function wireHomeFormStashHooks() {
+    let _stashTimer = null;
+    const _debounced = () => {
+      if (_stashTimer) clearTimeout(_stashTimer);
+      _stashTimer = setTimeout(stashHomeForm, 200);
+    };
+    ['origin', 'destination', 'date', 'return-date'].forEach(id => {
+      const el = document.getElementById(id);
+      if (!el || el.dataset.tfHomeStashHooked) return;
+      el.dataset.tfHomeStashHooked = '1';
+      el.addEventListener('input',  _debounced);
+      el.addEventListener('change', _debounced);
+    });
   }
 
   // Handle the browser back/forward buttons
@@ -7531,6 +7766,19 @@
   // Initial sweep + observer for dynamically-added inputs
   document.addEventListener('DOMContentLoaded', tfAttachDateClampToAll);
 
+  // Step 2: wire the home-form stash hooks + restore from sessionStorage
+  // on initial load. The showView wrapper handles subsequent home visits,
+  // but the initial render of /  (no hash, no callback) never goes through
+  // showView('home') — body just paints the HTML default. This hook
+  // captures that case so a refresh of the home page restores the form.
+  document.addEventListener('DOMContentLoaded', () => {
+    if (typeof wireHomeFormStashHooks === 'function') wireHomeFormStashHooks();
+    if (document.body.getAttribute('data-view') === 'home' &&
+        typeof restoreHomeForm === 'function') {
+      try { restoreHomeForm(); } catch (_) {}
+    }
+  });
+
   // ── Whitespace trim on every text-y field ─────────────────────────
   // Defense in depth: most save paths call .trim() explicitly, but this
   // catches anything missed and gives users immediate feedback (their
@@ -7605,8 +7853,9 @@
     if (rRet) rRet.value = '';
     // Visual prompt: highlight empty return-date when round-trip is active
     applyReturnDatePrompt();
+    // Step 2: trip-type toggle is part of the home-form state shadow.
+    if (typeof stashHomeForm === 'function') stashHomeForm();
   }
-
   // Adds/removes the .needs-input class on the return-date inputs depending on
   // whether we're in round-trip mode AND the field is empty. Used to draw the
   // eye to the missing field instead of letting the user submit without it.
@@ -8070,6 +8319,14 @@
     else if (which === 'es-origin') esOriginIata = storedIata;
     else if (which === 'es-destination') esDestinationIata = storedIata;
     document.getElementById(which + '-dropdown').classList.add('hidden');
+
+    // Step 2: persist home-form picks so refresh-restore can rehydrate the
+    // input value + IATA selection. Results-page picks (r-origin /
+    // r-destination / es-origin / es-destination) feed their own re-search
+    // paths and don't write to the home-form sessionStorage shadow.
+    if (which === 'origin' || which === 'destination') {
+      if (typeof stashHomeForm === 'function') stashHomeForm();
+    }
 
     // On the results page, picking triggers a re-search (after both fields are set)
     if (which === 'r-origin' || which === 'r-destination') {
