@@ -7475,6 +7475,15 @@
 
     if (!iataOk(from) || !iataOk(to) || !dateOk(depart) || (ret && !dateOk(ret))) {
       console.warn('[restoreResults] invalid params, falling back to home', params);
+      // Explicit bounce home: restoreFromUrl already returned true synchronously
+      // (so the initial-load wipe was skipped), and the head-script flash guard
+      // is still hiding non-results views via injected CSS. Calling showView
+      // here clears that guard (the showView entry point removes it) and
+      // renders the home view properly, instead of leaving the user staring
+      // at an empty results shell with a stale URL.
+      showView('home');
+      // Wipe the bad URL so refresh doesn't loop back through the same code path.
+      try { safeHistory('replace', { view: 'home' }, window.location.pathname); } catch (_) {}
       return false;
     }
     const pax = Math.max(1, Math.min(9, isNaN(paxRaw) ? 1 : paxRaw));
