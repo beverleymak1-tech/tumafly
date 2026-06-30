@@ -7340,15 +7340,23 @@
       }
     }
   }
-  if (!initialState && !_isOAuthCallback && !_isPesapalCallback) {
-    // Refresh-restore: if the URL already names a view (e.g., user pressed
-    // refresh on #booking?offer=…), try to restore it before wiping the URL
-    // to the clean home state. restoreFromUrl() returns true when it
-    // successfully rendered the matching view (step 1: only trivial views;
-    // later steps will add data-bearing restorers). When it returns false,
-    // we fall through to the historical wipe-to-home behavior.
-    const _restored = window.location.hash ? restoreFromUrl() : false;
-    if (!_restored) {
+  // Refresh-restore must run regardless of whether the browser preserved
+  // history.state across the reload (Chrome does, Firefox/Safari are
+  // inconsistent). Gating this on !initialState — as we did initially —
+  // means Chrome users land back on home because the restore branch is
+  // skipped when state was preserved. Always attempt the restore when a
+  // hash is present and we're not in a callback flow.
+  let _restored = false;
+  if (!_isOAuthCallback && !_isPesapalCallback && window.location.hash) {
+    _restored = restoreFromUrl();
+  }
+  // Wipe URL to clean home when there was nothing to restore and we're not
+  // mid-callback. The body's default data-view="home" means no showView
+  // call is needed here — the home view is already the rendered one.
+  if (!_restored && !_isOAuthCallback && !_isPesapalCallback) {
+    // Only replace history when there isn't already a clean state — avoids
+    // gratuitously overwriting a state Chrome already restored correctly.
+    if (!initialState || window.location.hash) {
       safeHistory('replace', { view: 'home' }, window.location.pathname);
     }
   }
