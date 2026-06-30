@@ -8702,8 +8702,6 @@
         const msg = data.error?.errors?.[0]?.message || data.error?.message || 'Search failed. Try different airports or dates.';
         return showAlert(alertContainer, msg);
       }
-      // Token is single-use — get a fresh one for the next search
-      resetTurnstile('search');
       const rawOffers = data.offers || [];
       // Build the set of acceptable origin airport IATAs for this search.
       //
@@ -8803,6 +8801,14 @@
       if (_runSearchInvocation !== myInvocation) return;
       showAlert(alertContainer, 'Could not connect. Please check your network and try again.');
     } finally {
+      // Turnstile tokens are single-use — the backend rejects replays. Reset
+      // on EVERY exit path (success, error, network failure, superseded) so
+      // the widget regenerates a fresh token in the background, ready for
+      // the next search. Skipping this on error paths was producing a
+      // sticky 403 loop: a failed search left the consumed token in state,
+      // the next search reused it, backend 403'd again — forcing the user
+      // to hard-refresh to break out.
+      try { resetTurnstile('search'); } catch (_) {}
       // Only clean up loading UI if we're still the latest invocation. If a
       // newer runSearch superseded us, IT will hide the loading on its own
       // completion — hiding now would prematurely close the modal while
