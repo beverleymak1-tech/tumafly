@@ -7603,6 +7603,46 @@
     }
   }
 
+  // Refresh the home-form sessionStorage shadow from a search that was just
+  // committed. Called by runSearch on success regardless of which UI surface
+  // initiated the search (home form, results-page edit-search bar, results
+  // travelers picker, fare-timer re-search, refresh-restore). Without this,
+  // changing the search from anywhere other than home leaves the shadow stale,
+  // and a later home refresh restores the OLDER search instead of the most
+  // recent. Bypasses the DOM-reading stashHomeForm because the home form DOM
+  // may be stale (user is on another view) — we write from runSearch's args
+  // directly, which represent the search the user actually committed to.
+  function syncHomeFormShadowFromSearch(origin, destination, date, returnDate) {
+    try {
+      const oAirport = findAirportByIata ? findAirportByIata(origin)      : null;
+      const dAirport = findAirportByIata ? findAirportByIata(destination) : null;
+      const data = {
+        originValue:            oAirport ? `${oAirport.city} (${origin})`      : origin,
+        originIata:             origin,
+        // City-group flag isn't tracked through runSearch — default false.
+        // Worst case: a user who originally picked a "City (All airports)"
+        // group and then re-searched from results loses the city-group flag
+        // on home restore. They can re-pick from the dropdown to fix it.
+        originIsCityGroup:      false,
+        destinationValue:       dAirport ? `${dAirport.city} (${destination})` : destination,
+        destinationIata:        destination,
+        destinationIsCityGroup: false,
+        date:                   date || '',
+        returnDate:             returnDate || '',
+        tripType:               tripType,
+        travelers: {
+          adults:        travelers?.adults        ?? 1,
+          children:      travelers?.children      ?? 0,
+          infantsSeat:   travelers?.infantsSeat   ?? 0,
+          infantsLap:    travelers?.infantsLap    ?? 0,
+        },
+      };
+      sessionStorage.setItem(TF_HOME_FORM_KEY, JSON.stringify(data));
+    } catch (_) {
+      // sessionStorage disabled (Safari private) or quota — drop silently.
+    }
+  }
+
   function restoreHomeForm() {
     try {
       const raw = sessionStorage.getItem(TF_HOME_FORM_KEY);
@@ -8824,6 +8864,12 @@
       recomputeRangeBounds();
 
       syncResultsSummaryBar(origin, destination, date, returnDate);
+      // Keep the home-form sessionStorage shadow in sync with the committed
+      // search. Edit-search bar / results travelers picker / fare-timer
+      // re-search all flow through here; without this sync, the home form
+      // would restore the OLDER search on next refresh because sessionStorage
+      // was only ever updated by home-form stash hooks. See D.1 partial-fail.
+      syncHomeFormShadowFromSearch(origin, destination, date, returnDate);
       renderResults();
       showView('results');
     } catch (e) {
