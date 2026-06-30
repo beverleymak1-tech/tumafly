@@ -7584,6 +7584,16 @@
         date:                   document.getElementById('date')?.value || '',
         returnDate:             document.getElementById('return-date')?.value || '',
         tripType:               tripType,
+        // travelers is the source-of-truth — passengerCount is derived from
+        // adults + children. Stashing passengerCount alone would lose the
+        // adult/child/infant breakdown and break the picker UI on restore;
+        // stashing the full travelers object preserves it exactly.
+        travelers: {
+          adults:        travelers?.adults        ?? 1,
+          children:      travelers?.children      ?? 0,
+          infantsSeat:   travelers?.infantsSeat   ?? 0,
+          infantsLap:    travelers?.infantsLap    ?? 0,
+        },
       };
       sessionStorage.setItem(TF_HOME_FORM_KEY, JSON.stringify(data));
     } catch (e) {
@@ -7635,6 +7645,19 @@
         if (_tr) _tr.classList.toggle('active', tripType === 'round');
         const _rf = document.getElementById('return-field');
         if (_rf) _rf.style.display = tripType === 'round' ? '' : 'none';
+      }
+
+      // Restore travelers (source-of-truth) and let recomputeTravelers()
+      // derive passengerCount + update the visible "N travelers" labels
+      // across home / results / edit-search pickers. Without this the
+      // refresh dropped the user from N back to the default 1 — same bug
+      // family as A.2 (passengerCount is derived, not authoritative).
+      if (data.travelers && typeof data.travelers === 'object') {
+        if (Number.isFinite(data.travelers.adults))      travelers.adults      = data.travelers.adults;
+        if (Number.isFinite(data.travelers.children))    travelers.children    = data.travelers.children;
+        if (Number.isFinite(data.travelers.infantsSeat)) travelers.infantsSeat = data.travelers.infantsSeat;
+        if (Number.isFinite(data.travelers.infantsLap))  travelers.infantsLap  = data.travelers.infantsLap;
+        if (typeof recomputeTravelers === 'function') recomputeTravelers();
       }
 
       return true;
@@ -8611,6 +8634,12 @@
     // Re-render the popup in place so steppers update
     const popup = document.getElementById(`tp-${which}-popup`);
     if (popup) popup.innerHTML = renderTravelerPopup(which);
+    // Persist home-picker changes to the sessionStorage shadow so refresh
+    // preserves the traveler count. Results/es pickers feed onSummaryChange()
+    // which re-runs the search; their state lives in lastSearchParams +
+    // travelers in memory until refresh, after which restoreResults' URL
+    // pax param rehydrates travelers.adults.
+    if (which === 'home' && typeof stashHomeForm === 'function') stashHomeForm();
     // If we're on the results page, re-run the search after change
     if (which === 'results') onSummaryChange();
   }
