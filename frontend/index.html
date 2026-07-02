@@ -7222,6 +7222,21 @@
         };
       }
 
+      // Step 3: same for showView('booking', ...) — encode the offer_id so
+      // refresh-restore can re-fetch. Two inline call sites at ~L6045 + L6101
+      // call showView('booking') with no params (payment view's "back to
+      // details" buttons); derive from the currently-selected offer so both
+      // paths produce a refresh-survivable URL without editing those sites.
+      // Prefer inbound when both exist (round-trip); either resolves to the
+      // same offer_id since Duffel pairs slices under one id — this matches
+      // the convention used at L10209 / L10701 / L12507.
+      if (name === 'booking' && !opts.params) {
+        const _bookingOfferId = (selectedInbound || selectedOutbound)?.cabinPricing?.offer_id;
+        if (_bookingOfferId) {
+          opts = { ...opts, params: { offer: _bookingOfferId } };
+        }
+      }
+
       // Encode any view-specific params into the URL hash so browser refresh
       // can rebuild the view from URL alone. Trivial views (home, profile,
       // my-trips, find-booking) carry no params; data-bearing views encode
@@ -7472,6 +7487,16 @@
       }, 0);
       return true;
     }
+    if (view === 'booking') {
+      // Same TDZ defer pattern as restoreResults — restoreBooking calls
+      // ensureTurnstileToken which reads turnstilePaymentToken (declared
+      // ~L13403). Also fetch()/proceedToBooking touch other late-init helpers.
+      setTimeout(() => {
+        try { restoreBooking(params); }
+        catch (e) { console.warn('[restoreBooking] deferred failed:', e); }
+      }, 0);
+      return true;
+    }
     return false;
   }
 
@@ -7547,6 +7572,325 @@
       alertContainer: 'results-alert',
     }).catch(e => console.warn('[restoreResults] search failed:', e));
 
+    return true;
+  }
+
+  // ============================================================
+  // STEP 3 — BOOKING REFRESH-RESTORE
+  // ============================================================
+  // Rehydrates the booking view from a URL like #booking?offer=off_xxx.
+  //
+  // Contract:
+  //   - offer: Duffel offer_id (regex /^off_[A-Za-z0-9]+$/). One id covers
+  //     ALL slices of the trip (one-way or round-trip), which matches
+  //     how search-flights buckets cabin variants (each cabin gets its own
+  //     offer_id that spans every slice).
+  //
+  // Flow:
+  //   1. Validate offer_id regex. Bad → bounce home + wipe URL.
+  //   2. Show booking view immediately (fromPopState → no double-push).
+  //      Otherwise the head-script flash guard would keep the view hidden
+  //      until we call showView, and the user would stare at a blank page
+  //      for the duration of the Turnstile challenge + Duffel fetch.
+  //   3. Await Turnstile token via ensureTurnstileToken('payment') — the
+  //      booking view already renders the payment widget for later use.
+  //   4. Call get-offer EF. Response shape is one-bucket-of-search-flights
+  //      (same fields), so we drop it into selectedOutbound directly.
+  //   5. Reconstruct selectedOutbound + selectedInbound (for RT). Set
+  //      passengerCount + travelers.adults from response.
+  //   6. Reset seat/baggage caches — they're keyed by offer_id and this may
+  //      be a different offer than what was in memory.
+  //   7. Call proceedToBooking() → the same entry point that runs when a
+  //      user picks a flight from results. It computes tripRequiresPassport,
+  //      inits travelerStates, renders forms + summary, and (indirectly)
+  //      kicks off the baggage fetch.
+  //   8. Restore passenger form values from the sessionStorage shadow
+  //      (title/name/gender/nationality/phone/email — see the shadow
+  //      helpers below for why DOB/passport are excluded).
+  //   9. Kick off seat-map fetch in the background so seats appear ready
+  //      by the time the user finishes filling forms.
+  //
+  // Error handling:
+  //   - 410 Gone (offer expired / Duffel 404): modal explaining the fare
+  //     is stale, offering "Search again" that bounces home. This is the
+  //     MAIN failure mode we design for — Duffel offers are ~10-20 min TTL.
+  //   - Other errors (403 Turnstile, 502 Duffel network, 500 EF crash):
+  //     toast + bounce home. Refresh-restore is opportunistic — a busted
+  //     retry doesn't warrant a full modal experience; home is a safe
+  //     landing spot.
+  //
+  // The URL is the source of truth. Any in-memory selectedOutbound is
+  // discarded — this restorer is called precisely because JS state was
+  // wiped (refresh) or is stale (popstate to a different offer). Trusting
+  // memory here would defeat the purpose of the restore.
+  async function restoreBooking(params) {
+    const offer = (params.offer || '').trim();
+    if (!/^off_[A-Za-z0-9]+$/.test(offer)) {
+      console.warn('[restoreBooking] invalid offer param, falling back to home', params);
+      showView('home');
+      try { safeHistory('replace', { view: 'home' }, window.location.pathname); } catch (_) {}
+      return false;
+    }
+
+    // Show the booking view now so the user isn't staring at a blank flash-guarded
+    // page while Turnstile + Duffel resolve. proceedToBooking() below will re-render
+    // with actual data; until then the view is a shell with static structure.
+    showView('booking', { fromPopState: true });
+
+    // Turnstile token — same pattern as create-payment (booking view already
+    // hosts the payment widget). 15s max wait; empty token → EF 403s and we
+    // land in the generic error path.
+    let token = '';
+    try {
+      token = await ensureTurnstileToken('payment');
+    } catch (e) {
+      console.warn('[restoreBooking] turnstile await failed:', e);
+    }
+
+    let res, data;
+    try {
+      res = await fetch(`${SUPABASE_URL}/functions/v1/get-offer`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${SUPABASE_ANON_KEY}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ offer_id: offer, turnstile_token: token }),
+      });
+      data = await res.json().catch(() => ({}));
+    } catch (e) {
+      console.warn('[restoreBooking] fetch failed:', e);
+      resetTurnstile('payment');
+      _restoreBookingBounceHome('Something went wrong loading your flight. Please search again.');
+      return false;
+    }
+
+    // Reset the token unconditionally — single-use, backend rejects replays.
+    resetTurnstile('payment');
+
+    if (res.status === 410) {
+      // Duffel says the offer is dead. Modal, not toast — this needs the
+      // user's attention because the CTA has to send them back to search.
+      _showFareExpiredModal();
+      return false;
+    }
+    if (!res.ok || !data.success) {
+      const msg = data?.error || 'We couldn\'t load that flight. Please search again.';
+      console.warn('[restoreBooking] EF error', res.status, msg);
+      _restoreBookingBounceHome(msg);
+      return false;
+    }
+
+    // Reconstruct the selection shape { offer, cabin, cabinPricing } that
+    // selectFlightCabin normally builds. See line ~9769 for the canonical
+    // shape — we're synthesising the same object from the get-offer response.
+    const cabin = data.selected_cabin;
+    const cabinPricing = data.offer?.cabins?.[cabin];
+    if (!cabin || !cabinPricing) {
+      console.warn('[restoreBooking] response missing cabin pricing', data);
+      _restoreBookingBounceHome('Something went wrong loading your flight. Please search again.');
+      return false;
+    }
+    const selection = { offer: data.offer, cabin, cabinPricing };
+
+    // Wire selectedOutbound + selectedInbound. For round-trip, both point
+    // at the SAME selection object — Duffel pairs slices under one offer_id.
+    // This matches the "prefer inbound" pattern used elsewhere in the code
+    // (e.g. line 10209, 10701, 12507) which is just a convention: both refs
+    // resolve to the same cabinPricing.offer_id.
+    const isRoundTrip = Array.isArray(data.offer.slices) && data.offer.slices.length === 2;
+    selectedOutbound = selection;
+    selectedInbound  = isRoundTrip ? selection : null;
+    selectedOffer    = selection; // legacy alias
+
+    // Reset seat/baggage caches — they may be keyed by a different offer_id
+    // from a previous session. Fresh offer = fresh cabin-level metadata.
+    selectedSeats = {};
+    seatMapsByOffer = {};
+    seatMapsData = {};
+    selectedBaggages = {};
+    baggageOptionsByOffer = {};
+    baggageOptionsByPax = {};
+    baggageOfferId = null;
+    baggagePassengerIds = [];
+
+    // Sync passenger count from the EF response. Same rules as restoreResults —
+    // travelers is the source of truth, passengerCount is derived via
+    // recomputeTravelers(). We attribute everything to adults because the
+    // URL doesn't encode a breakdown; the user can re-open the picker to
+    // redistribute if they want, but this is nearly never wrong at this
+    // stage of the funnel (they've already picked a flight).
+    const pax = Math.max(1, Math.min(9, parseInt(data.passengers_count, 10) || 1));
+    travelers.adults = pax;
+    travelers.children = 0;
+    travelers.infantsSeat = 0;
+    travelers.infantsLap = 0;
+    recomputeTravelers();
+
+    // Fresh traveler state — proceedToBooking below will call
+    // initTravelerStates() because travelerStates.length !== passengerCount.
+    // We could pre-init here, but proceedToBooking handles it idempotently
+    // and also runs the full validation/compute pass (tripRequiresPassport,
+    // render, baggage kickoff), so we lean on it.
+    proceedToBooking();
+
+    // Restore any passenger form values from the sessionStorage shadow.
+    // Runs AFTER proceedToBooking() has rendered the forms, so we can write
+    // directly to travelerStates + re-render.
+    try { restoreBookingPassengers(); } catch (e) { console.warn('[restoreBooking] passenger restore failed:', e); }
+
+    // Auto-fetch seat maps in the background so the seat picker is warm by
+    // the time the user gets to it. Silent — no modal, no focus shift, no
+    // banner. Failures are non-fatal; the picker will lazy-fetch on click.
+    (async () => {
+      try {
+        const uniqueOffers = [selection.cabinPricing.offer_id].filter(Boolean);
+        await Promise.all(uniqueOffers.map(loadSeatMapForOffer));
+        // Re-render if we're still on the booking view (user may have navigated away)
+        if (!document.getElementById('view-booking').classList.contains('hidden')) {
+          renderSeatsList();
+        }
+      } catch (e) {
+        console.warn('[restoreBooking] background seat-map fetch failed:', e);
+      }
+    })();
+
+    return true;
+  }
+
+  // Helper: bounce home + toast on generic restoreBooking failure.
+  function _restoreBookingBounceHome(msg) {
+    showView('home');
+    try { safeHistory('replace', { view: 'home' }, window.location.pathname); } catch (_) {}
+    if (msg && typeof showAlert === 'function') {
+      try { showAlert('home-alert', msg); } catch (_) {}
+    }
+  }
+
+  // Helper: modal for the 410-Gone fare-expired case. Reuses the same modal
+  // pattern the fare timer already uses (showSearchExpiredModal at ~L7333)
+  // so the UI is familiar. Kept as a thin wrapper so we can iterate on copy.
+  function _showFareExpiredModal() {
+    // If the fare-timer's modal is already showing (unlikely on refresh but
+    // possible on a race), don't stack a second one.
+    if (document.getElementById('search-expired-modal')) return;
+    try {
+      if (typeof showSearchExpiredModal === 'function') {
+        showSearchExpiredModal();
+        return;
+      }
+    } catch (_) {}
+    // Fallback if the fare-timer helper isn't available for some reason —
+    // shouldn't happen in practice (it's declared at top level) but keeps
+    // us safe.
+    alert('This fare is no longer available. Please search again to see fresh prices.');
+    showView('home');
+    try { safeHistory('replace', { view: 'home' }, window.location.pathname); } catch (_) {}
+  }
+
+  // ── Booking passenger sessionStorage shadow ──────────────────────────
+  //
+  // Persists per-passenger form values on the booking page so a mid-checkout
+  // refresh doesn't wipe them. Scoped to the browser tab (sessionStorage,
+  // not localStorage) so closing the tab clears the shadow — closing =
+  // "start over" in the mental model.
+  //
+  // Fields we DO restore: title, given_name, family_name, gender,
+  // nationality, contact.email, contact.phone_number (+dial code).
+  //
+  // Fields we DON'T restore (deliberately):
+  //   - born_on (DOB): personal identifier, moderate sensitivity, and the
+  //     user typing it fresh is a fine UX cost.
+  //   - passport.{country, number, expires}: high sensitivity — passport
+  //     data lives in Supabase Vault when saved, and we shouldn't quietly
+  //     round-trip it through sessionStorage. User re-types on refresh.
+  //   - _saved_traveler_id: picking a saved traveler is a stateful choice
+  //     tied to the saved_travelers row, which may have changed. Safer
+  //     to have the user re-pick, which re-fetches the freshest data.
+  //   - save_to_account: never persist across sessions, always default false.
+  //   - Baggage/seat selections: keyed by offer_id, refetched fresh anyway.
+  //
+  // Shape stored:
+  //   { travelers: [{title, given_name, family_name, gender, nationality}, ...],
+  //     contact:   {email, phone_number, phone_dial_iso} }
+  const BOOKING_PASSENGER_SHADOW_KEY = 'tf_booking_passengers_v1';
+
+  function stashBookingPassengers() {
+    try {
+      const payload = {
+        travelers: (travelerStates || []).map(s => ({
+          title:       s?.data?.title || '',
+          given_name:  s?.data?.given_name || '',
+          family_name: s?.data?.family_name || '',
+          gender:      s?.data?.gender || '',
+          nationality: s?.data?.nationality || '',
+        })),
+        contact: {
+          email:          document.getElementById('contact-email')?.value || '',
+          phone_number:   document.getElementById('contact-phone')?.value || '',
+          phone_dial_iso: countryPickerState?.['contact']?.iso || '',
+        },
+      };
+      sessionStorage.setItem(BOOKING_PASSENGER_SHADOW_KEY, JSON.stringify(payload));
+    } catch (_) { /* sessionStorage disabled — silent no-op */ }
+  }
+
+  function restoreBookingPassengers() {
+    let payload = null;
+    try {
+      const raw = sessionStorage.getItem(BOOKING_PASSENGER_SHADOW_KEY);
+      if (!raw) return false;
+      payload = JSON.parse(raw);
+    } catch (_) { return false; }
+    if (!payload || typeof payload !== 'object') return false;
+
+    // Travelers — pair by index. Extra shadow entries are silently dropped;
+    // extra live entries (e.g. new higher pax count than the shadow) are
+    // left in their default state. Both are safe.
+    if (Array.isArray(payload.travelers)) {
+      payload.travelers.forEach((shadow, i) => {
+        const ts = travelerStates[i];
+        if (!ts || !shadow) return;
+        // Only fill EMPTY fields. If the user already typed something in
+        // this session, don't clobber it. Since restoreBooking runs on a
+        // fresh view render (proceedToBooking just ran initTravelerStates
+        // if pax count changed), fields will typically be empty — but this
+        // guard is cheap insurance.
+        if (!ts.data.title       && shadow.title)       ts.data.title = shadow.title;
+        if (!ts.data.given_name  && shadow.given_name)  ts.data.given_name = shadow.given_name;
+        if (!ts.data.family_name && shadow.family_name) ts.data.family_name = shadow.family_name;
+        if (!ts.data.gender      && shadow.gender)      ts.data.gender = shadow.gender;
+        if (!ts.data.nationality && shadow.nationality) ts.data.nationality = shadow.nationality;
+      });
+    }
+
+    // Contact — the fields are static DOM elements (not per-traveler state),
+    // so we write them directly. Same "only-if-empty" guard as the D5 guest
+    // prefill path (readGuestPrefill at ~L9961).
+    if (payload.contact && typeof payload.contact === 'object') {
+      const emailEl = document.getElementById('contact-email');
+      if (emailEl && !emailEl.value && payload.contact.email) {
+        emailEl.value = payload.contact.email;
+      }
+      const phoneEl = document.getElementById('contact-phone');
+      if (phoneEl && !phoneEl.value && payload.contact.phone_number) {
+        phoneEl.value = payload.contact.phone_number;
+        // Restore the dial-code flag too, if we have it
+        const iso = payload.contact.phone_dial_iso;
+        if (iso) {
+          const country = PHONE_COUNTRIES?.find(c => c[0] === iso);
+          if (country && typeof applyCountrySelection === 'function') {
+            countryPickerState['contact'] = { iso: country[0], name: country[1], dial: country[2] };
+            try { applyCountrySelection('contact', countryPickerState['contact']); } catch (_) {}
+          }
+        }
+      }
+    }
+
+    // Re-render so the restored values show up in the DOM.
+    if (typeof renderPassengerForms === 'function') {
+      try { renderPassengerForms(); } catch (_) {}
+    }
     return true;
   }
 
@@ -7783,6 +8127,38 @@
           catch (err) { console.warn('[restoreResults popstate] failed:', err); }
         }, 0);
       }
+      return;
+    }
+
+    if (view === 'booking') {
+      // Three sub-cases (mirror of results branch):
+      //   1. Missing/malformed offer param → bounce home + wipe URL.
+      //   2. offer matches the currently-loaded selection → just showView.
+      //      Typical scenario: user was on booking, went to payment, hit
+      //      browser back. selectedOutbound is still in memory; no need to
+      //      re-fetch. This also covers a fast Result → Book → Back → Book
+      //      loop where the same offer stays selected.
+      //   3. Different offer (or no current selection at all) → dispatch
+      //      restoreBooking to fetch the offer fresh from Duffel.
+      const offer = (params.offer || '').trim();
+      if (!/^off_[A-Za-z0-9]+$/.test(offer)) {
+        console.warn('[popstate booking] invalid offer param, bouncing home', params);
+        showView('home');
+        try { safeHistory('replace', { view: 'home' }, window.location.pathname); } catch (_) {}
+        return;
+      }
+      const currentOfferId = (selectedInbound || selectedOutbound)?.cabinPricing?.offer_id;
+      if (currentOfferId === offer) {
+        // Fast path — offer still in memory, just re-show the view.
+        showView('booking', { fromPopState: true });
+        return;
+      }
+      // Fresh restore — call restoreBooking which will showView('booking')
+      // itself once the fetch resolves (or bounce home on failure).
+      setTimeout(() => {
+        try { restoreBooking(params); }
+        catch (err) { console.warn('[restoreBooking popstate] failed:', err); }
+      }, 0);
       return;
     }
 
@@ -10098,7 +10474,7 @@
         }
       };
       const runEmailValidation = () => showEmailHint(validateEmail(contactEmailEl.value.trim()));
-      contactEmailEl.addEventListener('blur', () => { emailBlurred = true; runEmailValidation(); });
+      contactEmailEl.addEventListener('blur', () => { emailBlurred = true; runEmailValidation(); try { stashBookingPassengers(); } catch (_) {} });
       contactEmailEl.addEventListener('input', () => { if (emailBlurred) runEmailValidation(); });
     }
     // Wire real-time digit-count validation on the contact phone field.
@@ -10114,7 +10490,7 @@
         const err = validatePhoneLocal(iso, local);
         showPhoneHint('contact-phone-hint', 'contact-phone-group', err);
       };
-      contactPhoneEl.addEventListener('blur', () => { phoneBlurred = true; runContactPhoneValidation(); });
+      contactPhoneEl.addEventListener('blur', () => { phoneBlurred = true; runContactPhoneValidation(); try { stashBookingPassengers(); } catch (_) {} });
       contactPhoneEl.addEventListener('input', () => { if (phoneBlurred) runContactPhoneValidation(); });
     }
     // Kick off baggage options fetch in the background — when it arrives, the
@@ -11120,6 +11496,12 @@
       const account = row.querySelector('.ff-account')?.value.trim();
       if (airline || account) s.data.frequent_flyer.push({ airline_iata_code: airline, account_number: account });
     });
+    // Step 3: stash to sessionStorage shadow. Piggybacked on snapshotTraveler
+    // so every input-change path (blur handlers at ~L11502/10/16/22, save
+    // click at ~L11697, live picker at ~L11895, submit at ~L12194) updates
+    // the shadow automatically. Cheap serialization — pax count is small
+    // and we only store 5 short fields per traveler + 3 contact fields.
+    try { stashBookingPassengers(); } catch (_) {}
   }
 
   function toggleSection(i, key) {
@@ -12609,6 +12991,9 @@
           sessionStorage.setItem('tumafly_post_pay_pnr', ref);
           sessionStorage.setItem('tumafly_post_pay_ref', activeMerchantRef || '');
         } catch (_) {}
+        // Step 3: booking complete → wipe the passenger shadow. Refreshing
+        // on success shouldn't re-populate a stale booking form later.
+        try { sessionStorage.removeItem(BOOKING_PASSENGER_SHADOW_KEY); } catch (_) {}
         showView('success');
         return;
       }
@@ -13662,6 +14047,8 @@
 
         activeMerchantRef = ref;
         location.hash = 'success';
+        // Step 3: booking complete → wipe the passenger shadow.
+        try { sessionStorage.removeItem(BOOKING_PASSENGER_SHADOW_KEY); } catch (_) {}
         if (typeof showView === 'function') showView('success');
 
         // If the boot block already populated the success-ref from a stash
