@@ -7786,6 +7786,13 @@
     // have one. Duffel offers are ~15 min TTL and the shadow was written
     // moments/minutes ago, so this is usually a fresh countdown. Phase 3
     // resyncs to the fresher expires_at from get-offer if it differs.
+    //
+    // If we DON'T have a stashed value (first-arrival refresh, cleared
+    // sessionStorage, etc.), paint the timer bar with the static "Fare expires
+    // in" label + a shimmering countdown placeholder. Phase 3's
+    // startFareTimer('booking') → tickFareTimer() will replace the innerHTML
+    // with the real countdown once get-offer resolves. Bar stays in the same
+    // place; only the number swaps in — no jarring appear-out-of-nowhere.
     try {
       const raw = sessionStorage.getItem(BOOKING_PASSENGER_SHADOW_KEY);
       const stashedExp = raw ? (JSON.parse(raw)?.fare_expires_at_ms || 0) : 0;
@@ -7795,8 +7802,14 @@
         if (fareTimerHandle) clearInterval(fareTimerHandle);
         tickFareTimer();
         fareTimerHandle = setInterval(tickFareTimer, 1000);
+      } else {
+        _paintFareTimerShell();
       }
-    } catch (_) {}
+    } catch (_) {
+      // sessionStorage disabled → still paint the shell rather than leaving
+      // the bar blank until Phase 3.
+      try { _paintFareTimerShell(); } catch (__) {}
+    }
 
     // ── PHASE 2: fetch offer (network) ──────────────────────────────────
     //
@@ -7982,6 +7995,32 @@
     })();
 
     return true;
+  }
+
+  // Phase 1 helper: paint the fare-timer bar with its static label + a
+  // shimmering placeholder in the countdown slot. Called when we DON'T have a
+  // stashed fare_expires_at_ms — either first-arrival refresh or shadow was
+  // cleared. Once Phase 3 completes and startFareTimer('booking') runs,
+  // tickFareTimer() replaces the entire innerHTML with the real countdown,
+  // so this shell dissolves naturally with no extra teardown code.
+  //
+  // We paint the bar VISIBLE (remove .hidden) because the whole point is
+  // that the "Fare expires in …" label is a known-good static string —
+  // making it invisible during the network wait is the very jarring
+  // pop-in-out effect we're trying to avoid.
+  function _paintFareTimerShell() {
+    const bar = document.getElementById('booking-fare-timer');
+    if (!bar) return;
+    bar.classList.remove('hidden', 'warning', 'expired');
+    bar.innerHTML = `
+      <div class="ft-label">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+          <circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="1.7"/>
+          <path d="M12 7v5l3 2" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/>
+        </svg>
+        <span>Fare expires in <span class="ft-time tf-shimmer" style="display:inline-block;width:52px;height:14px;vertical-align:-2px;border-radius:4px;">&nbsp;</span></span>
+      </div>
+    `;
   }
 
   // Phase 1 helper: paint shimmer placeholders into the trip panel, price
@@ -10767,6 +10806,15 @@
     renderBaggageList();        // initial render with empty/loading state
     renderBookingSummary();
     showView('booking');
+    // Step 3: seed the sessionStorage shadow right after entry so a refresh
+    // BEFORE any user interaction still has fare_expires_at_ms to read from,
+    // letting restoreBooking start the fare timer at t=0. Previously the shadow
+    // was only written when the user typed/blurred a passenger field
+    // (via snapshotTraveler → stashBookingPassengers), so an "arrive → refresh
+    // immediately" flow saw the 6-8s Turnstile wait before the timer appeared.
+    // Now the stash writes at booking-view entry too — passenger fields are
+    // empty at this point but the fare_expires_at_ms carries what matters.
+    try { stashBookingPassengers(); } catch (_) {}
     // Reset CTA collapse flags each time we enter — fresh upsell every visit
     seatCTACollapsed = false;
     baggageCTACollapsed = false;
