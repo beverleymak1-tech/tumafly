@@ -114,16 +114,10 @@
   </script>
   <style>
     :root {
-      /* Brand blue family. --brand matches the wordmark exactly (#2563EB =
-       * Tailwind blue-600); --brand-dark is the canonical hover mate
-       * (Tailwind blue-700); --brand-soft is the pale-tinted background
-       * (Tailwind blue-100). Keeping to a single mathematical family means
-       * hover states, backgrounds, and borders all read as the same brand
-       * rather than three different blues that "look close." */
-      --brand: #2563EB;
-      --brand-dark: #1D4ED8;
-      --brand-soft: #DBEAFE;
-      --brand-border: #93C5FD;  /* blue-300 — for soft borders on info banners etc. */
+      --brand: #3D95F5;
+      --brand-dark: #1a6fd4;
+      --brand-soft: #e8f3ff;
+      --brand-border: #B7DAFA;  /* soft border for info banners — pairs with --brand-soft */
 
       --sand: #F5EFE6;       /* hero warm neutral — Nairobi midday */
       --sand-deep: #ECE3D2;
@@ -945,7 +939,7 @@
     }
     .hero-title em {
       font-style: normal;
-      color: var(--brand-dark);
+      color: var(--brand);
     }
     .hero-sub {
       font-size: clamp(15px, 1.6vw, 17px);
@@ -13131,7 +13125,7 @@
         <div style="font-size:14px;color:var(--text-2,#4A5568);margin-bottom:20px;line-height:1.5;">
           Prices and availability can change quickly. Refresh your search for the latest options.
         </div>
-        <button type="button" id="search-expired-refresh" style="width:100%;padding:12px 16px;border-radius:10px;border:none;background:var(--brand,#2563EB);color:#fff;font-weight:600;cursor:pointer;font-size:14px;">
+        <button type="button" id="search-expired-refresh" style="width:100%;padding:12px 16px;border-radius:10px;border:none;background:var(--brand,#3D95F5);color:#fff;font-weight:600;cursor:pointer;font-size:14px;">
           Refresh
         </button>
       </div>
@@ -15104,7 +15098,7 @@
         <div style="font-size:14px;color:var(--text-2,#4A5568);margin-bottom:20px;line-height:1.5;">
           ${phone ? phone + ' is' : 'This number is'} already used by another TumaFly account. Try signing in with Google or a different number. If you think this is a mistake, contact support.
         </div>
-        <button type="button" id="dup-account-ok" style="width:100%;padding:12px 16px;border-radius:10px;border:none;background:var(--brand,#2563EB);color:#fff;font-weight:600;cursor:pointer;font-size:14px;">
+        <button type="button" id="dup-account-ok" style="width:100%;padding:12px 16px;border-radius:10px;border:none;background:var(--brand,#3D95F5);color:#fff;font-weight:600;cursor:pointer;font-size:14px;">
           OK
         </button>
       </div>
@@ -15147,7 +15141,7 @@
         <div style="font-size:13px;color:var(--text-3,#717A86);margin-bottom:20px;line-height:1.5;text-align:left;">
           Note: in incognito or private mode, you also need to be signed into Google in this window first.
         </div>
-        <button type="button" id="fedcm-blocked-ok" style="width:100%;padding:12px 16px;border-radius:10px;border:none;background:var(--brand,#2563EB);color:#fff;font-weight:600;cursor:pointer;font-size:14px;">
+        <button type="button" id="fedcm-blocked-ok" style="width:100%;padding:12px 16px;border-radius:10px;border:none;background:var(--brand,#3D95F5);color:#fff;font-weight:600;cursor:pointer;font-size:14px;">
           Got it
         </button>
       </div>
