@@ -3461,6 +3461,80 @@
     }
     .form-grid-3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 12px; }
     .form-grid .full { grid-column: 1 / -1; }
+
+    /* ========================================================================
+     * Step 3 — refresh-restore shell shimmer + slide-in animations
+     * ========================================================================
+     * Used by _paintBookingShellShimmers() and _reconcileBookingShell().
+     * Shimmer: Claude-attachment style — a diagonal light sweep across a
+     * grey rounded rectangle, loops every ~1.4s.
+     * Slide-in: for pax cards 2..N when get-offer says pax > 1, and for the
+     * international-passport banner when the trip is confirmed international.
+     */
+    @keyframes tf-shimmer-sweep {
+      0%   { background-position: -200% 0; }
+      100% { background-position:  200% 0; }
+    }
+    .tf-shimmer {
+      background: linear-gradient(
+        100deg,
+        rgba(220,220,225,0.6) 0%,
+        rgba(220,220,225,0.6) 40%,
+        rgba(245,245,250,0.95) 50%,
+        rgba(220,220,225,0.6) 60%,
+        rgba(220,220,225,0.6) 100%
+      );
+      background-size: 200% 100%;
+      animation: tf-shimmer-sweep 1.4s ease-in-out infinite;
+      border-radius: 6px;
+    }
+    .tf-shimmer-line {
+      display: block;
+      border-radius: 4px;
+    }
+    .tf-shimmer-card {
+      padding: 16px !important;
+    }
+    /* Saved-traveler dropdown shimmer overlay — flag on the picker while
+     * fetchSavedTravelers is in flight, cleared when its .then() re-renders. */
+    .tf-shimmer-picker {
+      position: relative;
+      pointer-events: none;
+    }
+    .tf-shimmer-picker::after {
+      content: "";
+      position: absolute;
+      inset: 0;
+      background: linear-gradient(
+        100deg,
+        rgba(220,220,225,0.35) 0%,
+        rgba(220,220,225,0.35) 40%,
+        rgba(245,245,250,0.7) 50%,
+        rgba(220,220,225,0.35) 60%,
+        rgba(220,220,225,0.35) 100%
+      );
+      background-size: 200% 100%;
+      animation: tf-shimmer-sweep 1.4s ease-in-out infinite;
+      border-radius: 8px;
+      pointer-events: none;
+    }
+
+    /* Slide-in for pax cards N > 1 when get-offer says pax > 1.
+     * Card starts collapsed (0 height, opacity 0) and animates to full size. */
+    @keyframes tf-slide-in-anim {
+      0%   { opacity: 0; transform: translateY(-8px); max-height: 0; overflow: hidden; }
+      100% { opacity: 1; transform: translateY(0);   max-height: 2000px; overflow: visible; }
+    }
+    .tf-slide-in {
+      animation: tf-slide-in-anim 350ms ease-out;
+    }
+    /* Same treatment for the international-passport banner when tripRequiresPassport
+     * flips true after Phase 3. .intl-banner appears via renderPassengerForms; we
+     * give it a subtle fade+slide-down every time it shows up. */
+    .intl-banner {
+      animation: tf-slide-in-anim 300ms ease-out;
+    }
+
     @media (max-width: 600px) {
       .form-grid, .form-grid-3 { grid-template-columns: 1fr; }
     }
@@ -3622,6 +3696,11 @@
       background: var(--surface-2, #f7f9fc);
       border: 1px solid var(--border);
       border-radius: var(--radius-sm);
+      animation: tf-fade-in 250ms ease-out;
+    }
+    @keyframes tf-fade-in {
+      0%   { opacity: 0; transform: translateY(-4px); }
+      100% { opacity: 1; transform: translateY(0); }
     }
     .saved-trav-picker-label {
       display: block;
@@ -7632,11 +7711,53 @@
       return false;
     }
 
-    // Show the booking view now so the user isn't staring at a blank flash-guarded
-    // page while Turnstile + Duffel resolve. proceedToBooking() below will re-render
-    // with actual data; until then the view is a shell with static structure.
+    // ── PHASE 1: shell paint (synchronous, before any network) ──────────
+    //
+    // Paint the booking view from what we have RIGHT NOW: the sessionStorage
+    // shadow. This is the same instant-paint behaviour Contact Details gets
+    // (its inputs live in static HTML) — we just extend it to Travelers +
+    // trip panel by pre-populating state before rendering.
+    //
+    // The shell renders:
+    //   - Traveler card 1 with any shadowed fields (title/name/gender/
+    //     nationality). Blank otherwise. Passport section closed (no
+    //     tripRequiresPassport signal yet).
+    //   - Contact email/phone from shadow.
+    //   - Trip panel: empty (no offer data yet) — a shimmer placeholder.
+    //   - Price panel: shimmer placeholder for KES values.
+    //   - Saved-traveler dropdown: shimmer (fetchSavedTravelers hasn't run).
+    //
+    // Assumptions that get reconciled in Phase 2:
+    //   - pax count = 1 (shell renders one card; extras slide in when
+    //     get-offer says pax > 1)
+    //   - tripRequiresPassport = false (banner slides down if offer says true)
+    //   - No offer object → trip panel + price panel need shimmers
     showView('booking', { fromPopState: true });
 
+    // Ensure clean baseline so the shell paints from defaults.
+    travelers.adults = 1;
+    travelers.children = 0;
+    travelers.infantsSeat = 0;
+    travelers.infantsLap = 0;
+    recomputeTravelers();
+    initTravelerStates(); // fills travelerStates with one default entry
+    tripRequiresPassport = false;
+    fareTimerExpired = false;
+
+    // Overlay shadow values onto the fresh travelerStates + contact inputs.
+    // Cheap: sessionStorage read is synchronous, values applied in one pass.
+    try { restoreBookingPassengers(); } catch (e) { console.warn('[restoreBooking] shell passenger restore failed:', e); }
+
+    // Render the shell. renderPassengerForms writes into #passenger-forms;
+    // renderBookingSummary writes into #booking-trip-slot + #booking-price-slot.
+    // Neither depends on selectedOutbound at this point — the trip panel will
+    // be replaced by a shimmer placeholder below, and the price panel will
+    // render with all-zero values behind a shimmer overlay.
+    renderPassengerForms();
+    _paintBookingShellShimmers();
+
+    // ── PHASE 2: fetch offer (network) ──────────────────────────────────
+    //
     // Turnstile token — same pattern as create-payment (booking view already
     // hosts the payment widget). 15s max wait; empty token → EF 403s and we
     // land in the generic error path.
@@ -7671,6 +7792,8 @@
     if (res.status === 410) {
       // Duffel says the offer is dead. Modal, not toast — this needs the
       // user's attention because the CTA has to send them back to search.
+      // Shadow is preserved so anything they typed stays available if
+      // they come back to the same route later.
       _showFareExpiredModal();
       return false;
     }
@@ -7680,6 +7803,17 @@
       _restoreBookingBounceHome(msg);
       return false;
     }
+
+    // ── PHASE 3: reconcile ──────────────────────────────────────────────
+    //
+    // Get-offer resolved. Now stitch the real data into the shell we already
+    // painted. What changes visually:
+    //   - Trip panel: shimmer → real Outbound/Return leg cards
+    //   - Price panel: shimmer numbers → real KES values
+    //   - International banner (if trip is international): slides in above
+    //     the Traveler card
+    //   - Traveler cards 2..N (if pax > 1): slide in below card 1
+    //   - Fare timer starts
 
     // Reconstruct the selection shape { offer, cabin, cabinPricing } that
     // selectFlightCabin normally builds. See line ~9769 for the canonical
@@ -7695,9 +7829,8 @@
 
     // Wire selectedOutbound + selectedInbound. For round-trip, both point
     // at the SAME selection object — Duffel pairs slices under one offer_id.
-    // This matches the "prefer inbound" pattern used elsewhere in the code
-    // (e.g. line 10209, 10701, 12507) which is just a convention: both refs
-    // resolve to the same cabinPricing.offer_id.
+    // Convention used at L10209 / L10701 / L12507: both refs resolve to the
+    // same cabinPricing.offer_id.
     const isRoundTrip = Array.isArray(data.offer.slices) && data.offer.slices.length === 2;
     selectedOutbound = selection;
     selectedInbound  = isRoundTrip ? selection : null;
@@ -7714,30 +7847,82 @@
     baggageOfferId = null;
     baggagePassengerIds = [];
 
-    // Sync passenger count from the EF response. Same rules as restoreResults —
-    // travelers is the source of truth, passengerCount is derived via
-    // recomputeTravelers(). We attribute everything to adults because the
-    // URL doesn't encode a breakdown; the user can re-open the picker to
-    // redistribute if they want, but this is nearly never wrong at this
-    // stage of the funnel (they've already picked a flight).
+    // Reconcile passenger count. If the offer says pax > 1, we need to add
+    // cards. We preserve card 0 (which has shadow data + anything the user
+    // typed during Phase 2 while waiting) and append fresh cards for the rest.
     const pax = Math.max(1, Math.min(9, parseInt(data.passengers_count, 10) || 1));
+    const shellPax = travelerStates.length; // usually 1 from Phase 1 shell
     travelers.adults = pax;
     travelers.children = 0;
     travelers.infantsSeat = 0;
     travelers.infantsLap = 0;
     recomputeTravelers();
 
-    // Fresh traveler state — proceedToBooking below will call
-    // initTravelerStates() because travelerStates.length !== passengerCount.
-    // We could pre-init here, but proceedToBooking handles it idempotently
-    // and also runs the full validation/compute pass (tripRequiresPassport,
-    // render, baggage kickoff), so we lean on it.
-    proceedToBooking();
+    // Compute international status now that we have the offer.
+    tripRequiresPassport = computeTripInternational();
+    if (tripRequiresPassport) {
+      // Trip is international → force-open passport section on every
+      // unsaved traveler. Matches proceedToBooking's behavior at L10045-10054.
+      travelerStates.forEach(s => {
+        if (!s.saved) s.openSections.add('passport');
+      });
+    }
 
-    // Restore any passenger form values from the sessionStorage shadow.
-    // Runs AFTER proceedToBooking() has rendered the forms, so we can write
-    // directly to travelerStates + re-render.
-    try { restoreBookingPassengers(); } catch (e) { console.warn('[restoreBooking] passenger restore failed:', e); }
+    // Extend travelerStates to pax count if needed. Card 0 is preserved
+    // in-place (shadow data + any user input intact).
+    if (travelerStates.length < pax) {
+      for (let i = travelerStates.length; i < pax; i++) {
+        travelerStates.push({
+          saved: false,
+          data: {
+            title: 'mr', gender: '', given_name: '', middle_name: '', family_name: '',
+            born_on: '', nationality: '',
+            passport: { country: '', number: '', expires: '' },
+            frequent_flyer: [],
+            known_traveler_id: '', redress_number: '', special_assistance: '',
+            save_to_account: false,
+          },
+          openSections: tripRequiresPassport ? new Set(['passport']) : new Set(),
+          showRequiredErrors: false,
+          showPassportErrors: false,
+        });
+      }
+    }
+    // Overlay shadow onto ANY newly-added cards too (in case shadow had
+    // multiple travelers stashed from a prior visit).
+    try { restoreBookingPassengers(); } catch (_) {}
+
+    // Kick off async fetches that proceedToBooking would normally handle.
+    // These fire in parallel; each updates its own UI slot when it lands.
+    (async () => {
+      try {
+        await prefillContactFromProfile();
+      } catch (e) { console.warn('[restoreBooking] prefill failed:', e); }
+    })();
+    readGuestPrefill();
+    (async () => {
+      try {
+        await fetchSavedTravelers();
+        if (!document.getElementById('view-booking').classList.contains('hidden')) {
+          renderPassengerForms(); // saved-traveler dropdown now populates
+        }
+      } catch (e) { console.warn('[restoreBooking] saved travelers fetch failed:', e); }
+    })();
+    (async () => {
+      try {
+        await loadBaggageForBookingOffer();
+        renderBaggageList();
+        renderBookingSummary();
+      } catch (e) { console.warn('[restoreBooking] baggage fetch failed:', e); }
+    })();
+
+    // Re-render the passenger forms & price panel with the reconciled state.
+    // Card 0 stays where it was; cards 1..N-1 get the slide-in animation
+    // via the .tf-slide-in class added by _reconcileBookingShell.
+    _reconcileBookingShell({ shellPax, newPax: pax });
+
+    // Start the fare timer now that we have expires_at.
+    startFareTimer('booking');
 
     // Auto-fetch seat maps in the background so the seat picker is warm by
     // the time the user gets to it. Silent — no modal, no focus shift, no
@@ -7746,7 +7931,6 @@
       try {
         const uniqueOffers = [selection.cabinPricing.offer_id].filter(Boolean);
         await Promise.all(uniqueOffers.map(loadSeatMapForOffer));
-        // Re-render if we're still on the booking view (user may have navigated away)
         if (!document.getElementById('view-booking').classList.contains('hidden')) {
           renderSeatsList();
         }
@@ -7757,6 +7941,94 @@
 
     return true;
   }
+
+  // Phase 1 helper: paint shimmer placeholders into the trip panel, price
+  // panel, and saved-traveler dropdown. Called right after the initial
+  // renderPassengerForms so the empty slots aren't just blank white gaps.
+  //
+  // We're careful NOT to clobber #passenger-forms — the traveler card
+  // rendered from shadow lives there and needs to stay. Only the trip
+  // panel, price panel, and saved-traveler slot get replaced with shimmer.
+  function _paintBookingShellShimmers() {
+    // Trip panel — replace with a two-card shimmer placeholder. We don't
+    // know yet whether the trip is round-trip; render two anyway (safe: the
+    // reconcile step will replace with the correct 1 or 2 leg cards).
+    const tripSlot = document.getElementById('booking-trip-slot');
+    if (tripSlot) {
+      tripSlot.innerHTML = `
+        <div class="trip-panel">
+          <div class="leg-card tf-shimmer-card">
+            <div class="tf-shimmer-line tf-shimmer" style="width:40%;height:14px;"></div>
+            <div class="tf-shimmer-line tf-shimmer" style="width:70%;height:20px;margin-top:8px;"></div>
+            <div class="tf-shimmer-line tf-shimmer" style="width:55%;height:12px;margin-top:6px;"></div>
+          </div>
+          <div class="leg-card tf-shimmer-card">
+            <div class="tf-shimmer-line tf-shimmer" style="width:40%;height:14px;"></div>
+            <div class="tf-shimmer-line tf-shimmer" style="width:70%;height:20px;margin-top:8px;"></div>
+            <div class="tf-shimmer-line tf-shimmer" style="width:55%;height:12px;margin-top:6px;"></div>
+          </div>
+        </div>
+      `;
+    }
+    // Price panel — shimmer rows in the same layout as the real panel.
+    const priceSlot = document.getElementById('booking-price-slot');
+    if (priceSlot) {
+      priceSlot.innerHTML = `
+        <div class="price-panel">
+          <h4>Estimated price</h4>
+          <div class="ppp"><span class="tf-shimmer-line tf-shimmer" style="width:100px;height:12px;display:inline-block;"></span></div>
+          <div class="line"><span class="label">Flight</span><span class="value"><span class="tf-shimmer-line tf-shimmer" style="width:80px;height:14px;display:inline-block;"></span></span></div>
+          <div class="line"><span class="label">TumaFly service fee</span><span class="value"><span class="tf-shimmer-line tf-shimmer" style="width:80px;height:14px;display:inline-block;"></span></span></div>
+          <div class="line"><span class="label">Payment processing</span><span class="value"><span class="tf-shimmer-line tf-shimmer" style="width:80px;height:14px;display:inline-block;"></span></span></div>
+          <div class="divider"></div>
+          <div class="total"><span>Total estimate</span><span class="value"><span class="tf-shimmer-line tf-shimmer" style="width:100px;height:16px;display:inline-block;"></span></span></div>
+        </div>
+      `;
+    }
+    // Saved-traveler dropdown — add a shimmer overlay class. The picker
+    // itself lives inside each traveler card. We flag the currently-rendered
+    // cards; renderPassengerForms in Phase 3 will render without the flag
+    // once fetchSavedTravelers resolves.
+    document.querySelectorAll('.saved-trav-picker').forEach(el => el.classList.add('tf-shimmer-picker'));
+  }
+
+  // Phase 3 helper: swap shimmer placeholders for real content, expand pax
+  // cards if needed, animate the international banner in if the trip crosses
+  // borders. Called once get-offer has resolved and state is reconciled.
+  function _reconcileBookingShell({ shellPax, newPax }) {
+    // Trip panel + price panel — re-render with real data. renderBookingSummary
+    // calls both renderTripPanel and renderPricePanel, which fully replace
+    // their slots' innerHTML.
+    renderBookingSummary();
+
+    // Passenger forms — full re-render. New cards (if pax > shellPax) will
+    // slide in via CSS animation triggered by the .tf-slide-in class.
+    // We add the class BEFORE render so the initial DOM state has the
+    // collapsed height; the CSS transition then plays.
+    renderPassengerForms();
+
+    // Slide-in animation for expansion cards. Only cards added post-shell
+    // (indices shellPax..newPax-1) get the class; card 0 stays put with no
+    // animation.
+    if (newPax > shellPax) {
+      for (let i = shellPax; i < newPax; i++) {
+        const card = document.querySelector(`[data-traveler-card="${i}"]`);
+        if (card) {
+          card.classList.add('tf-slide-in');
+          // Remove the class after animation ends so it doesn't affect
+          // future re-renders (subsequent renderPassengerForms calls that
+          // rebuild these cards will produce them in the "normal" state).
+          setTimeout(() => card.classList.remove('tf-slide-in'), 400);
+        }
+      }
+    }
+
+    // International banner appears via renderPassengerForms (which reads
+    // tripRequiresPassport) — no extra work here beyond setting that flag,
+    // which happened before we called renderPassengerForms above. The banner
+    // fades in via its own CSS transition (added in the shimmer stylesheet).
+  }
+
 
   // Helper: bounce home + toast on generic restoreBooking failure.
   function _restoreBookingBounceHome(msg) {
@@ -11716,6 +11988,9 @@
       travelerStates[i].showRequiredErrors = false;
       travelerStates[i].showPassportErrors = false;
       renderPassengerForms();
+      // Step 3: sync shadow. Bypasses snapshotTraveler (which reads DOM inputs,
+      // but we've just wiped the data directly), so we stash by hand.
+      try { stashBookingPassengers(); } catch (_) {}
       return;
     }
 
@@ -11757,6 +12032,10 @@
     travelerStates[i].showRequiredErrors = false;
     travelerStates[i].showPassportErrors = false;
     renderPassengerForms();
+    // Step 3: sync shadow. Same reason as the New-traveler branch above —
+    // we're mutating travelerStates[i].data directly rather than through DOM
+    // inputs, so snapshotTraveler wouldn't pick this change up.
+    try { stashBookingPassengers(); } catch (_) {}
   }
 
   // Trashcan affordance next to the pencil on the saved (collapsed) card.
