@@ -269,7 +269,7 @@ serve(async (req) => {
   }
 
   try {
-    const { offer_id, passengers, contact, seats, baggages, turnstile_token } = await req.json();
+    const { offer_id, passengers, contact, seats, baggages, turnstile_token, expected_price_kes } = await req.json();
 
     // 1. Validate
     if (!offer_id || !passengers?.length || !contact?.email) {
@@ -353,6 +353,50 @@ serve(async (req) => {
       parseFloat(offer.total_amount),
       offer.total_currency
     );
+
+    // 3z. Price-drift check. Compare the fresh Duffel-quoted base KES against
+    // what the frontend claims the user was shown. When they diverge by more
+    // than 1% of the expected value, we refuse to proceed silently — the
+    // customer hasn't consented to the new price yet. The client displays a
+    // brief informative modal ("prices fluctuate…") and re-fires the request
+    // without `expected_price_kes` (bypass this check on the second attempt,
+    // now that the user has been notified).
+    //
+    // Skipped entirely when the client doesn't send `expected_price_kes` —
+    // this preserves backward compatibility with older frontends and lets the
+    // "user accepted the drift" retry pass through untouched.
+    //
+    // Tolerance = 1% of expected. Sub-1% deltas are typically FX-rate noise
+    // between page-load and payment-click; not worth alarming the user.
+    // Applies in BOTH directions (price rose or dropped) — even a small
+    // savings shown as-is beats silently charging the "new" number.
+    //
+    // Logs regardless of whether it triggers, so we can eyeball production
+    // drift rates over time from EF logs.
+    if (typeof expected_price_kes === "number" && expected_price_kes > 0) {
+      const deltaKES = baseAmountKES - expected_price_kes;
+      const deltaPct = Math.abs(deltaKES) / expected_price_kes;
+      console.log("[create-payment] price drift check", {
+        offer_id,
+        expected_kes: expected_price_kes,
+        actual_kes: baseAmountKES,
+        delta_kes: deltaKES,
+        delta_pct: (deltaPct * 100).toFixed(2) + "%",
+        triggered: deltaPct > 0.01,
+      });
+      if (deltaPct > 0.01) {
+        return new Response(JSON.stringify({
+          code: "PRICE_DRIFT",
+          expected_kes: expected_price_kes,
+          actual_kes: baseAmountKES,
+          delta_kes: deltaKES,
+          error: "The fare price has changed.",
+        }), {
+          status: 409,
+          headers: { ...CORS_HEADERS, "Content-Type": "application/json" },
+        });
+      }
+    }
 
     // 3a. Validate seat selections — re-fetch the seat map and verify each
     // selected service_id is still available, matches the segment, and re-cost

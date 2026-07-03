@@ -7141,6 +7141,18 @@
   let baggageModalState = null;
   let baggageOfferId = null;
   let baggagePassengerIds = [];
+  // Step 2b service-id-error escalation counter. Increments each time
+  // create-payment returns a 409 for a stale seat/baggage service_id
+  // (see EF lines ~467/540 for the two error paths). First strike: we
+  // clear the affected selections, toast the user, and let them re-pick
+  // + re-Continue. Second strike on the same booking session: the offer's
+  // service catalog is genuinely broken (cache eviction or Duffel-side
+  // inconsistency), so we escalate to the same expired-modal flow as
+  // a 410 — user gets a fresh search rather than being stuck.
+  //
+  // Reset on: fresh booking-view entry via proceedToBooking, refresh-restore,
+  // and successful payment (redirect away from booking).
+  let _bookingServiceIdRetryCount = 0;
   // "Add later" collapse state — when the user dismisses an upsell CTA group
   // we hide the buttons and show a subtle re-expand link in their place.
   // Reset on each entry into the booking view (in proceedToBooking).
@@ -7313,6 +7325,25 @@
             depart: lastSearchParams.date,
             return: lastSearchParams.returnDate || undefined,
             pax:    passengerCount,
+          },
+        };
+      }
+
+      // Step 2b: when we're on results with a selectedOutbound (RT inbound
+      // picker state), append &outbound=off_XXX to the URL. This makes the
+      // inbound picker a distinct history entry so:
+      //   - browser Back from inbound picker → outbound picker (not straight home)
+      //   - refresh on inbound picker restores selectedOutbound + inbound view
+      //   - copy-paste URL to a friend takes them to the same inbound picker state
+      // We add this regardless of how opts.params was populated (auto-derived
+      // above OR passed explicitly from a caller) — the URL always reflects
+      // the currently-selected outbound.
+      if (name === 'results' && tripType === 'round' && selectedOutbound?.cabinPricing?.offer_id) {
+        opts = {
+          ...opts,
+          params: {
+            ...(opts.params || {}),
+            outbound: selectedOutbound.cabinPricing.offer_id,
           },
         };
       }
@@ -7658,16 +7689,122 @@
     // visually since we already showed it, but updates the URL via the
     // auto-derive in showView — keeping URL in sync if any param was
     // canonicalized along the way).
-    runSearch({
+    const outboundOfferId = (params.outbound || '').trim();
+    const searchPromise = runSearch({
       origin: from,
       destination: to,
       date: depart,
       returnDate: ret,
       fromButton: null,
       alertContainer: 'results-alert',
-    }).catch(e => console.warn('[restoreResults] search failed:', e));
+    });
+
+    // Step 2b: if the URL carried &outbound=off_XXX we need to restore the
+    // inbound picker state after the fresh search lands. runSearch clears
+    // selectedOutbound (line ~9587) and Duffel returns fresh offer_ids that
+    // won't match the URL's stale off_XXX, so we can't just look it up in
+    // allOffers by id. Instead:
+    //   1. Wait for runSearch to complete + allOffers to populate
+    //   2. Call get-offer on the URL's outbound offer_id to extract its
+    //      outbound slice's departure timestamp + origin (stable identifiers
+    //      that survive across searches for the same physical flight)
+    //   3. Find the flight in allOffers matching that signature + set it as
+    //      selectedOutbound + re-render (inbound picker now shows)
+    //   4. If the offer_id 410'd or no match found, show the expired modal
+    //      — the user came here expecting a specific flight and we couldn't
+    //      find it, so fall through cleanly rather than silently ignoring.
+    if (outboundOfferId && /^off_[A-Za-z0-9]+$/.test(outboundOfferId) && ret) {
+      searchPromise.then(async () => {
+        try {
+          await _restoreInboundPickerFromOffer(outboundOfferId);
+        } catch (e) {
+          console.warn('[restoreResults] inbound picker restore failed:', e);
+        }
+      }).catch(e => console.warn('[restoreResults] search failed:', e));
+    } else {
+      searchPromise.catch(e => console.warn('[restoreResults] search failed:', e));
+    }
 
     return true;
+  }
+
+  // Step 2b helper: given the URL's stale outbound=off_XXX, find the
+  // matching flight in the just-fetched allOffers and set it as
+  // selectedOutbound so the inbound picker renders. Called from
+  // restoreResults after runSearch resolves.
+  //
+  // Match signature: first-segment departure timestamp + origin IATA.
+  // Both are stable across Duffel searches for the same physical flight
+  // (unless the airline retires the flight, which is what triggers
+  // showSearchExpiredModal below).
+  async function _restoreInboundPickerFromOffer(outboundOfferId) {
+    // Turnstile token for get-offer — same widget as booking uses.
+    let token = '';
+    try { token = await ensureTurnstileToken('payment'); }
+    catch (e) { console.warn('[_restoreInboundPickerFromOffer] turnstile await failed:', e); }
+
+    let res, data;
+    try {
+      res = await fetch(`${SUPABASE_URL}/functions/v1/get-offer`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${SUPABASE_ANON_KEY}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ offer_id: outboundOfferId, turnstile_token: token }),
+      });
+      data = await res.json().catch(() => ({}));
+    } catch (e) {
+      console.warn('[_restoreInboundPickerFromOffer] fetch failed:', e);
+      resetTurnstile('payment');
+      return;
+    }
+    resetTurnstile('payment');
+
+    // 410 or bad response — offer is gone. User navigated back to a URL that
+    // references a fare that no longer exists. Show the expired modal;
+    // rerunSearchFromExpiry will (again) bounce them to fresh results.
+    if (res.status === 410 || !res.ok || !data.success) {
+      console.warn('[_restoreInboundPickerFromOffer] URL outbound offer stale', res.status);
+      showSearchExpiredModal();
+      return;
+    }
+
+    // Extract first-segment signature from the stale offer's outbound slice.
+    const staleSlice = data.offer?.slices?.[0];
+    const staleSeg = staleSlice?.segments?.[0];
+    if (!staleSeg) {
+      console.warn('[_restoreInboundPickerFromOffer] no first segment in stale offer');
+      return;
+    }
+    const targetDep = staleSeg.departure;   // ISO timestamp
+    const targetOrigin = staleSeg.origin;   // IATA
+
+    // Find the matching flight in the fresh allOffers by that signature.
+    // allOffers is bucketed by flight_key, so we scan each and check its
+    // first outbound segment's departure + origin. First hit wins.
+    const match = allOffers.find(o => {
+      const seg = o?.slices?.[0]?.segments?.[0];
+      return seg && seg.departure === targetDep && seg.origin === targetOrigin;
+    });
+    if (!match) {
+      // No matching flight in the fresh data. Treat as fare-expired so the
+      // user gets a clean fallback rather than being stuck on the wrong
+      // page with URL state we can't honor.
+      console.warn('[_restoreInboundPickerFromOffer] no matching fresh flight for stale offer');
+      showSearchExpiredModal();
+      return;
+    }
+
+    // Reconstruct selection. Pick the same cabin the user was on.
+    const cabin = data.selected_cabin;
+    const cabinPricing = match.cabins?.[cabin];
+    if (!cabin || !cabinPricing) {
+      console.warn('[_restoreInboundPickerFromOffer] fresh flight has no matching cabin', cabin);
+      return;
+    }
+    selectedOutbound = { offer: match, cabin, cabinPricing };
+    renderResults();
   }
 
   // ============================================================
@@ -7759,6 +7896,8 @@
     initTravelerStates(); // fills travelerStates with one default entry
     tripRequiresPassport = false;
     fareTimerExpired = false;
+    // Step 2b: reset service-id retry counter — refresh means a fresh session.
+    _bookingServiceIdRetryCount = 0;
 
     // Reset first-mount animation flags on the passenger-forms container.
     // Refresh = new booking session = each of these should animate its
@@ -8470,16 +8609,17 @@
     // `view = 'home'` default and bouncing the user home; this branch fixes
     // that by routing to restoreResults when params indicate a real search.
     if (view === 'results') {
-      // Three sub-cases:
-      //   1. Required params missing (e.g., hand-edited to #results?from=XYZ
-      //      with no to/depart) → bounce home + wipe URL. Mirrors what
-      //      restoreResults' validation does for the refresh path.
-      //   2. Valid params that match lastSearchParams exactly → just showView,
-      //      no re-search (the typical back-from-booking nav — offers are
-      //      still in memory, no need to refetch).
-      //   3. Valid params that DIFFER from lastSearchParams → dispatch
-      //      restoreResults to re-run the search (the hand-edit-then-back
-      //      scenario, or forward to a stale-in-memory results URL).
+      // Sub-cases:
+      //   1. Required params missing → bounce home + wipe URL.
+      //   2. Valid params match lastSearchParams AND outbound= matches
+      //      current selectedOutbound → showView, no re-search (typical
+      //      back-from-booking or step-to-step nav within same session).
+      //   3. Valid params match lastSearchParams BUT outbound= differs from
+      //      current selectedOutbound → in-memory search still valid, just
+      //      flip between outbound/inbound picker view. No re-search, no
+      //      re-fetch — matches the "back button as UI toggle" mental model.
+      //   4. Valid params DIFFER from lastSearchParams → hand-edit / stale
+      //      history entry → dispatch restoreResults for a fresh search.
       if (!params.from || !params.to || !params.depart) {
         console.warn('[popstate results] invalid params, bouncing home', params);
         showView('home');
@@ -8491,6 +8631,41 @@
         && lastSearchParams.destination === params.to
         && lastSearchParams.date        === params.depart
         && (lastSearchParams.returnDate || null) === (params.return || null);
+
+      // Step 2b: reconcile selectedOutbound with the URL's &outbound=.
+      // Only applies to RT (OW never has an inbound picker state).
+      // Runs BEFORE showView so renderResults sees the correct picker mode.
+      const urlOutbound = (params.outbound || '').trim();
+      const currentOutboundId = selectedOutbound?.cabinPricing?.offer_id || '';
+      if (sameAsCurrent && params.return) {
+        if (urlOutbound && urlOutbound !== currentOutboundId) {
+          // Forward to inbound picker: find matching flight in the in-memory
+          // allOffers. Since we're on the fast path (params match
+          // lastSearchParams), allOffers is populated with the SAME offers
+          // that were live when we pushed this history entry, so the
+          // urlOutbound offer_id will resolve directly.
+          const match = allOffers.find(o =>
+            Object.values(o.cabins || {}).some(c => c?.offer_id === urlOutbound)
+          );
+          if (match) {
+            const cabin = Object.keys(match.cabins).find(c => match.cabins[c]?.offer_id === urlOutbound);
+            if (cabin) {
+              selectedOutbound = { offer: match, cabin, cabinPricing: match.cabins[cabin] };
+            }
+          }
+        } else if (!urlOutbound && currentOutboundId) {
+          // Back to outbound picker: clear selectedOutbound so renderResults
+          // renders step 1 of 2. Also clear selectedInbound in case the user
+          // was even further along at some point.
+          selectedOutbound = null;
+          selectedInbound = null;
+          selectedOffer = null;
+        }
+        showView('results', { fromPopState: true });
+        renderResults();
+        return;
+      }
+
       showView('results', { fromPopState: true });
       if (!sameAsCurrent) {
         setTimeout(() => {
@@ -10518,6 +10693,13 @@
       selectedOutbound = selection;
       renderResults();
       window.scrollTo({ top: 0, behavior: 'smooth' });
+      // Step 2b: push a new history entry so browser Back from the inbound
+      // picker returns to the outbound picker (not straight home). The URL
+      // gains an &outbound=off_XXX param so a refresh on the inbound picker
+      // can restore selectedOutbound without asking the user to re-pick.
+      // fromPopState:false → normal push. showView's URL-derive helper will
+      // read lastSearchParams and append &outbound= via our extension below.
+      showView('results');
       return;
     }
     if (kind === 'inbound') {
@@ -10766,6 +10948,10 @@
     // called when the user picks a fresh flight from results, so we know the
     // selected offer is now valid and the payment CTA should be live again.
     fareTimerExpired = false;
+    // Step 2b: reset the service-id retry counter — this is a fresh booking
+    // session with a fresh offer, so any previous stale-service_id history
+    // is irrelevant.
+    _bookingServiceIdRetryCount = 0;
     enablePaymentActions();
     // Compute international status before deciding traveler state — we need it for
     // the force-expand logic and for re-validating saved travelers.
@@ -13151,12 +13337,23 @@
   // would 422 — so we interrupt the user with a modal rather than let them
   // submit a doomed form. Refresh CTA re-runs the search with the same
   // criteria and lands them on fresh results.
+  // Modal shown when the current Duffel offer is no longer valid — either
+  // fare-timer hit zero, or a get-offer / create-payment call came back 410.
+  // As of Step 2b there's NO button: user reads the notice, we auto-refresh
+  // their search after ~1.5s. Rationale: the user has already lost their fare
+  // (nothing they can do to save it), so an "OK" button just adds a click
+  // between them and the fix. The auto-refresh keeps forward momentum.
+  //
+  // Announced via role="alert" + aria-live="assertive" so screen readers pick
+  // up the notice immediately rather than waiting for the user to tab to it.
   function showSearchExpiredModal() {
     if (document.getElementById('search-expired-modal')) return;
 
     const modal = document.createElement('div');
     modal.id = 'search-expired-modal';
     modal.className = 'search-loading-backdrop';
+    modal.setAttribute('role', 'alert');
+    modal.setAttribute('aria-live', 'assertive');
     modal.innerHTML = `
       <div class="search-loading-card" style="max-width:400px;text-align:center;">
         <div style="display:flex;justify-content:center;margin-bottom:14px;">
@@ -13170,20 +13367,84 @@
         <div style="font-size:18px;font-weight:600;color:var(--ink,#0F1923);margin-bottom:8px;">
           Search results have expired
         </div>
-        <div style="font-size:14px;color:var(--text-2,#4A5568);margin-bottom:20px;line-height:1.5;">
-          Prices and availability can change quickly. Refresh your search for the latest options.
+        <div style="font-size:14px;color:var(--text-2,#4A5568);line-height:1.5;">
+          Prices and availability can change quickly. We're refreshing your search…
         </div>
-        <button type="button" id="search-expired-refresh" style="width:100%;padding:12px 16px;border-radius:10px;border:none;background:var(--brand,#3D95F5);color:#fff;font-weight:600;cursor:pointer;font-size:14px;">
-          Refresh
-        </button>
       </div>
     `;
     document.body.appendChild(modal);
 
-    document.getElementById('search-expired-refresh').addEventListener('click', () => {
+    // Auto-advance after a beat so the user has time to read the notice
+    // without needing to click. 1.5s is long enough to register the message,
+    // short enough that the redirect still feels responsive.
+    setTimeout(() => {
       modal.remove();
       rerunSearchFromExpiry();
-    });
+    }, 1500);
+  }
+
+  // Step 2b price-drift notification modal. Shown when create-payment returns
+  // 409 PRICE_DRIFT — the base fare has shifted more than 1% between the
+  // user's last view and the moment of Continue-to-payment click.
+  //
+  // Design choice: this is a NOTIFICATION, not a gate. The user already
+  // committed to paying (they clicked Continue). We tell them the new price
+  // via an unmissable modal, give them ~3 seconds to read, then complete
+  // their request. Their escape hatches during the 3s window are the ones
+  // they already have — browser back, browser refresh, close the tab. We
+  // don't need to add another button for "no thanks."
+  //
+  // Why no dismiss button: adding one makes this look like a gate. Then
+  // users hit "no" out of habit and lose their booking. Since the current
+  // page's price panel updates BEFORE this modal appears (see caller), the
+  // user CAN see the new price on the booking view if they escape.
+  //
+  // role="alert" + aria-live="assertive" so screen readers announce the
+  // price change immediately.
+  function _showPriceDriftModal({ expected_kes, actual_kes, delta_kes }, onProceed) {
+    if (document.getElementById('price-drift-modal')) return;
+
+    const modal = document.createElement('div');
+    modal.id = 'price-drift-modal';
+    modal.className = 'search-loading-backdrop';
+    modal.setAttribute('role', 'alert');
+    modal.setAttribute('aria-live', 'assertive');
+
+    const sign = delta_kes >= 0 ? '+' : '−'; // proper minus sign
+    const absDelta = Math.abs(delta_kes);
+    modal.innerHTML = `
+      <div class="search-loading-card" style="max-width:420px;text-align:center;">
+        <div style="display:flex;justify-content:center;margin-bottom:14px;">
+          <div style="width:48px;height:48px;border-radius:50%;background:var(--brand-soft,#e8f3ff);display:flex;align-items:center;justify-content:center;">
+            <svg width="26" height="26" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+              <path d="M12 6v6l4 2" stroke="var(--brand,#3D95F5)" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+              <circle cx="12" cy="12" r="9" stroke="var(--brand,#3D95F5)" stroke-width="1.8"/>
+            </svg>
+          </div>
+        </div>
+        <div style="font-size:18px;font-weight:600;color:var(--ink,#0F1923);margin-bottom:12px;">
+          The fare price has changed
+        </div>
+        <div style="font-size:14px;color:var(--text-2,#4A5568);line-height:1.6;margin-bottom:14px;">
+          Was: ${formatKes(expected_kes)}<br>
+          Now: ${formatKes(actual_kes)} (${sign}${formatKes(absDelta)})
+        </div>
+        <div style="font-size:13px;color:var(--text-3,#8A96A3);line-height:1.5;font-style:italic;">
+          Prices fluctuate all the time. Continuing to payment…
+        </div>
+      </div>
+    `;
+    document.body.appendChild(modal);
+
+    // 3s beat, then callback fires to retry the payment. Long enough for the
+    // user to read + register, short enough that the flow still feels
+    // responsive. If for any reason the callback throws, we still tear down
+    // the modal so the user isn't stranded.
+    setTimeout(() => {
+      modal.remove();
+      try { if (typeof onProceed === 'function') onProceed(); }
+      catch (e) { console.warn('[_showPriceDriftModal] onProceed threw:', e); }
+    }, 3000);
   }
 
   function goToPayment() {
@@ -13281,7 +13542,7 @@
     // M-Pesa stays disabled at launch
   }
 
-  async function startCardPayment() {
+  async function startCardPayment({ _skipDriftCheck = false } = {}) {
     clearAlert('payment-alert');
     const btn = document.getElementById('card-start-btn');
     if (btn) { btn.classList.add('btn-loading'); btn.disabled = true; }
@@ -13297,23 +13558,116 @@
       // includes BOTH the chosen outbound AND the chosen return — that's what we
       // need to book.
       // One-way: only selectedOutbound exists.
-      const bookingOfferId = (selectedInbound || selectedOutbound).cabinPricing.offer_id;
+      const bookingSelection = selectedInbound || selectedOutbound;
+      const bookingOfferId = bookingSelection.cabinPricing.offer_id;
+      // Step 2b price-drift check: send what we THINK the base fare is (KES).
+      // EF re-fetches from Duffel + re-runs FX; if the fresh KES quote differs
+      // by more than 1% we get a 409 PRICE_DRIFT response, show the notification
+      // modal, then re-fire the same request with _skipDriftCheck=true to bypass
+      // the check (customer has been notified of the new price).
+      const expectedBaseKes = bookingSelection.cabinPricing.price_kes;
       // If signed in, pass the user's JWT so the EF can resolve user_id and
       // link the booking to their account. Falls back to anon key for guests.
       const authBearer = await getAuthBearer();
+      const body = {
+        offer_id: bookingOfferId,
+        passengers: passengerData,
+        contact: contactData,
+        seats: collectSeatSelections(),
+        baggages: collectBaggageSelections(),
+        turnstile_token: turnstileToken,
+      };
+      if (!_skipDriftCheck) body.expected_price_kes = expectedBaseKes;
+
       const res = await fetch(`${SUPABASE_URL}/functions/v1/create-payment`, {
         method: 'POST',
         headers: { 'Authorization': `Bearer ${authBearer}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          offer_id: bookingOfferId,
-          passengers: passengerData,
-          contact: contactData,
-          seats: collectSeatSelections(),
-          baggages: collectBaggageSelections(),
-          turnstile_token: turnstileToken,
-        }),
+        body: JSON.stringify(body),
       });
       const data = await res.json();
+
+      // 410 Gone — offer no longer valid at Duffel. Same handling as the
+      // fare-timer-expiry path: search-expired modal + auto-refresh.
+      if (res.status === 410) {
+        resetTurnstile('payment');
+        showSearchExpiredModal();
+        return;
+      }
+
+      // 409 PRICE_DRIFT — offer valid but base fare KES has shifted more
+      // than 1% since the user's last view. Show notification modal, then
+      // silently update in-memory price + re-fire WITHOUT the drift check.
+      // The user has already clicked Continue-to-payment, so we're taking
+      // them all the way through — the modal is a heads-up, not a gate.
+      if (res.status === 409 && data.code === 'PRICE_DRIFT') {
+        resetTurnstile('payment');
+        // Update the selection so all subsequent renders (price panel,
+        // payment summary) show the fresh number. Frontend rounds; EF's
+        // number is the source of truth.
+        bookingSelection.cabinPricing.price_kes = data.actual_kes;
+        renderBookingSummary();
+        // Show the modal, wait ~3s, then auto-fire the retry.
+        _showPriceDriftModal({
+          expected_kes: data.expected_kes,
+          actual_kes: data.actual_kes,
+          delta_kes: data.delta_kes,
+        }, () => {
+          // Retry with drift-check bypassed. The button loading state was
+          // reset in the finally below; startCardPayment will manage it
+          // again on the retry.
+          startCardPayment({ _skipDriftCheck: true });
+        });
+        return;
+      }
+
+      // 409 (non-drift) — a seat or baggage service_id is no longer valid at
+      // Duffel (EF lines ~467/540). Two possible causes:
+      //   - The user's selection was made against a stale offer cache and
+      //     Duffel has since evicted those specific service_ids. Rare but
+      //     recoverable — clear the affected selection and let them re-pick.
+      //   - The offer's service catalog is genuinely broken and even a
+      //     re-pick will hit the same wall. Not recoverable via booking flow.
+      //
+      // We can't tell these apart from a single response, so we give the
+      // user ONE clean retry: strike 1 = clear + toast + stay on booking,
+      // strike 2 = escalate to the same expired-modal flow as a 410. The
+      // counter is scoped to the booking view (reset on fresh entry).
+      if (res.status === 409) {
+        resetTurnstile('payment');
+        _bookingServiceIdRetryCount++;
+        if (_bookingServiceIdRetryCount >= 2) {
+          // Second strike — offer is genuinely broken. Redirect to fresh
+          // search via the standard expired flow. The counter will reset
+          // when the user picks a fresh flight (proceedToBooking runs).
+          console.warn('[startCardPayment] second 409 on same booking, escalating to expired modal');
+          showSearchExpiredModal();
+          return;
+        }
+        // First strike — clear stale selections + explain + let user retry.
+        // We clear BOTH seats and baggage regardless of which one Duffel
+        // rejected, because we don't parse the error message and both are
+        // keyed by the same offer's service catalog. Slight over-clear but
+        // consistent with the "you need to re-pick" mental model.
+        selectedSeats = {};
+        selectedBaggages = {};
+        try { renderSeatsList(); } catch (_) {}
+        try { renderBaggageList(); } catch (_) {}
+        renderBookingSummary();
+        // Return to booking view if we're already on payment (proceedToPayment
+        // switched views before firing this fetch). Otherwise stay put.
+        if (document.getElementById('view-payment') && !document.getElementById('view-payment').classList.contains('hidden')) {
+          showView('booking');
+        }
+        showAlert('booking-alert',
+          (data.error || 'Some selections are no longer available.') +
+          ' Your seat and bag choices have been cleared — please re-add them and try again.');
+        // Reset iframe wrap so the next Continue-click doesn't see stale
+        // pesapal iframe HTML lying around.
+        const wrap = document.getElementById('card-iframe-wrap');
+        if (wrap) wrap.innerHTML = '';
+        return;
+      }
+
       if (!res.ok || data.error || !data.redirect_url) {
         // Reset so the next attempt gets a fresh token
         resetTurnstile('payment');
