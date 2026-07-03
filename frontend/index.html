@@ -5,10 +5,9 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>TumaFly</title>
   <meta name="description" content="Book flights from Nairobi with M-Pesa or card. Built for African travelers.">
-  <!-- Favicon set. SVG for modern browsers (crisp at any DPI), PNG fallback for
-       older ones + Apple's home-screen icon. Served as static files from repo
-       root alongside index.html. -->
-  <link rel="icon" type="image/svg+xml" href="/logo.svg">
+  <!-- Favicon set. NOTE: we do NOT reference logo.svg here — that file is the
+       "tumafly" wordmark, not the icon mark. Browsers would try to cram the
+       whole wordmark into a 16px tab. Instead we use the icon-only PNGs. -->
   <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32.png">
   <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png">
   <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -115,9 +114,16 @@
   </script>
   <style>
     :root {
-      --brand: #3D95F5;
-      --brand-dark: #1a6fd4;
-      --brand-soft: #e8f3ff;
+      /* Brand blue family. --brand matches the wordmark exactly (#2563EB =
+       * Tailwind blue-600); --brand-dark is the canonical hover mate
+       * (Tailwind blue-700); --brand-soft is the pale-tinted background
+       * (Tailwind blue-100). Keeping to a single mathematical family means
+       * hover states, backgrounds, and borders all read as the same brand
+       * rather than three different blues that "look close." */
+      --brand: #2563EB;
+      --brand-dark: #1D4ED8;
+      --brand-soft: #DBEAFE;
+      --brand-border: #93C5FD;  /* blue-300 — for soft borders on info banners etc. */
 
       --sand: #F5EFE6;       /* hero warm neutral — Nairobi midday */
       --sand-deep: #ECE3D2;
@@ -887,7 +893,7 @@
 
     /* ─── Post-booking nudge (on success page) ───────────────────── */
     .save-booking-nudge {
-      background: var(--brand-soft); border: 1px solid #b8d8fc;
+      background: var(--brand-soft); border: 1px solid var(--brand-border);
       border-radius: var(--radius); padding: 16px 20px;
       display: flex; align-items: center; gap: 16px;
       margin-top: 20px;
@@ -908,7 +914,7 @@
        ───────────────────────────────────────────────────────────── */
     .hero {
       background: var(--sand);
-      padding: 56px 24px 88px;
+      padding: 56px 0 88px;
       position: relative;
       /* No overflow:hidden — would clip the travelers popup. The radial-gradient ::before
          uses inset:0 so it's naturally bounded to hero anyway. */
@@ -925,6 +931,7 @@
     .hero-inner {
       max-width: var(--container);
       margin: 0 auto;
+      padding: 0 24px;
       position: relative;
     }
     .hero-title {
@@ -4395,7 +4402,7 @@
       gap: 10px;
     }
     .alert-error { background: var(--danger-soft); color: var(--danger); border: 1px solid #FDC8C8; }
-    .alert-info { background: var(--brand-soft); color: var(--brand-dark); border: 1px solid #B7DAFA; }
+    .alert-info { background: var(--brand-soft); color: var(--brand-dark); border: 1px solid var(--brand-border); }
     .alert-warn { background: var(--warning-soft); color: var(--warning); border: 1px solid #FCD9A2; }
 
     input.has-error, select.has-error {
@@ -5089,8 +5096,11 @@
         z-index: 49; /* just under the nav's z-index: 50 */
       }
 
-      /* Hero */
-      .hero { padding: 28px 16px 36px; }
+      /* Hero — matches the nav-inner pattern: outer full-bleed, inner
+         holds the 16px gutter so its content column lines up with the header
+         logo + nav-links columns. Mirrors the desktop rule above. */
+      .hero { padding: 28px 0 36px; }
+      .hero-inner { padding: 0 16px; }
       .hero-title {
         font-size: clamp(26px, 7.5vw, 32px);
         letter-spacing: -0.8px;
@@ -13121,7 +13131,7 @@
         <div style="font-size:14px;color:var(--text-2,#4A5568);margin-bottom:20px;line-height:1.5;">
           Prices and availability can change quickly. Refresh your search for the latest options.
         </div>
-        <button type="button" id="search-expired-refresh" style="width:100%;padding:12px 16px;border-radius:10px;border:none;background:var(--brand,#3D95F5);color:#fff;font-weight:600;cursor:pointer;font-size:14px;">
+        <button type="button" id="search-expired-refresh" style="width:100%;padding:12px 16px;border-radius:10px;border:none;background:var(--brand,#2563EB);color:#fff;font-weight:600;cursor:pointer;font-size:14px;">
           Refresh
         </button>
       </div>
@@ -15094,7 +15104,7 @@
         <div style="font-size:14px;color:var(--text-2,#4A5568);margin-bottom:20px;line-height:1.5;">
           ${phone ? phone + ' is' : 'This number is'} already used by another TumaFly account. Try signing in with Google or a different number. If you think this is a mistake, contact support.
         </div>
-        <button type="button" id="dup-account-ok" style="width:100%;padding:12px 16px;border-radius:10px;border:none;background:var(--brand,#3D95F5);color:#fff;font-weight:600;cursor:pointer;font-size:14px;">
+        <button type="button" id="dup-account-ok" style="width:100%;padding:12px 16px;border-radius:10px;border:none;background:var(--brand,#2563EB);color:#fff;font-weight:600;cursor:pointer;font-size:14px;">
           OK
         </button>
       </div>
@@ -15137,7 +15147,7 @@
         <div style="font-size:13px;color:var(--text-3,#717A86);margin-bottom:20px;line-height:1.5;text-align:left;">
           Note: in incognito or private mode, you also need to be signed into Google in this window first.
         </div>
-        <button type="button" id="fedcm-blocked-ok" style="width:100%;padding:12px 16px;border-radius:10px;border:none;background:var(--brand,#3D95F5);color:#fff;font-weight:600;cursor:pointer;font-size:14px;">
+        <button type="button" id="fedcm-blocked-ok" style="width:100%;padding:12px 16px;border-radius:10px;border:none;background:var(--brand,#2563EB);color:#fff;font-weight:600;cursor:pointer;font-size:14px;">
           Got it
         </button>
       </div>
