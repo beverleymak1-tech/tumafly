@@ -5,6 +5,12 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>TumaFly</title>
   <meta name="description" content="Book flights from Nairobi with M-Pesa or card. Built for African travelers.">
+  <!-- Favicon set. SVG for modern browsers (crisp at any DPI), PNG fallback for
+       older ones + Apple's home-screen icon. Served as static files from repo
+       root alongside index.html. -->
+  <link rel="icon" type="image/svg+xml" href="/logo.svg">
+  <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32.png">
+  <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
@@ -191,28 +197,19 @@
     .brand {
       display: flex;
       align-items: center;
-      gap: 10px;
-      font-weight: 600;
-      font-size: 19px;
-      letter-spacing: -0.4px;
-      color: var(--ink);
       cursor: pointer;
-      text-decoration: none;
       background: none;
       border: none;
+      padding: 0;
       font-family: inherit;
     }
-    .brand-mark {
-      width: 32px;
+    /* Logo replaces the old "T" square + "TumaFly" wordmark. Height locked to
+     * match the previous header rhythm (32px tall = same as old brand-mark).
+     * Width auto so the SVG's native aspect ratio is preserved. */
+    .brand-logo {
       height: 32px;
-      background: var(--brand);
-      border-radius: 8px;
-      display: grid;
-      place-items: center;
-      color: white;
-      font-weight: 700;
-      font-size: 16px;
-      letter-spacing: -1px;
+      width: auto;
+      display: block;
     }
     .nav-links {
       display: flex;
@@ -3528,12 +3525,10 @@
     .tf-slide-in {
       animation: tf-slide-in-anim 350ms ease-out;
     }
-    /* Same treatment for the international-passport banner when tripRequiresPassport
-     * flips true after Phase 3. .intl-banner appears via renderPassengerForms; we
-     * give it a subtle fade+slide-down every time it shows up. */
-    .intl-banner {
-      animation: tf-slide-in-anim 300ms ease-out;
-    }
+    /* Note: .intl-banner first-appearance animation is handled by the
+     * .tf-first-mount pattern (see saved-trav-picker block above) — we
+     * only want to animate its INITIAL appearance, not every re-render
+     * that happens during form interaction. */
 
     @media (max-width: 600px) {
       .form-grid, .form-grid-3 { grid-template-columns: 1fr; }
@@ -3696,10 +3691,27 @@
       background: var(--surface-2, #f7f9fc);
       border: 1px solid var(--border);
       border-radius: var(--radius-sm);
+    }
+    /* Only apply the fade-in animation the first time the picker appears
+     * per booking session. JS toggles this class on first mount and clears
+     * it after animation ends so subsequent re-renders (e.g. from
+     * applySavedTraveler → renderPassengerForms) don't re-flicker. */
+    .saved-trav-picker.tf-first-mount {
       animation: tf-fade-in 250ms ease-out;
+    }
+    /* Banner has its own animation — slower, more travel, gentler ease.
+     * The international-passport requirement is a "pay attention" moment,
+     * so we want it to feel like the app is deliberately telling the user
+     * something rather than a fast utility fade. */
+    .intl-banner.tf-first-mount {
+      animation: tf-banner-slide 550ms cubic-bezier(0.16, 1, 0.3, 1);
     }
     @keyframes tf-fade-in {
       0%   { opacity: 0; transform: translateY(-4px); }
+      100% { opacity: 1; transform: translateY(0); }
+    }
+    @keyframes tf-banner-slide {
+      0%   { opacity: 0; transform: translateY(-14px); }
       100% { opacity: 1; transform: translateY(0); }
     }
     .saved-trav-picker-label {
@@ -5602,9 +5614,8 @@
 
 <nav class="nav">
   <div class="nav-inner">
-    <button class="brand" onclick="showView('home')">
-      <span class="brand-mark">T</span>
-      <span>TumaFly</span>
+    <button class="brand" onclick="showView('home')" aria-label="TumaFly — home">
+      <img src="/logo.svg" alt="TumaFly" class="brand-logo">
     </button>
     <div class="nav-links">
       <div class="nav-currency" id="nav-currency-toggle">
@@ -7744,6 +7755,16 @@
     tripRequiresPassport = false;
     fareTimerExpired = false;
 
+    // Reset first-mount animation flags on the passenger-forms container.
+    // Refresh = new booking session = each of these should animate its
+    // first appearance again. Without this reset, a returning user would
+    // see the picker/banner pop in with no transition.
+    const _pfContainer = document.getElementById('passenger-forms');
+    if (_pfContainer) {
+      _pfContainer.__tfPickerAnimated = false;
+      _pfContainer.__tfBannerAnimated = false;
+    }
+
     // Overlay shadow values onto the fresh travelerStates + contact inputs.
     // Cheap: sessionStorage read is synchronous, values applied in one pass.
     try { restoreBookingPassengers(); } catch (e) { console.warn('[restoreBooking] shell passenger restore failed:', e); }
@@ -7755,6 +7776,22 @@
     // render with all-zero values behind a shimmer overlay.
     renderPassengerForms();
     _paintBookingShellShimmers();
+
+    // Start the fare timer optimistically from the stashed expires_at if we
+    // have one. Duffel offers are ~15 min TTL and the shadow was written
+    // moments/minutes ago, so this is usually a fresh countdown. Phase 3
+    // resyncs to the fresher expires_at from get-offer if it differs.
+    try {
+      const raw = sessionStorage.getItem(BOOKING_PASSENGER_SHADOW_KEY);
+      const stashedExp = raw ? (JSON.parse(raw)?.fare_expires_at_ms || 0) : 0;
+      if (stashedExp && stashedExp > Date.now()) {
+        fareTimerExpiresAtMs = stashedExp;
+        fareTimerExpired = false;
+        if (fareTimerHandle) clearInterval(fareTimerHandle);
+        tickFareTimer();
+        fareTimerHandle = setInterval(tickFareTimer, 1000);
+      }
+    } catch (_) {}
 
     // ── PHASE 2: fetch offer (network) ──────────────────────────────────
     //
@@ -8089,6 +8126,11 @@
 
   function stashBookingPassengers() {
     try {
+      // Include the offer's expires_at so refresh-restore can start the fare
+      // timer at t=0 rather than waiting for get-offer to resolve (which
+      // takes 6-8s on some networks due to Turnstile). The timer will
+      // resync to the fresher value once get-offer returns.
+      const expMs = getEffectiveExpiresAtMs();
       const payload = {
         travelers: (travelerStates || []).map(s => ({
           title:       s?.data?.title || '',
@@ -8096,12 +8138,14 @@
           family_name: s?.data?.family_name || '',
           gender:      s?.data?.gender || '',
           nationality: s?.data?.nationality || '',
+          _saved_traveler_id: s?.data?._saved_traveler_id || null,
         })),
         contact: {
           email:          document.getElementById('contact-email')?.value || '',
           phone_number:   document.getElementById('contact-phone')?.value || '',
           phone_dial_iso: countryPickerState?.['contact']?.iso || '',
         },
+        fare_expires_at_ms: expMs || 0,
       };
       sessionStorage.setItem(BOOKING_PASSENGER_SHADOW_KEY, JSON.stringify(payload));
     } catch (_) { /* sessionStorage disabled — silent no-op */ }
@@ -8133,6 +8177,17 @@
         if (!ts.data.family_name && shadow.family_name) ts.data.family_name = shadow.family_name;
         if (!ts.data.gender      && shadow.gender)      ts.data.gender = shadow.gender;
         if (!ts.data.nationality && shadow.nationality) ts.data.nationality = shadow.nationality;
+        // _saved_traveler_id: restore only if the picker actually has this
+        // saved-traveler row available (fetchSavedTravelers may not have
+        // run yet, in which case _savedTravelers is empty and we skip;
+        // Phase 3 re-render will pick it up once the fetch resolves).
+        if (!ts.data._saved_traveler_id && shadow._saved_traveler_id) {
+          const stillExists = Array.isArray(_savedTravelers)
+            && _savedTravelers.some(t => t.id === shadow._saved_traveler_id);
+          if (stillExists) {
+            ts.data._saved_traveler_id = shadow._saved_traveler_id;
+          }
+        }
       });
     }
 
@@ -12161,6 +12216,30 @@
       if (s.saved) return renderSavedTraveler(i);
       return renderTravelerForm(i);
     }).join('');
+
+    // Step 3 first-mount animation. Container-level flags survive innerHTML
+    // rewrites (they're on the parent, not the swapped children). On the
+    // first render that produces a picker or banner, add .tf-first-mount so
+    // CSS plays the fade-in animation. On subsequent renders (e.g. applying
+    // a saved traveler, live typing that triggers refreshUpdateOnFileCheckbox,
+    // or Phase 3 shell reconcile) we DON'T re-add the class, so no re-flicker.
+    if (!container.__tfPickerAnimated) {
+      const picker = container.querySelector('.saved-trav-picker');
+      if (picker) {
+        picker.classList.add('tf-first-mount');
+        container.__tfPickerAnimated = true;
+        setTimeout(() => picker.classList.remove('tf-first-mount'), 350);
+      }
+    }
+    if (!container.__tfBannerAnimated) {
+      const bannerEl = container.querySelector('.intl-banner');
+      if (bannerEl) {
+        bannerEl.classList.add('tf-first-mount');
+        container.__tfBannerAnimated = true;
+        // Banner animation is 550ms — clear the class a hair after it ends.
+        setTimeout(() => bannerEl.classList.remove('tf-first-mount'), 600);
+      }
+    }
 
     // Q4 (live): attach delegated input/change watcher exactly once.
     // Survives subsequent innerHTML rewrites because it lives on the
