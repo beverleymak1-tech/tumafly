@@ -7699,6 +7699,22 @@
       // final render (either inbound picker on success, or falls through to
       // expired modal on failure).
       _suppressNextResultsRender = true;
+      // Paint an inbound-picker skeleton right away so the user sees the
+      // right shape (return-flight header, outbound side-card, shimmering
+      // return options) while the network round-trips complete. Replaces
+      // the empty results shell that would otherwise show through.
+      try { renderInboundPickerSkeleton(); } catch (e) {
+        console.warn('[restoreResults] inbound skeleton paint failed:', e);
+      }
+    } else {
+      // No outbound= param → outbound picker refresh (RT step 1 or OW).
+      // Same skeleton treatment as inbound: paint immediately so the shell
+      // doesn't show as empty for the duration of the search-flights fetch.
+      // We don't suppress runSearch's render — its renderResults will
+      // replace the skeleton with real content.
+      try { renderOutboundPickerSkeleton(); } catch (e) {
+        console.warn('[restoreResults] outbound skeleton paint failed:', e);
+      }
     }
     const searchPromise = runSearch({
       origin: from,
@@ -7733,10 +7749,12 @@
           // the helper failed. Otherwise user is stuck on a blank results
           // shell (the runSearch render was suppressed above).
           try { renderResults(); showView('results'); } catch (_) {}
+          try { hideSearchLoading(); } catch (_) {}
         }
       }).catch(e => {
         console.warn('[restoreResults] search failed:', e);
         try { renderResults(); showView('results'); } catch (_) {}
+        try { hideSearchLoading(); } catch (_) {}
       });
     } else {
       searchPromise.catch(e => console.warn('[restoreResults] search failed:', e));
@@ -7755,86 +7773,101 @@
   // (unless the airline retires the flight, which is what triggers
   // showSearchExpiredModal below).
   async function _restoreInboundPickerFromOffer(outboundOfferId) {
-    // Turnstile token for get-offer — same widget as booking uses.
-    let token = '';
-    try { token = await ensureTurnstileToken('search'); }
-    catch (e) { console.warn('[_restoreInboundPickerFromOffer] turnstile await failed:', e); }
-
-    let res, data;
+    // Wrap the whole body in try/finally so hideSearchLoading() ALWAYS
+    // fires when we exit. runSearch's finally deferred that call for us
+    // (see _suppress branch there); if we skipped hiding it too the modal
+    // would stay up forever on any error path.
     try {
-      res = await fetch(`${SUPABASE_URL}/functions/v1/get-offer`, {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${SUPABASE_ANON_KEY}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ offer_id: outboundOfferId, turnstile_token: token }),
-      });
-      data = await res.json().catch(() => ({}));
-    } catch (e) {
-      console.warn('[_restoreInboundPickerFromOffer] fetch failed:', e);
+      // Turnstile token for get-offer — uses the search widget since we're
+      // on the results page (payment widget only lives on the booking view).
+      let token = '';
+      try { token = await ensureTurnstileToken('search'); }
+      catch (e) { console.warn('[_restoreInboundPickerFromOffer] turnstile await failed:', e); }
+
+      let res, data;
+      try {
+        res = await fetch(`${SUPABASE_URL}/functions/v1/get-offer`, {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${SUPABASE_ANON_KEY}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({ offer_id: outboundOfferId, turnstile_token: token }),
+        });
+        data = await res.json().catch(() => ({}));
+      } catch (e) {
+        console.warn('[_restoreInboundPickerFromOffer] fetch failed:', e);
+        resetTurnstile('search');
+        // Fall through to outbound picker with fresh offers.
+        renderResults();
+        showView('results', { fromPopState: true });
+        return;
+      }
       resetTurnstile('search');
-      return;
-    }
-    resetTurnstile('search');
 
-    // 410 or bad response — offer is gone. User navigated back to a URL that
-    // references a fare that no longer exists. Show the expired modal;
-    // rerunSearchFromExpiry will (again) bounce them to fresh results.
-    if (res.status === 410 || !res.ok || !data.success) {
-      console.warn('[_restoreInboundPickerFromOffer] URL outbound offer stale', res.status);
-      showSearchExpiredModal();
-      return;
-    }
+      // 410 or bad response — offer is gone. User navigated back to a URL that
+      // references a fare that no longer exists. Show the expired modal;
+      // rerunSearchFromExpiry will (again) bounce them to fresh results.
+      if (res.status === 410 || !res.ok || !data.success) {
+        console.warn('[_restoreInboundPickerFromOffer] URL outbound offer stale', res.status);
+        showSearchExpiredModal();
+        return;
+      }
 
-    // Extract first-segment signature from the stale offer's outbound slice.
-    const staleSlice = data.offer?.slices?.[0];
-    const staleSeg = staleSlice?.segments?.[0];
-    if (!staleSeg) {
-      console.warn('[_restoreInboundPickerFromOffer] no first segment in stale offer');
-      // Weird response shape — fall through to outbound picker with fresh
-      // offers rather than leaving the view hidden.
+      // Extract first-segment signature from the stale offer's outbound slice.
+      const staleSlice = data.offer?.slices?.[0];
+      const staleSeg = staleSlice?.segments?.[0];
+      if (!staleSeg) {
+        console.warn('[_restoreInboundPickerFromOffer] no first segment in stale offer');
+        // Weird response shape — fall through to outbound picker with fresh
+        // offers rather than leaving the view hidden.
+        renderResults();
+        showView('results', { fromPopState: true });
+        return;
+      }
+      const targetDep = staleSeg.departure;   // ISO timestamp
+      const targetOrigin = staleSeg.origin;   // IATA
+
+      // Find the matching flight in the fresh allOffers by that signature.
+      // allOffers is bucketed by flight_key, so we scan each and check its
+      // first outbound segment's departure + origin. First hit wins.
+      const match = allOffers.find(o => {
+        const seg = o?.slices?.[0]?.segments?.[0];
+        return seg && seg.departure === targetDep && seg.origin === targetOrigin;
+      });
+      if (!match) {
+        // No matching flight in the fresh data. Treat as fare-expired so the
+        // user gets a clean fallback rather than being stuck on the wrong
+        // page with URL state we can't honor.
+        console.warn('[_restoreInboundPickerFromOffer] no matching fresh flight for stale offer');
+        showSearchExpiredModal();
+        return;
+      }
+
+      // Reconstruct selection. Pick the same cabin the user was on.
+      const cabin = data.selected_cabin;
+      const cabinPricing = match.cabins?.[cabin];
+      if (!cabin || !cabinPricing) {
+        console.warn('[_restoreInboundPickerFromOffer] fresh flight has no matching cabin', cabin);
+        // Fresh flight exists but its cabin catalog changed — fall through
+        // to outbound picker rather than leaving view hidden.
+        renderResults();
+        showView('results', { fromPopState: true });
+        return;
+      }
+      selectedOutbound = { offer: match, cabin, cabinPricing };
       renderResults();
+      // showView on the successful path — runSearch's own showView call was
+      // suppressed (see _suppressNextResultsRender) so the flash guard is
+      // still hiding views. Calling showView clears the guard and reveals
+      // the inbound picker with selectedOutbound set.
       showView('results', { fromPopState: true });
-      return;
+    } finally {
+      // Always drop the search-loading modal — runSearch's finally deferred
+      // it for us. The modal covered the interim outbound-flash; we're done
+      // with our render now, so it's safe to hide.
+      try { hideSearchLoading(); } catch (_) {}
     }
-    const targetDep = staleSeg.departure;   // ISO timestamp
-    const targetOrigin = staleSeg.origin;   // IATA
-
-    // Find the matching flight in the fresh allOffers by that signature.
-    // allOffers is bucketed by flight_key, so we scan each and check its
-    // first outbound segment's departure + origin. First hit wins.
-    const match = allOffers.find(o => {
-      const seg = o?.slices?.[0]?.segments?.[0];
-      return seg && seg.departure === targetDep && seg.origin === targetOrigin;
-    });
-    if (!match) {
-      // No matching flight in the fresh data. Treat as fare-expired so the
-      // user gets a clean fallback rather than being stuck on the wrong
-      // page with URL state we can't honor.
-      console.warn('[_restoreInboundPickerFromOffer] no matching fresh flight for stale offer');
-      showSearchExpiredModal();
-      return;
-    }
-
-    // Reconstruct selection. Pick the same cabin the user was on.
-    const cabin = data.selected_cabin;
-    const cabinPricing = match.cabins?.[cabin];
-    if (!cabin || !cabinPricing) {
-      console.warn('[_restoreInboundPickerFromOffer] fresh flight has no matching cabin', cabin);
-      // Fresh flight exists but its cabin catalog changed — fall through
-      // to outbound picker rather than leaving view hidden.
-      renderResults();
-      showView('results', { fromPopState: true });
-      return;
-    }
-    selectedOutbound = { offer: match, cabin, cabinPricing };
-    renderResults();
-    // showView on the successful path — runSearch's own showView call was
-    // suppressed (see _suppressNextResultsRender) so the flash guard is
-    // still hiding views. Calling showView clears the guard and reveals
-    // the inbound picker with selectedOutbound set.
-    showView('results', { fromPopState: true });
   }
 
   // ============================================================
@@ -9710,8 +9743,18 @@
     // same search after an offer expires mid-checkout.
     lastSearchParams = { origin, destination, date, returnDate };
     if (fromButton) { fromButton.classList.add('btn-loading'); fromButton.disabled = true; }
+    // Step 2b: snapshot the suppress flag once here — try-block scope can't
+    // see it from finally. Cleared to false regardless so subsequent
+    // searches don't inherit it.
+    const _suppress = _suppressNextResultsRender;
+    _suppressNextResultsRender = false;
     // Show the branded loading modal — gives the user a sense of motion during the
     // 3-6s that parallel cabin lookups take. Hidden in `finally` below.
+    // We show it even on refresh-restore flows where the skeleton is
+    // already painting behind: the modal's dimmed backdrop lets the shimmer
+    // show through, and its small white card + "Comparing fares…" copy
+    // reinforces that we're actively fetching. Skeleton says "here's the
+    // shape"; modal says "we're on it."
     showSearchLoading(origin, destination);
     // Bot-protection: get a Turnstile token (no-op if widget isn't loaded yet —
     // backend fails open when TURNSTILE_SECRET isn't configured).
@@ -9840,9 +9883,8 @@
       // (_restoreInboundPickerFromOffer) will run selectedOutbound-setting
       // + renderResults + showView('results') once the get-offer round-trip
       // completes. This eliminates the intermediate outbound-picker flash.
-      // Clear the flag whether it was set or not — one-shot semantics.
-      const _suppress = _suppressNextResultsRender;
-      _suppressNextResultsRender = false;
+      // The flag was hoisted above (near the try opener) so finally can
+      // also read it to defer hideSearchLoading.
       if (!_suppress) {
         renderResults();
         showView('results');
@@ -10522,6 +10564,155 @@
   function changeOutbound() {
     selectedOutbound = null;
     renderResults();
+  }
+
+  // Step 2b: outbound-picker skeleton (RT step 1 OR one-way). Sibling of
+  // renderInboundPickerSkeleton — same shimmer language but for the outbound
+  // step. No outbound side-card (there's nothing to lock in yet), just the
+  // step-row header + shimmering flight cards where offers will land.
+  //
+  // Called from restoreResults when we're doing a fresh search-restore with
+  // no outbound= param in URL (i.e., outbound picker refresh — either RT
+  // step 1 or one-way). Replaced by renderResults() once runSearch resolves.
+  function renderOutboundPickerSkeleton() {
+    try { setRouteHeader('outbound'); } catch (_) {}
+
+    // Clear sidebar slot — outbound picker doesn't show the outbound
+    // side-card (there's no selected outbound yet).
+    const sideSlot = document.getElementById('outbound-side-slot');
+    if (sideSlot) sideSlot.innerHTML = '';
+
+    const list = document.getElementById('results-list');
+    if (!list) return;
+    const cardSkeleton = () => `
+      <div class="fc-card" style="pointer-events:none;">
+        <div class="fc-header">
+          <div class="fc-airline">
+            <span class="tf-shimmer" style="display:inline-block;width:28px;height:28px;border-radius:6px;">&nbsp;</span>
+            <span class="tf-shimmer" style="display:inline-block;width:110px;height:12px;border-radius:3px;margin-left:8px;">&nbsp;</span>
+          </div>
+        </div>
+        <div class="fc-body">
+          <div class="fc-times">
+            <span class="tf-shimmer" style="display:inline-block;width:70px;height:24px;border-radius:3px;">&nbsp;</span>
+            <span class="tf-shimmer" style="display:inline-block;width:120px;height:12px;border-radius:3px;margin:6px 0;">&nbsp;</span>
+            <span class="tf-shimmer" style="display:inline-block;width:100px;height:12px;border-radius:3px;">&nbsp;</span>
+          </div>
+        </div>
+        <div class="fc-cabins" style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px;padding:12px;">
+          <span class="tf-shimmer" style="height:56px;border-radius:8px;">&nbsp;</span>
+          <span class="tf-shimmer" style="height:56px;border-radius:8px;">&nbsp;</span>
+          <span class="tf-shimmer" style="height:56px;border-radius:8px;">&nbsp;</span>
+          <span class="tf-shimmer" style="height:56px;border-radius:8px;">&nbsp;</span>
+        </div>
+      </div>
+    `;
+    // Step-row copy varies by trip type: RT step 1 shows the two-step framing,
+    // one-way just says "Choose your flight". Both match what renderResults
+    // would eventually print — same text, just under shimmer for now.
+    const stepText = (tripType === 'round')
+      ? 'Step 1 of 2 — Choose your departure flight'
+      : 'Choose your flight';
+    list.innerHTML = `
+      ${renderStepRow(stepText)}
+      <div class="results-list">
+        ${cardSkeleton()}
+        ${cardSkeleton()}
+        ${cardSkeleton()}
+        ${cardSkeleton()}
+      </div>
+    `;
+  }
+
+  // Step 2b: paint an inbound-picker-shaped skeleton while search-flights +
+  // get-offer round-trips complete on refresh-restore. Structure matches
+  // renderResults' RT-with-selectedOutbound branch above (setRouteHeader
+  // 'return', outbound side-card in sideSlot, step-row + inbound list), but
+  // with all data-bearing spots swapped for tf-shimmer placeholders. The
+  // shell (nav, summary bar, filters sidebar) is already in the static HTML.
+  //
+  // Called from restoreResults BEFORE runSearch fires, replaced by the real
+  // renderResults() once _restoreInboundPickerFromOffer sets selectedOutbound
+  // and completes. If the restore fails, the fallback branches call
+  // renderResults() with fresh offers which also replaces the skeleton.
+  //
+  // The .tf-shimmer class is the same one Step 3 uses for booking-page
+  // shimmer placeholders (see CSS block near line 3475).
+  function renderInboundPickerSkeleton() {
+    try { setRouteHeader('return'); } catch (_) {}
+
+    // Outbound side-card skeleton — shimmer bars in each of the ~5 lines
+    // (date+route, times, meta, airline, cabin). Matches renderOutboundSideCard
+    // structure closely so when it swaps to real content nothing shifts.
+    const sideSlot = document.getElementById('outbound-side-slot');
+    if (sideSlot) {
+      sideSlot.innerHTML = `
+        <div class="outbound-side">
+          <div class="outbound-side-head">
+            <div>
+              <div class="outbound-side-title">Outbound</div>
+              <div class="outbound-side-sub">
+                <span class="tf-shimmer" style="display:inline-block;width:180px;height:12px;border-radius:3px;">&nbsp;</span>
+              </div>
+            </div>
+          </div>
+          <div class="outbound-side-body">
+            <div class="outbound-side-times tabular">
+              <span class="tf-shimmer" style="display:inline-block;width:140px;height:18px;border-radius:3px;">&nbsp;</span>
+            </div>
+            <div class="outbound-side-meta">
+              <span class="tf-shimmer" style="display:inline-block;width:120px;height:12px;border-radius:3px;">&nbsp;</span>
+            </div>
+            <div class="outbound-side-airline">
+              <span class="tf-shimmer" style="display:inline-block;width:24px;height:24px;border-radius:4px;">&nbsp;</span>
+              <span class="tf-shimmer" style="display:inline-block;width:100px;height:14px;border-radius:3px;margin-left:8px;">&nbsp;</span>
+            </div>
+            <div class="outbound-side-cabin">
+              <span class="tf-shimmer" style="display:inline-block;width:70px;height:12px;border-radius:3px;">&nbsp;</span>
+            </div>
+          </div>
+        </div>
+      `;
+    }
+
+    // Return-list skeleton: step-row (known static text) + 4 flight-card
+    // skeletons. Each card gets a shimmer for airline logo, route times,
+    // and 4 cabin buttons. Skeleton cards use the same .fc-card class so
+    // the layout matches; content inside is shimmer.
+    const list = document.getElementById('results-list');
+    if (!list) return;
+    const cardSkeleton = () => `
+      <div class="fc-card" style="pointer-events:none;">
+        <div class="fc-header">
+          <div class="fc-airline">
+            <span class="tf-shimmer" style="display:inline-block;width:28px;height:28px;border-radius:6px;">&nbsp;</span>
+            <span class="tf-shimmer" style="display:inline-block;width:110px;height:12px;border-radius:3px;margin-left:8px;">&nbsp;</span>
+          </div>
+        </div>
+        <div class="fc-body">
+          <div class="fc-times">
+            <span class="tf-shimmer" style="display:inline-block;width:70px;height:24px;border-radius:3px;">&nbsp;</span>
+            <span class="tf-shimmer" style="display:inline-block;width:120px;height:12px;border-radius:3px;margin:6px 0;">&nbsp;</span>
+            <span class="tf-shimmer" style="display:inline-block;width:100px;height:12px;border-radius:3px;">&nbsp;</span>
+          </div>
+        </div>
+        <div class="fc-cabins" style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px;padding:12px;">
+          <span class="tf-shimmer" style="height:56px;border-radius:8px;">&nbsp;</span>
+          <span class="tf-shimmer" style="height:56px;border-radius:8px;">&nbsp;</span>
+          <span class="tf-shimmer" style="height:56px;border-radius:8px;">&nbsp;</span>
+          <span class="tf-shimmer" style="height:56px;border-radius:8px;">&nbsp;</span>
+        </div>
+      </div>
+    `;
+    list.innerHTML = `
+      ${renderStepRow('Step 2 of 2 — Choose your return flight')}
+      <div class="results-list">
+        ${cardSkeleton()}
+        ${cardSkeleton()}
+        ${cardSkeleton()}
+        ${cardSkeleton()}
+      </div>
+    `;
   }
 
   function renderStopDots(stops) {
