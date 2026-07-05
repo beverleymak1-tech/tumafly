@@ -7690,6 +7690,16 @@
     // auto-derive in showView — keeping URL in sync if any param was
     // canonicalized along the way).
     const outboundOfferId = (params.outbound || '').trim();
+    const willRestoreInbound = !!(
+      outboundOfferId && /^off_[A-Za-z0-9]+$/.test(outboundOfferId) && ret
+    );
+    if (willRestoreInbound) {
+      // Suppress runSearch's own render so we don't flash outbound picker
+      // between search-complete and get-offer-complete. Helper handles the
+      // final render (either inbound picker on success, or falls through to
+      // expired modal on failure).
+      _suppressNextResultsRender = true;
+    }
     const searchPromise = runSearch({
       origin: from,
       destination: to,
@@ -7713,14 +7723,21 @@
     //   4. If the offer_id 410'd or no match found, show the expired modal
     //      — the user came here expecting a specific flight and we couldn't
     //      find it, so fall through cleanly rather than silently ignoring.
-    if (outboundOfferId && /^off_[A-Za-z0-9]+$/.test(outboundOfferId) && ret) {
+    if (willRestoreInbound) {
       searchPromise.then(async () => {
         try {
           await _restoreInboundPickerFromOffer(outboundOfferId);
         } catch (e) {
           console.warn('[restoreResults] inbound picker restore failed:', e);
+          // Fallback: render outbound picker with the fresh offers since
+          // the helper failed. Otherwise user is stuck on a blank results
+          // shell (the runSearch render was suppressed above).
+          try { renderResults(); showView('results'); } catch (_) {}
         }
-      }).catch(e => console.warn('[restoreResults] search failed:', e));
+      }).catch(e => {
+        console.warn('[restoreResults] search failed:', e);
+        try { renderResults(); showView('results'); } catch (_) {}
+      });
     } else {
       searchPromise.catch(e => console.warn('[restoreResults] search failed:', e));
     }
@@ -7740,7 +7757,7 @@
   async function _restoreInboundPickerFromOffer(outboundOfferId) {
     // Turnstile token for get-offer — same widget as booking uses.
     let token = '';
-    try { token = await ensureTurnstileToken('payment'); }
+    try { token = await ensureTurnstileToken('search'); }
     catch (e) { console.warn('[_restoreInboundPickerFromOffer] turnstile await failed:', e); }
 
     let res, data;
@@ -7756,10 +7773,10 @@
       data = await res.json().catch(() => ({}));
     } catch (e) {
       console.warn('[_restoreInboundPickerFromOffer] fetch failed:', e);
-      resetTurnstile('payment');
+      resetTurnstile('search');
       return;
     }
-    resetTurnstile('payment');
+    resetTurnstile('search');
 
     // 410 or bad response — offer is gone. User navigated back to a URL that
     // references a fare that no longer exists. Show the expired modal;
@@ -7775,6 +7792,10 @@
     const staleSeg = staleSlice?.segments?.[0];
     if (!staleSeg) {
       console.warn('[_restoreInboundPickerFromOffer] no first segment in stale offer');
+      // Weird response shape — fall through to outbound picker with fresh
+      // offers rather than leaving the view hidden.
+      renderResults();
+      showView('results', { fromPopState: true });
       return;
     }
     const targetDep = staleSeg.departure;   // ISO timestamp
@@ -7801,10 +7822,19 @@
     const cabinPricing = match.cabins?.[cabin];
     if (!cabin || !cabinPricing) {
       console.warn('[_restoreInboundPickerFromOffer] fresh flight has no matching cabin', cabin);
+      // Fresh flight exists but its cabin catalog changed — fall through
+      // to outbound picker rather than leaving view hidden.
+      renderResults();
+      showView('results', { fromPopState: true });
       return;
     }
     selectedOutbound = { offer: match, cabin, cabinPricing };
     renderResults();
+    // showView on the successful path — runSearch's own showView call was
+    // suppressed (see _suppressNextResultsRender) so the flash guard is
+    // still hiding views. Calling showView clears the guard and reveals
+    // the inbound picker with selectedOutbound set.
+    showView('results', { fromPopState: true });
   }
 
   // ============================================================
@@ -9665,6 +9695,14 @@
   // its generation number on entry; after each `await`, it checks if it's
   // still the latest and silently drops if superseded.
   let _runSearchInvocation = 0;
+  // Step 2b: when restoreResults is going to restore inbound picker state
+  // via _restoreInboundPickerFromOffer, we set this flag before calling
+  // runSearch so runSearch's own renderResults call is skipped. The helper
+  // renders ONCE with the correct final state (inbound picker or outbound
+  // picker on failure). Without this, users see a jarring flash of outbound
+  // picker before it flips to inbound. Cleared automatically after each
+  // runSearch call.
+  let _suppressNextResultsRender = false;
 
   async function runSearch({ origin, destination, date, returnDate, fromButton, alertContainer }) {
     const myInvocation = ++_runSearchInvocation;
@@ -9797,8 +9835,18 @@
       // would restore the OLDER search on next refresh because sessionStorage
       // was only ever updated by home-form stash hooks. See D.1 partial-fail.
       syncHomeFormShadowFromSearch(origin, destination, date, returnDate);
-      renderResults();
-      showView('results');
+      // Step 2b: when restoreResults set _suppressNextResultsRender, skip
+      // BOTH the render and the showView call. The helper
+      // (_restoreInboundPickerFromOffer) will run selectedOutbound-setting
+      // + renderResults + showView('results') once the get-offer round-trip
+      // completes. This eliminates the intermediate outbound-picker flash.
+      // Clear the flag whether it was set or not — one-shot semantics.
+      const _suppress = _suppressNextResultsRender;
+      _suppressNextResultsRender = false;
+      if (!_suppress) {
+        renderResults();
+        showView('results');
+      }
     } catch (e) {
       if (_runSearchInvocation !== myInvocation) return;
       showAlert(alertContainer, 'Could not connect. Please check your network and try again.');
