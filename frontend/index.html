@@ -7689,6 +7689,16 @@
     // visually since we already showed it, but updates the URL via the
     // auto-derive in showView — keeping URL in sync if any param was
     // canonicalized along the way).
+    // Step 2b: sync the results summary bar BEFORE the skeleton so
+    // setRouteHeader('return') can pick up origin/destination from
+    // apSelections and produce the correct "Return · NBO → JNB" header.
+    // Without this, setRouteHeader bails on !origin || !destination
+    // (line ~10416) and leaves the default "Outbound" text in the HTML,
+    // producing an outbound → return header flip when the modal drops.
+    try { syncResultsSummaryBar(from, to, depart, ret); } catch (e) {
+      console.warn('[restoreResults] summary bar sync failed:', e);
+    }
+
     const outboundOfferId = (params.outbound || '').trim();
     const willRestoreInbound = !!(
       outboundOfferId && /^off_[A-Za-z0-9]+$/.test(outboundOfferId) && ret
@@ -7856,6 +7866,37 @@
         return;
       }
       selectedOutbound = { offer: match, cabin, cabinPricing };
+      // Step 2b: update the URL's outbound= param to reflect the FRESH offer_id
+      // (since the old one from before the refresh no longer exists in
+      // allOffers). Without this, back-to-outbound-picker + forward-to-inbound
+      // pops a URL containing a stale offer_id that the popstate handler can't
+      // find in memory → forward silently no-ops.
+      // Use replaceState (not push) so we don't create a spurious history
+      // entry — we're updating the CURRENT entry to match reality.
+      try {
+        const freshUrl = `#results?${new URLSearchParams({
+          from: lastSearchParams?.origin || '',
+          to: lastSearchParams?.destination || '',
+          depart: lastSearchParams?.date || '',
+          ...(lastSearchParams?.returnDate ? { return: lastSearchParams.returnDate } : {}),
+          pax: String(passengerCount),
+          outbound: cabinPricing.offer_id,
+        }).toString()}`;
+        const freshState = {
+          view: 'results',
+          params: {
+            from: lastSearchParams?.origin,
+            to: lastSearchParams?.destination,
+            depart: lastSearchParams?.date,
+            ...(lastSearchParams?.returnDate ? { return: lastSearchParams.returnDate } : {}),
+            pax: String(passengerCount),
+            outbound: cabinPricing.offer_id,
+          },
+        };
+        safeHistory('replace', freshState, freshUrl);
+      } catch (e) {
+        console.warn('[_restoreInboundPickerFromOffer] URL refresh failed:', e);
+      }
       renderResults();
       // showView on the successful path — runSearch's own showView call was
       // suppressed (see _suppressNextResultsRender) so the flash guard is
