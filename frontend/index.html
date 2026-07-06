@@ -13829,17 +13829,56 @@
     `;
     document.body.appendChild(modal);
 
-    // 6s beat, then callback fires to retry the payment. Long enough for the
-    // user to read + register the was/now price change + the fluctuation
-    // context copy. Matches the expired modal's cadence so users learn
-    // one rhythm for notification modals across the app. If for any reason
-    // the callback throws, we still tear down the modal so the user isn't
-    // stranded.
+    // Two conditions must be met before dismiss: (1) min 6s dwell so the user
+    // has time to read + register what happened, (2) the actual retry has
+    // completed (payment view is loading, or errored). Whichever finishes
+    // LAST triggers dismissal — so users don't see the modal disappear only
+    // to sit on a stale booking view for another 3s while Turnstile+create-
+    // payment complete. Firing the retry IMMEDIATELY (not after the 6s beat)
+    // means the 6s and the network round-trip overlap, so total perceived
+    // latency is roughly max(6s, network) instead of 6s + network.
+    //
+    // Safety cap at 15s: if the retry hangs, we force-dismiss anyway so the
+    // user isn't stuck under a modal forever. Any error handling inside
+    // onProceed's flow will surface via its own UI paths.
+    let minDwellElapsed = false;
+    let retryCompleted = false;
+    let dismissed = false;
+
+    function tryDismiss() {
+      if (dismissed) return;
+      if (minDwellElapsed && retryCompleted) {
+        dismissed = true;
+        modal.remove();
+      }
+    }
+
     setTimeout(() => {
-      modal.remove();
-      try { if (typeof onProceed === 'function') onProceed(); }
-      catch (e) { console.warn('[_showPriceDriftModal] onProceed threw:', e); }
+      minDwellElapsed = true;
+      tryDismiss();
     }, 6000);
+
+    // Safety cap — never leave user stuck under modal even if retry hangs.
+    setTimeout(() => {
+      if (!dismissed) {
+        console.warn('[_showPriceDriftModal] safety cap reached, force-dismissing');
+        dismissed = true;
+        modal.remove();
+      }
+    }, 15000);
+
+    // Fire onProceed immediately (in parallel with the min-dwell timer).
+    // onProceed returns a Promise (from startCardPayment); when it resolves
+    // OR rejects, mark retryCompleted and try to dismiss.
+    Promise.resolve()
+      .then(() => (typeof onProceed === 'function' ? onProceed() : null))
+      .catch(e => {
+        console.warn('[_showPriceDriftModal] onProceed threw:', e);
+      })
+      .finally(() => {
+        retryCompleted = true;
+        tryDismiss();
+      });
   }
 
   function goToPayment() {
