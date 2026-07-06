@@ -6013,7 +6013,12 @@
         </div>
 
         <div class="route-header">
-          <h2 id="route-h2">Outbound</h2>
+          <!-- Empty by default. setRouteHeader('outbound' | 'return') populates
+               this on every results render. Static "Outbound" here would
+               flicker for one frame on inbound-picker refresh (skeleton
+               paints with 'return' but the H2 briefly shows 'Outbound'
+               before JS runs). -->
+          <h2 id="route-h2"></h2>
           <div class="route-meta" id="route-meta">Price per traveler, includes taxes and fees</div>
         </div>
 
@@ -6107,12 +6112,12 @@
         <div id="booking-alert"></div>
         <div class="booking-inline-cta" style="justify-content:space-between;gap:12px;">
           <button class="btn btn-secondary" onclick="showView('results')">← Back to results</button>
-          <button class="btn btn-primary btn-lg" onclick="goToPayment()">Continue to payment →</button>
+          <button class="btn btn-primary btn-lg" id="continue-to-pay-btn" onclick="goToPayment()">Continue to payment →</button>
         </div>
         <!-- Phase E: sticky bottom CTA bar (mobile only; hidden on desktop via .booking-inline-cta show) -->
         <div class="booking-cta-bar" id="booking-cta-bar">
           <button class="btn btn-secondary" onclick="showView('results')" aria-label="Back to results">←</button>
-          <button class="btn btn-primary" onclick="goToPayment()">Continue to payment</button>
+          <button class="btn btn-primary" id="continue-to-pay-btn-mobile" onclick="goToPayment()">Continue to payment</button>
         </div>
       </div>
 
@@ -13655,12 +13660,14 @@
     document.body.appendChild(modal);
 
     // Auto-advance after a beat so the user has time to read the notice
-    // without needing to click. 1.5s is long enough to register the message,
-    // short enough that the redirect still feels responsive.
+    // without needing to click. 6s is long enough for a full read + a
+    // moment to process — the modal is doing real work explaining a
+    // fare-expired situation, and users need time to absorb it before
+    // being auto-redirected. Drift modal uses the same 6s cadence.
     setTimeout(() => {
       modal.remove();
       rerunSearchFromExpiry();
-    }, 1500);
+    }, 6000);
   }
 
   // Step 2b price-drift notification modal. Shown when create-payment returns
@@ -13716,15 +13723,17 @@
     `;
     document.body.appendChild(modal);
 
-    // 3s beat, then callback fires to retry the payment. Long enough for the
-    // user to read + register, short enough that the flow still feels
-    // responsive. If for any reason the callback throws, we still tear down
-    // the modal so the user isn't stranded.
+    // 6s beat, then callback fires to retry the payment. Long enough for the
+    // user to read + register the was/now price change + the fluctuation
+    // context copy. Matches the expired modal's cadence so users learn
+    // one rhythm for notification modals across the app. If for any reason
+    // the callback throws, we still tear down the modal so the user isn't
+    // stranded.
     setTimeout(() => {
       modal.remove();
       try { if (typeof onProceed === 'function') onProceed(); }
       catch (e) { console.warn('[_showPriceDriftModal] onProceed threw:', e); }
-    }, 3000);
+    }, 6000);
   }
 
   function goToPayment() {
@@ -13812,9 +13821,31 @@
     `;
     document.getElementById('poll-area').classList.add('hidden');
     clearAlert('payment-alert');
-    showView('payment');
-    // Auto-load Pesapal iframe — no "Pay with card" click required
-    startCardPayment();
+    // Step 2b: DO NOT switchView to 'payment' here. startCardPayment now
+    // switches views itself, but ONLY after clearing drift-check (409) and
+    // expired-offer (410) branches. This keeps drift/expired modals showing
+    // on the booking view where the user left off, avoiding the confusing
+    // "wait, I was going to pay and now there's a modal on the payment
+    // view" experience. On the success path, startCardPayment calls
+    // showView('payment') just before rendering the Pesapal iframe.
+    //
+    // Disable Continue button + show inline spinner so user knows something
+    // is happening during the ~6-8s Turnstile + create-payment round-trip.
+    // Both the desktop button and mobile sticky-bar button need disabling
+    // so a user tapping around during the wait doesn't fire duplicate calls.
+    const _btns = [
+      document.getElementById('continue-to-pay-btn'),
+      document.getElementById('continue-to-pay-btn-mobile'),
+    ].filter(Boolean);
+    _btns.forEach(b => { b.classList.add('btn-loading'); b.disabled = true; });
+    // Auto-load Pesapal iframe — no "Pay with card" click required.
+    // startCardPayment will re-enable the buttons and switch views as needed.
+    startCardPayment().finally(() => {
+      // Always re-enable Continue buttons, even if we ended up switching
+      // views. If we did switch to payment, they're off-screen but still
+      // need their enabled state so a "back to booking" re-uses them.
+      _btns.forEach(b => { b.classList.remove('btn-loading'); b.disabled = false; });
+    });
   }
 
   function selectPayTab(tab) {
@@ -13951,6 +13982,10 @@
       if (!res.ok || data.error || !data.redirect_url) {
         // Reset so the next attempt gets a fresh token
         resetTurnstile('payment');
+        // Step 2b: switch to payment view so the "Try again" button appears
+        // in context. Otherwise the user is stuck on booking with a hidden
+        // error and no visible retry.
+        showView('payment');
         showAlert('payment-alert', data.error || 'Could not start payment. Please try again.');
         // No more "Pay with card" gate — surface a retry button inline since
         // auto-load just failed and the loading spinner would otherwise hang.
@@ -13963,6 +13998,13 @@
       }
       activeMerchantRef = data.merchant_ref;
       if (data.breakdown) renderPaymentSummary(data.breakdown);
+
+      // Step 2b: switch to payment view now, RIGHT before rendering the
+      // iframe. Deferring this switch until after we've cleared 409/410
+      // means drift/expired modals appear over the booking view (the
+      // context the user just left), rather than over an unfamiliar
+      // payment loading state.
+      showView('payment');
 
       // Embed Pesapal iframe in place of the start button
       document.getElementById('card-iframe-wrap').innerHTML = `
@@ -13980,6 +14022,9 @@
       // Begin polling
       startPolling();
     } catch (e) {
+      // Step 2b: switch to payment view so the Try again button appears in
+      // context (booking view would leave the user with no visible retry).
+      showView('payment');
       showAlert('payment-alert', 'Could not connect. Please check your network and try again.');
       document.getElementById('card-iframe-wrap').innerHTML = `
         <div style="text-align:center;padding:18px;">
