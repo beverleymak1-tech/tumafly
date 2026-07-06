@@ -5916,14 +5916,19 @@
         display: none !important;
       }
 
-      /* Batch 1 · #9 — Cards were overflowing the mobile viewport. Two
-         defensive fixes:
+      /* Batch 1 · #9 (revised Batch 3 patch) — Cards were overflowing the
+         mobile viewport. Two defensive fixes:
          1. Grid children of .booking-layout must respect min-width: 0,
             otherwise flex/grid items refuse to shrink below their intrinsic
             content width when a child (e.g. a long email) is un-breakable.
-         2. Cap the panels' max-width to 100% of the parent and force
-            overflow-wrap: anywhere so long unbreakable strings don't push
-            the card wider. */
+         2. Cap the panels' max-width to 100% of the parent and use
+            overflow-wrap: break-word so long unbreakable strings (URLs,
+            emails, city names) can wrap when they'd otherwise overflow —
+            WITHOUT the aggressive per-character breaking that
+            `overflow-wrap: anywhere` produces in narrow flex cells (which
+            caused the seat-row route labels to render one letter per
+            line in the seats card). break-word only breaks when there's
+            no other option, and only at reasonable points. */
       .booking-layout > div,
       .booking-layout > aside {
         min-width: 0;
@@ -5935,7 +5940,7 @@
       .booking-layout .pax-block {
         min-width: 0;
         max-width: 100%;
-        overflow-wrap: anywhere;
+        overflow-wrap: break-word;
       }
       /* Belt & suspenders: keep any Duffel-provided text (airline names,
          cabin labels, etc) from blowing out the summary bar. */
@@ -10817,6 +10822,23 @@
     // Dates
     document.getElementById('r-date').value = date;
     document.getElementById('r-return-date').value = returnDate || '';
+
+    // Batch 1 · #6 followup — Programmatic `.value =` doesn't fire `change`,
+    // so the depart-change listener that pushes r-return-date.min to
+    // depart+1 never ran on first arrival at #results. Result: the Return
+    // picker showed pre-departure dates as selectable until the user
+    // manually changed Depart. Fix: apply the same clamp here explicitly.
+    if (date) {
+      const next = new Date(date);
+      next.setDate(next.getDate() + 1);
+      const nextIso = next.toISOString().split('T')[0];
+      const rRet = document.getElementById('r-return-date');
+      if (rRet) rRet.min = nextIso;
+      // Mirror on the edit-search-sheet variants so opening that sheet
+      // right after landing on results shows the same greyed-out range.
+      const esRet = document.getElementById('es-return-date');
+      if (esRet) esRet.min = nextIso;
+    }
 
     updateRateInfo();
     updatePriceGauge();
