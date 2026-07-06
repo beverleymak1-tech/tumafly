@@ -329,6 +329,12 @@
       justify-content: center;
       width: 44px;
       height: 44px;
+      /* Slide hamburger visually to the left so its icon left edge lines
+         up with the mobile summary pill's left edge (both containers
+         have 16px padding, but the hamburger's 22px SVG is centered in
+         a 44px button — negative margin pulls the button-box left so
+         the visual icon aligns instead of the invisible tap target). */
+      margin-left: -10px;
       background: none;
       border: none;
       padding: 0;
@@ -5415,7 +5421,9 @@
 
       /* Nav */
       .nav { height: 56px; }
-      .nav-inner { padding: 0 16px; gap: 10px; }
+      /* Halved from 10 → 5 per Bev's ask to bring hamburger and logo
+         closer together on mobile. */
+      .nav-inner { padding: 0 16px; gap: 5px; }
       /* Search strip: visible on mobile, sticky just below the 56px nav.
          JS toggles .hidden to show/hide per view. */
       .mobile-search-strip {
@@ -6012,6 +6020,32 @@
       .ff-remove { min-height: 44px; min-width: 44px; }
       .seat-row-cta { min-height: 44px; }
       .seat-cta-btn { min-height: 48px; }
+
+      /* Hotfix — Baggage rows on mobile: same 4-item flex structure as
+         seat rows (icon + info + status + Change button). Same fix — flex
+         wrap into a 2-row layout so the pax name gets full width on
+         row 1, status + CTA sit together on row 2 indented past the
+         icon. Prevents the per-character name stacking Bev caught. */
+      .bag-row {
+        flex-wrap: wrap;
+        row-gap: 10px;
+      }
+      .bag-row-icon { align-self: flex-start; }
+      .bag-row-info {
+        flex: 1 1 calc(100% - 60px);
+        min-width: 0;
+      }
+      .bag-row-status {
+        margin-left: 50px;
+        flex: 1 1 auto;
+        min-width: 0;
+        /* When name row wraps to row 1, status arrives on row 2 — but
+           the nowrap on parent CSS makes it clip. Keep nowrap for the
+           text itself but let the container shrink. */
+      }
+      .bag-row-cta {
+        flex: 0 0 auto;
+      }
 
       /* Hotfix — Seat rows on mobile: previously all 4 items (icon +
          info + status + Select button) fought for one flex row. The
