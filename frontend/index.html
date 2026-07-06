@@ -11079,9 +11079,14 @@
     if (!offer) return;
     const cabinPricing = offer.cabins[cabin];
     if (!cabinPricing) return;
-    // Any new selection invalidates previously-picked seats — different offer means
-    // different service_ids and possibly different cabin/aircraft layout.
+    // Any new selection invalidates previously-picked seats + baggages —
+    // different offer means different service_ids and possibly different
+    // cabin/aircraft layout. Without clearing baggages, a stale service_id
+    // from the previous flight persists into the new booking view and
+    // renders as a phantom "1 bag · KES 0" until the async baggage
+    // fetch resolves + prunes it. Clear both up front.
     selectedSeats = {};
+    selectedBaggages = {};
     seatMapsByOffer = {};
     seatMapsData = {};
     const selection = { offer, cabin, cabinPricing };
@@ -12078,6 +12083,23 @@
     ordered.forEach((p, idx) => {
       baggageOptionsByPax[idx] = byPassenger[p.id] || [];
     });
+    // Prune stale selectedBaggages entries. When the offer changes (or the
+    // service catalog rotates during retries), old service_ids stay keyed in
+    // selectedBaggages but no longer appear in baggageOptionsByPax — they
+    // then render as ghost bag counts (e.g. "2 bags · KES 0" because
+    // bagOptionCostKes lookup returns undefined). Sweep them out so the
+    // count on the booking card matches the priced total. Passengers whose
+    // service catalog is entirely gone get their whole entry dropped too.
+    for (const paxIdx of Object.keys(selectedBaggages)) {
+      const opts = baggageOptionsByPax[paxIdx] || [];
+      const validIds = new Set(opts.map(o => o.service_id));
+      const cleaned = {};
+      for (const svcId of Object.keys(selectedBaggages[paxIdx] || {})) {
+        if (validIds.has(svcId)) cleaned[svcId] = selectedBaggages[paxIdx][svcId];
+      }
+      if (Object.keys(cleaned).length > 0) selectedBaggages[paxIdx] = cleaned;
+      else delete selectedBaggages[paxIdx];
+    }
   }
 
   function baggageAnyOptionsAvailable() {
