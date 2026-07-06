@@ -424,6 +424,7 @@ serve(async (req) => {
       const smData = await smRes.json();
       if (!smRes.ok) {
         return new Response(JSON.stringify({
+          code: "STALE_SEAT",
           error: "Seat selection no longer available. Please reselect seats.",
         }), {
           status: 409,
@@ -465,6 +466,7 @@ serve(async (req) => {
             continue;
           }
           return new Response(JSON.stringify({
+            code: "STALE_SEAT",
             error: `Seat ${s.designator || "?"} is no longer available. Please reselect.`,
           }), {
             status: 409,
@@ -538,6 +540,7 @@ serve(async (req) => {
             continue;
           }
           return new Response(JSON.stringify({
+            code: "STALE_BAGGAGE",
             error: "A baggage selection is no longer available. Please reselect.",
           }), {
             status: 409,

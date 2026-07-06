@@ -10663,16 +10663,24 @@
     const stops = slice.stops ?? 0;
     const stopsLabel = stops === 0 ? 'Nonstop' : `${stops} stop${stops > 1 ? 's' : ''}`;
     const dateLabel = new Date(slice.departure).toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' });
-    // Step 2b: cabin line gets a drift-indicator when a refresh detected the
-    // fresh Duffel-quoted price differs > 1% from the URL's op= value. Inline
-    // format: "Economy · ~~KES 39,909~~ KES 41,306". Only appears on refresh
-    // paths; picked-fresh-from-outbound-picker shows the plain cabin label.
-    let cabinLine = escapeHtml(CABIN_LABELS[sel.cabin]);
-    if (_inboundDriftState && _inboundDriftState.previous_kes && _inboundDriftState.fresh_kes) {
-      const prevFmt = formatPrice(_inboundDriftState.previous_kes);
-      const freshFmt = formatPrice(_inboundDriftState.fresh_kes);
-      cabinLine += ` · <span style="text-decoration:line-through;color:var(--text-3,#8A96A3);margin-right:4px;">${escapeHtml(prevFmt)}</span><span style="font-weight:600;">${escapeHtml(freshFmt)}</span>`;
+    // Cabin line always shows the current outbound price alongside the cabin
+    // label. Format: "Economy · KES 39,909". When a refresh detected drift
+    // (previous URL op= value differed > 1% from fresh Duffel-quoted price),
+    // the previous value is added as a strikethrough BEFORE the current one:
+    // "Economy · ~~KES 39,909~~ KES 41,306". The current price is bold in
+    // both cases so it visually anchors as "this is what you're paying."
+    const currentKes = sel?.cabinPricing?.price_kes;
+    const currentFmt = currentKes ? formatPrice(currentKes) : '';
+    let priceLine = '';
+    if (currentFmt) {
+      if (_inboundDriftState && _inboundDriftState.previous_kes && _inboundDriftState.fresh_kes) {
+        const prevFmt = formatPrice(_inboundDriftState.previous_kes);
+        priceLine = ` · <span style="text-decoration:line-through;color:var(--text-3,#8A96A3);margin-right:4px;">${escapeHtml(prevFmt)}</span><span style="font-weight:600;">${escapeHtml(currentFmt)}</span>`;
+      } else {
+        priceLine = ` · <span style="font-weight:600;">${escapeHtml(currentFmt)}</span>`;
+      }
     }
+    const cabinLine = escapeHtml(CABIN_LABELS[sel.cabin]) + priceLine;
     return `
       <div class="outbound-side">
         <div class="outbound-side-head">
@@ -11881,6 +11889,10 @@
       if (!selectedSeats[paxIdx]) selectedSeats[paxIdx] = {};
       selectedSeats[paxIdx][segmentId] = { service_id: serviceId, designator, cost_kes: costKes };
     }
+    // If the booking-level alert is showing (typically a stale-service_id
+    // notice from a prior Continue-to-payment attempt), assigning a seat is
+    // a positive corrective action — dismiss the alert automatically.
+    try { clearAlert('booking-alert'); } catch (_) {}
     // Auto-advance to the next passenger who doesn't yet have a seat on this leg
     for (let i = 1; i < passengerCount; i++) {
       const next = (paxIdx + i) % passengerCount;
@@ -12238,6 +12250,9 @@
     closeBaggageModal();
     renderBaggageList();
     renderBookingSummary();
+    // If a stale-baggage alert is up from a prior Continue attempt, this
+    // commit is corrective action — dismiss it automatically.
+    try { clearAlert('booking-alert'); } catch (_) {}
   }
 
   // Compute draft total inside the modal (so the footer updates live as the
@@ -14062,17 +14077,18 @@
         // number is the source of truth.
         bookingSelection.cabinPricing.price_kes = data.actual_kes;
         renderBookingSummary();
-        // Show the modal, wait ~3s, then auto-fire the retry.
+        // Show the modal. Return the retry promise from the callback so
+        // _showPriceDriftModal's internal await sees the ACTUAL completion
+        // time (Turnstile + create-payment + showView 'payment'). Without
+        // returning it, the callback resolves immediately and the modal
+        // dismisses at the 6s min-dwell mark even if the retry is still
+        // in flight — user then sees booking view for a few seconds before
+        // the payment view arrives. Confusing.
         _showPriceDriftModal({
           expected_kes: data.expected_kes,
           actual_kes: data.actual_kes,
           delta_kes: data.delta_kes,
-        }, () => {
-          // Retry with drift-check bypassed. The button loading state was
-          // reset in the finally below; startCardPayment will manage it
-          // again on the retry.
-          startCardPayment({ _skipDriftCheck: true });
-        });
+        }, () => startCardPayment({ _skipDriftCheck: true }));
         return;
       }
 
@@ -14099,24 +14115,36 @@
           showSearchExpiredModal();
           return;
         }
-        // First strike — clear stale selections + explain + let user retry.
-        // We clear BOTH seats and baggage regardless of which one Duffel
-        // rejected, because we don't parse the error message and both are
-        // keyed by the same offer's service catalog. Slight over-clear but
-        // consistent with the "you need to re-pick" mental model.
-        selectedSeats = {};
-        selectedBaggages = {};
-        try { renderSeatsList(); } catch (_) {}
-        try { renderBaggageList(); } catch (_) {}
+        // First strike — clear ONLY the affected category and prompt the
+        // user to re-pick. EF returns a structured code (STALE_SEAT or
+        // STALE_BAGGAGE) so we don't guess or over-clear. Missing code
+        // (older EF, or an unstructured 4xx) falls back to clearing both,
+        // matching the prior over-clear behavior.
+        const errCode = data.code || '';
+        const clearsSeats = errCode === 'STALE_SEAT' || !errCode;
+        const clearsBaggage = errCode === 'STALE_BAGGAGE' || !errCode;
+        if (clearsSeats) selectedSeats = {};
+        if (clearsBaggage) selectedBaggages = {};
+        try { if (clearsSeats) renderSeatsList(); } catch (_) {}
+        try { if (clearsBaggage) renderBaggageList(); } catch (_) {}
         renderBookingSummary();
         // Return to booking view if we're already on payment (proceedToPayment
         // switched views before firing this fetch). Otherwise stay put.
         if (document.getElementById('view-payment') && !document.getElementById('view-payment').classList.contains('hidden')) {
           showView('booking');
         }
+        // Tailor the alert message to what was actually cleared. When both
+        // were cleared (missing code path), keep the combined message.
+        let alertSuffix;
+        if (clearsSeats && clearsBaggage) {
+          alertSuffix = ' Your seat and bag choices have been cleared — please re-add them and try again.';
+        } else if (clearsSeats) {
+          alertSuffix = ' Your seat selection has been cleared — please re-add it and try again.';
+        } else {
+          alertSuffix = ' Your bag selection has been cleared — please re-add it and try again.';
+        }
         showAlert('booking-alert',
-          (data.error || 'Some selections are no longer available.') +
-          ' Your seat and bag choices have been cleared — please re-add them and try again.');
+          (data.error || 'Some selections are no longer available.') + alertSuffix);
         // Reset iframe wrap so the next Continue-click doesn't see stale
         // pesapal iframe HTML lying around.
         const wrap = document.getElementById('card-iframe-wrap');
