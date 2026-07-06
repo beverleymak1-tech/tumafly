@@ -4565,6 +4565,30 @@
     }
     .pay-tab .tab-name { display: block; font-weight: 600; color: var(--ink); }
     .pay-tab .tab-meta { display: block; font-size: 12px; color: var(--text-3); font-weight: 400; margin-top: 2px; }
+    /* Batch 3 · #10 — Persistent hint line under the M-Pesa meta, used
+       to tell users why "Coming soon" is there without needing a
+       tap-response toast. Muted text so it doesn't compete with the
+       main M-Pesa label. */
+    .pay-tab .tab-hint {
+      display: block;
+      font-size: 11px;
+      color: var(--text-3);
+      font-weight: 400;
+      font-style: italic;
+      margin-top: 4px;
+      opacity: 0.85;
+    }
+    /* Batch 3 · #10 — Chevron icon on the Card tab. Hidden on desktop
+       (tabs, not accordion). Visible on mobile as an accordion affordance,
+       rotates 180deg when the pane is open. */
+    .pay-tab-chev {
+      display: none;
+      margin-left: auto;
+      font-size: 14px;
+      color: var(--text-3);
+      transition: transform 0.25s;
+      flex-shrink: 0;
+    }
     .coming-soon {
       position: absolute;
       top: 8px;
@@ -4576,6 +4600,19 @@
       border-radius: 10px;
       font-weight: 600;
       letter-spacing: 0.03em;
+    }
+
+    /* Batch 3 · #10 — Accordion wrapper. On desktop it's a display:contents
+       ghost so the tab button and the pane behave as direct grid children
+       of .pay-tabs — preserves the identical two-column desktop layout.
+       On mobile the wrapper re-materializes (mobile CSS override below) so
+       the pane can slide from within it. */
+    .pay-tab-item {
+      display: contents;
+    }
+    .pay-tab-pane {
+      grid-column: 1 / -1;   /* desktop: span full row under the two tabs */
+      margin-top: 8px;       /* match old gap between pay-tabs and pane */
     }
 
     .pay-iframe-wrap {
@@ -6004,13 +6041,60 @@
         margin-bottom: 0;
       }
 
-      /* Pay tabs — full width on mobile */
-      .pay-tabs { flex-direction: column; gap: 8px; }
+      /* Pay tabs — Batch 3 · #10.
+         Mobile: stacked accordion cards. .pay-tabs flips to flex-column
+         so pay-tab-item's `display: contents` (desktop grid ghost)
+         becomes a real block wrapper here — the item can then own its
+         pane visually as an accordion body. Order in DOM = order on
+         screen: M-Pesa tab, Card tab, Card pane (nested inside its
+         wrapper). */
+      .pay-tabs {
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+      }
+      .pay-tab-item { display: block; }
       .pay-tab {
         width: 100%;
         min-height: 56px;
         border-radius: 14px;
       }
+      /* .active is meaningless as a stand-alone visual on mobile — the
+         accordion's .open state on the wrapper is the source of truth
+         for "this card is expanded." Neutralize .active's brand color
+         here so the initial collapsed state doesn't paint the Card tab
+         blue before user has tapped it. */
+      .pay-tab.active {
+        border-color: var(--border);
+        background: var(--surface);
+      }
+      .pay-tab-item.open > .pay-tab {
+        border-color: var(--brand);
+        background: var(--brand-soft);
+      }
+      /* Accordion pane collapsed by default; slides open on .open. */
+      .pay-tab-pane {
+        max-height: 0;
+        overflow: hidden;
+        opacity: 0;
+        margin-top: 0;
+        transition: max-height 0.32s ease, opacity 0.2s ease-out, margin-top 0.2s;
+        min-height: 0;
+      }
+      .pay-tab-item.open .pay-tab-pane {
+        /* Upper cap — real content is ~580–820px; overshoot is fine as
+           the transition ends at the intrinsic height. */
+        max-height: 1200px;
+        opacity: 1;
+        margin-top: 10px;
+      }
+      /* Chevron cue */
+      .pay-tab-chev { display: inline-block; }
+      .pay-tab-item.open .pay-tab-chev { transform: rotate(180deg); }
+      /* The iframe wrap inside the pane already sets its own min-height:
+         580px for desktop. On mobile we want the pane to CONTAIN it
+         without forcing it taller than the viewport. The base rule at
+         line ~4581 uses min(820px, calc(100vh - 80px)) already. */
 
       /* ── Phase G — 44px tap target sweep ────────────────────── */
 
@@ -6816,33 +6900,53 @@
         <div class="card">
           <h3>Pay for your booking</h3>
           <div class="pay-tabs">
+            <!-- Batch 3 · #10 — M-Pesa stays disabled at launch. New hint
+                 line under the meta gives users a persistent reason for
+                 the "Coming soon" badge without needing a tap-response
+                 toast. Wired to Daraja directly post-launch (Pesapal's
+                 built-in M-Pesa will be disabled on our merchant account
+                 once we go live). -->
             <button class="pay-tab" disabled id="paytab-mpesa">
               <div class="pay-tab-icon" style="background:#1a9e4a;color:white;font-weight:600;font-size:11px;">M</div>
-              <div>
+              <div class="pay-tab-body">
                 <span class="tab-name">M-Pesa</span>
                 <span class="tab-meta">Pay from your phone</span>
+                <span class="tab-hint">Direct M-Pesa launching soon</span>
               </div>
               <span class="coming-soon">Coming soon</span>
             </button>
-            <button class="pay-tab active" id="paytab-card" onclick="selectPayTab('card')">
-              <div class="pay-tab-icon">💳</div>
-              <div>
-                <span class="tab-name">Card</span>
-                <span class="tab-meta">Visa, Mastercard, Amex</span>
-              </div>
-            </button>
-          </div>
+            <!-- Batch 3 · #10 — Card + pane wrapped in .pay-tab-item so
+                 the pane can accordion-collapse under the tab on mobile.
+                 On desktop, .pay-tab-item { display: contents } lets the
+                 button and pane behave as direct grid children of
+                 .pay-tabs (button in cell 2, pane spanning full row
+                 below via grid-column: 1/-1) so the desktop layout is
+                 pixel-identical to before. On mobile the wrapper
+                 re-materializes and .pay-tab-pane is a slide-open body. -->
+            <div class="pay-tab-item" id="pay-card-item">
+              <button class="pay-tab active" id="paytab-card" onclick="selectPayTab('card')">
+                <div class="pay-tab-icon">💳</div>
+                <div class="pay-tab-body">
+                  <span class="tab-name">Credit or Debit (Pesapal)</span>
+                  <span class="tab-meta">Visa, Mastercard, Amex</span>
+                </div>
+                <!-- Mobile-only chevron cue that this is an accordion.
+                     Rotated 180deg via CSS when .pay-tab-item.open. -->
+                <span class="pay-tab-chev" aria-hidden="true">▾</span>
+              </button>
 
-          <div id="payment-alert"></div>
-
-          <div id="pay-card-pane">
-            <div class="pay-iframe-wrap" id="card-iframe-wrap">
-              <div>
-                <button class="btn btn-primary btn-lg" id="card-start-btn" onclick="startCardPayment()">Pay with card</button>
-                <div style="font-size:12px;color:var(--text-3);margin-top:14px;">Card details are handled by Pesapal. TumaFly never sees your card.</div>
+              <div class="pay-tab-pane" id="pay-card-pane">
+                <div class="pay-iframe-wrap" id="card-iframe-wrap">
+                  <div>
+                    <button class="btn btn-primary btn-lg" id="card-start-btn" onclick="startCardPayment()">Pay with card</button>
+                    <div style="font-size:12px;color:var(--text-3);margin-top:14px;">Card details are handled by Pesapal. TumaFly never sees your card.</div>
+                  </div>
+                </div>
               </div>
             </div>
           </div>
+
+          <div id="payment-alert"></div>
 
           <div id="poll-area" class="hidden"></div>
         </div>
@@ -14989,7 +15093,27 @@
 
   function selectPayTab(tab) {
     document.getElementById('paytab-card').classList.toggle('active', tab === 'card');
-    // M-Pesa stays disabled at launch
+    // Batch 3 · #10 — Mobile accordion behavior. The Card tab's
+    // wrapper element .pay-tab-item#pay-card-item toggles .open, which
+    // triggers the slide-open CSS transition on .pay-tab-pane. On
+    // desktop we ignore the toggle and always keep .open present so
+    // the pane stays visible (desktop layout has no collapse behavior).
+    //
+    // Rationale for viewport check rather than pure CSS:
+    // - Mobile users tap the same button to expand AND collapse (Bev's
+    //   spec: "tap one → slide-expand; tapping expanded card collapses
+    //   it"). That's stateful — CSS alone can't remember "is this open."
+    // - Desktop tab click should never collapse (pane is the whole
+    //   payment UI; user needs it visible to pay).
+    const cardItem = document.getElementById('pay-card-item');
+    if (!cardItem) return;
+    const isMobile = window.matchMedia('(max-width: 768px)').matches;
+    if (isMobile) {
+      cardItem.classList.toggle('open');
+    } else {
+      cardItem.classList.add('open');
+    }
+    // M-Pesa stays disabled at launch — no branch needed for it.
   }
 
   async function startCardPayment({ _skipDriftCheck = false, _turnstileAutoRetry = false } = {}) {
