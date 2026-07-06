@@ -3470,6 +3470,15 @@
      * Slide-in: for pax cards 2..N when get-offer says pax > 1, and for the
      * international-passport banner when the trip is confirmed international.
      */
+    /* Batch 1 · #1 — Expired-fare hourglass rotates while modal is up.
+       2.4s per rev keeps it calm (loading-style) rather than frantic.
+       transform-origin locked to center so it spins in place. */
+    @keyframes tf-hourglass-spin { to { transform: rotate(360deg); } }
+    .tf-expired-hourglass {
+      animation: tf-hourglass-spin 2.4s linear infinite;
+      transform-origin: 50% 50%;
+    }
+
     @keyframes tf-shimmer-sweep {
       0%   { background-position: -200% 0; }
       100% { background-position:  200% 0; }
@@ -5531,11 +5540,73 @@
       /* Hide the desktop booking header on mobile (replaced by mobile header above) */
       .booking-mobile-header-desktop { display: none; }
 
+      /* Batch 1 · #4 — Remove the back-arrow button in the sticky mobile CTA
+         bar. Users can navigate back via the browser or the header back link;
+         the sticky bar is now Continue-only. */
+      .booking-cta-bar .btn-secondary { display: none !important; }
+
+      /* Batch 1 · #3 — Flight summary + estimated price above travelers on
+         mobile. The aside currently sits below main (order: 10) — flip to
+         -1 so trip-slot + price-slot render first. The mobile-compliance
+         line that lives inside the aside is repositioned back to the end
+         of the booking flow just below the last card (see rule below). */
+      .booking-layout > aside { order: -1; }
+      /* Move the mobile compliance note visually to appear at the end
+         via CSS order — the aside is now a flex column so its own
+         order property works on children. */
+      .booking-layout > aside {
+        display: flex;
+        flex-direction: column;
+      }
+      /* The mobile compliance note inside the aside would otherwise land
+         right below the price panel — but since the aside itself is now
+         above travelers, we hide the aside-embedded compliance and rely
+         on a mirrored copy rendered near the sticky bar (see JS + HTML
+         further down). */
+      .booking-layout > aside > #booking-compliance-mobile {
+        display: none !important;
+      }
+
+      /* Batch 1 · #9 — Cards were overflowing the mobile viewport. Two
+         defensive fixes:
+         1. Grid children of .booking-layout must respect min-width: 0,
+            otherwise flex/grid items refuse to shrink below their intrinsic
+            content width when a child (e.g. a long email) is un-breakable.
+         2. Cap the panels' max-width to 100% of the parent and force
+            overflow-wrap: anywhere so long unbreakable strings don't push
+            the card wider. */
+      .booking-layout > div,
+      .booking-layout > aside {
+        min-width: 0;
+        max-width: 100%;
+      }
+      .booking-layout .card,
+      .booking-layout .trip-panel,
+      .booking-layout .price-panel,
+      .booking-layout .pax-block {
+        min-width: 0;
+        max-width: 100%;
+        overflow-wrap: anywhere;
+      }
+      /* Belt & suspenders: keep any Duffel-provided text (airline names,
+         cabin labels, etc) from blowing out the summary bar. */
+      .booking-layout .tp-leg-head-title,
+      .booking-layout .tp-leg-body,
+      .booking-layout .price-panel .line { min-width: 0; }
+
       /* Compliance note — smaller on mobile */
       .compliance { font-size: 12px; margin-bottom: 8px; }
-      /* On mobile, hide the compliance note in the main flow and show it below the price card in the aside */
+      /* On mobile, hide the compliance note in the main flow and show a
+         mirrored copy at the end of the main column so it stays near the
+         sticky Continue button (the aside version above the fold makes
+         no sense there — no CTA nearby). */
       .booking-compliance-desktop { display: none !important; }
-      #booking-compliance-mobile { display: block !important; font-size: 12px; margin-top: 10px; color: var(--text-3); }
+      #booking-compliance-main-mobile {
+        display: block !important;
+        font-size: 12px;
+        margin-top: 10px;
+        color: var(--text-3);
+      }
 
       /* ── Phase F — Payment page mobile ──────────────────────── */
 
@@ -5774,7 +5845,7 @@
   <section class="hero">
     <div class="hero-inner">
       <h1 class="hero-title">Book flights from Nairobi. <em>Pay with M-Pesa or card.</em></h1>
-      <p class="hero-sub">Transparent Pricing. Tickets issued in seconds. Across Africa. Around the world.</p>
+      <p class="hero-sub">Transparent pricing. Tickets issued in seconds. Across Africa. Around the world.</p>
 
       <div class="search">
         <div class="search-tabs">
@@ -6103,8 +6174,16 @@
           <p class="sub" style="margin-top:6px;">Available seat options for this flight. Selection may not be available on every airline; in that case you can choose seats at check-in.</p>
           <div id="seats-list"></div>
         </div>
-        <!-- Desktop-only compliance note (hidden on mobile; mobile version injected below price slot) -->
+        <!-- Desktop-only compliance note (hidden on mobile; mobile mirror below sits near sticky CTA) -->
         <p class="compliance booking-compliance-desktop">
+          By continuing, you confirm you have valid travel documents for your destination.
+          Verify with your consulate before travel.
+          <a href="https://www.iatatravelcentre.com" target="_blank" rel="noopener">Travel requirements →</a>
+        </p>
+        <!-- Batch 1 · #3 mobile mirror — lives at the end of the main col so
+             the compliance note sits right above the sticky Continue bar,
+             instead of in the aside which now renders ABOVE travelers on mobile. -->
+        <p class="compliance" id="booking-compliance-main-mobile" style="display:none;">
           By continuing, you confirm you have valid travel documents for your destination.
           Verify with your consulate before travel.
           <a href="https://www.iatatravelcentre.com" target="_blank" rel="noopener">Travel requirements →</a>
@@ -7100,6 +7179,26 @@
   let currentCurrency = 'KES';
   let rateInfo = { date: null, isLive: true };
   let cabinDiagnostics = null;
+
+  // Batch 1 · #11b — Client-side fallback KES-per-vendor-currency table
+  // for penalty fees where Duffel returned a currency other than KES/USD.
+  //
+  // MIRRORS the FALLBACK_RATES table in supabase/functions/create-payment/index.ts
+  // — if you touch one, touch the other. Values are approximate spot rates,
+  // fine for display of "change fees from KES X" where an exact figure isn't
+  // legally binding (Duffel confirms the real fee at ticket-change time).
+  //
+  // The prior implementation only converted USD → KES via rateInfo and showed
+  // GBP/EUR/etc as their raw source currency (e.g. "GBP 20.00"), which broke
+  // the currency-toggle contract and confused Kenyan users. Now everything
+  // routes through KES via this table, then USD via rateInfo.kesToUsd if the
+  // user has toggled to USD display.
+  //
+  // Post-launch: replace with a per-search cross-rate map returned by
+  // search-flights so we get live FX for every offer's vendor currency.
+  const FLEX_FALLBACK_RATES_KES = {
+    GBP: 170, USD: 130, EUR: 140, AED: 35, QAR: 36,
+  };
 
   // Selection: track both the flight (offer) AND the cabin the user chose
   // Shape: { offer, cabin, cabinPricing: { offer_id, price_kes, price_usd } }
@@ -9087,6 +9186,37 @@
       el.min = min; el.max = max;
       tfAttachDateClamp(el);
     });
+
+    // Batch 1 · #6 — Mirror the #home depart→return min behavior on the
+    // results-page summary bar. When the depart date changes on #results,
+    // return-date's min becomes depart+1 and any stale earlier return
+    // value is cleared. Same for the edit-search bar variant.
+    // Without this, the results-page return picker would allow dates
+    // BEFORE the outbound date, which is nonsense.
+    const rDateEl = document.getElementById('r-date');
+    const rRetEl  = document.getElementById('r-return-date');
+    if (rDateEl && rRetEl) {
+      rDateEl.addEventListener('change', function() {
+        if (!this.value) return;
+        const next = new Date(this.value);
+        next.setDate(next.getDate() + 1);
+        rRetEl.min = next.toISOString().split('T')[0];
+        const ret = rRetEl.value;
+        if (ret && ret <= this.value) rRetEl.value = '';
+      });
+    }
+    const esDateEl = document.getElementById('es-date');
+    const esRetEl  = document.getElementById('es-return-date');
+    if (esDateEl && esRetEl) {
+      esDateEl.addEventListener('change', function() {
+        if (!this.value) return;
+        const next = new Date(this.value);
+        next.setDate(next.getDate() + 1);
+        esRetEl.min = next.toISOString().split('T')[0];
+        const ret = esRetEl.value;
+        if (ret && ret <= this.value) esRetEl.value = '';
+      });
+    }
   })();
 
   function setTripType(type) {
@@ -13583,14 +13713,26 @@
     const c = offer.conditions;
     if (!c) return '';
 
-    // Convert a penalty fee to the current display currency
+    // Convert a penalty fee to the current display currency.
+    //
+    // Batch 1 · #11b — Route every vendor currency through KES via
+    // FLEX_FALLBACK_RATES_KES, then use rateInfo.kesToUsd for USD display.
+    // If we truly can't identify the source currency we fall back to the
+    // raw amount labeled with its ISO code (better than nothing, honest
+    // signal to the user that we couldn't convert).
     function fmtPenalty(amount, sourceCurrency) {
       const n = parseFloat(amount);
       if (!n || n <= 0) return null;
       const src = (sourceCurrency || '').toUpperCase();
+      // Direct: already in KES
       if (src === 'KES') return formatKes(n);
+      // USD → KES via live rate
       if (src === 'USD' && rateInfo?.kesToUsd) return formatKes(n / rateInfo.kesToUsd);
-      // Non-KES, non-USD: show original (e.g. GBP 20.00) — honest fallback
+      // Foreign currency (GBP/EUR/AED/…) → KES via fallback table.
+      // formatKes then respects the global KES/USD currency toggle.
+      const kesPerUnit = FLEX_FALLBACK_RATES_KES[src];
+      if (kesPerUnit) return formatKes(n * kesPerUnit);
+      // Unknown currency: label with ISO code as an honest fallback.
       return `${src} ${n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
     }
 
@@ -13785,10 +13927,10 @@
     modal.innerHTML = `
       <div class="search-loading-card" style="max-width:400px;text-align:center;">
         <div style="display:flex;justify-content:center;margin-bottom:14px;">
-          <div style="width:48px;height:48px;border-radius:50%;background:var(--warning-soft,#FEF6E7);display:flex;align-items:center;justify-content:center;">
-            <svg width="26" height="26" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+          <div style="width:48px;height:48px;border-radius:50%;background:var(--brand-soft,#e8f3ff);display:flex;align-items:center;justify-content:center;">
+            <svg class="tf-expired-hourglass" width="26" height="26" viewBox="0 0 24 24" fill="none" aria-hidden="true">
               <path d="M6 3h12M6 21h12M7 3v3.5c0 2 1.2 3.8 3 4.6L12 12l2-.9c1.8-.8 3-2.6 3-4.6V3M7 21v-3.5c0-2 1.2-3.8 3-4.6L12 12l2 .9c1.8.8 3 2.6 3 4.6V21"
-                stroke="var(--warning,#B45309)" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+                stroke="var(--brand,#3D95F5)" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
             </svg>
           </div>
         </div>
@@ -14577,32 +14719,24 @@
 
     // ── Flexibility ─────────────────────────────────────────────
     // Duffel may return penalty amounts in any currency (GBP, USD, EUR, etc.).
-    // We convert to KES (or USD if toggled) using rateInfo so fees honour
-    // the global currency toggle. If we lack a rate for the source currency
-    // we show the original amount as a fallback rather than hiding it.
+    // Batch 1 · #11b — All non-KES currencies now route through
+    // FLEX_FALLBACK_RATES_KES → KES, then formatKes handles the KES/USD
+    // toggle. Consistent with fmtPenalty in the details modal above so
+    // the same fee reads the same across both surfaces.
     function formatFlexFee(amount, sourceCurrency) {
       const n = parseFloat(amount);
       if (!n || n <= 0) return null;
       const src = (sourceCurrency || '').toUpperCase();
-      // If Duffel already returned KES, run through formatKes directly
+      // Direct: already in KES
       if (src === 'KES') return formatKes(n);
-      // Try converting via our KES rate. rateInfo.kesToUsd = usd/kes, so kes = usd / kesToUsd
-      // We need: foreignCcy → KES. We approximate via USD as the bridge:
-      //   GBP/EUR → USD: Duffel's own price_usd on the offer gives us the implicit KES rate.
-      //   For non-USD source we fall back to showing original if we can't convert.
-      if (rateInfo?.kesToUsd && src === 'USD') {
-        // USD → KES
-        const kes = n / rateInfo.kesToUsd;
-        return formatKes(kes);
-      }
-      // For GBP and other currencies: use the offer's implicit USD value if available.
-      // We store usdToGbp on rateInfo if the search result gave us enough data.
-      // For now, if it's USD we converted above; for others we show original clearly.
-      // Future: extend when the backend exposes per-currency rates.
-      if (currentCurrency === 'USD') {
-        return `${src} ${n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-      }
-      // KES mode but non-KES, non-USD source: show original tagged with the currency
+      // USD → KES via live rate
+      if (src === 'USD' && rateInfo?.kesToUsd) return formatKes(n / rateInfo.kesToUsd);
+      // Foreign currency → KES via fallback table.
+      // formatKes then respects the global KES/USD currency toggle so the
+      // displayed unit always matches whatever the header shows.
+      const kesPerUnit = FLEX_FALLBACK_RATES_KES[src];
+      if (kesPerUnit) return formatKes(n * kesPerUnit);
+      // Truly unknown vendor currency: label with ISO code, honest fallback.
       return `${src} ${n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
     }
 
