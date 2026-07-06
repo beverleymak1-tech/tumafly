@@ -191,9 +191,18 @@
       padding: 0 24px;
       display: flex;
       align-items: center;
-      justify-content: space-between;
-      gap: 16px;
+      /* Batch 3 · #12 followup — Was `justify-content: space-between` with
+         `gap: 16px`, which spread the three groups (hamburger, brand,
+         nav-links) evenly across the bar and pushed the brand toward
+         the middle. On mobile that left a big gap between hamburger
+         and logo (Priceline pattern in screenshot #4 keeps them
+         tight). Fix: kill space-between, use `margin-left: auto` on
+         nav-links to shove the right cluster to the edge. Hamburger
+         and brand now cluster at the start with a small controlled
+         gap. */
+      gap: 12px;
     }
+    .nav-inner .nav-links { margin-left: auto; }
     .brand {
       display: flex;
       align-items: center;
@@ -320,7 +329,6 @@
       justify-content: center;
       width: 44px;
       height: 44px;
-      margin-left: -8px; /* pull toward the edge so the tap target still reads centered next to logo */
       background: none;
       border: none;
       padding: 0;
@@ -6004,6 +6012,37 @@
       .ff-remove { min-height: 44px; min-width: 44px; }
       .seat-row-cta { min-height: 44px; }
       .seat-cta-btn { min-height: 48px; }
+
+      /* Hotfix — Seat rows on mobile: previously all 4 items (icon +
+         info + status + Select button) fought for one flex row. The
+         info column got squeezed under ~65px on narrow phones, which
+         was narrower than the pax name as a single word, forcing
+         `break-word` to fall back to per-character stacking (Bev's
+         screenshot showed "BeverleyMakhubele" rendering vertically).
+         Fix: two-row layout via flex-wrap. Row 1 = icon + info full
+         width; row 2 = status + CTA, indented past the icon so the
+         card visually reads as a single unit. */
+      .seat-row {
+        flex-wrap: wrap;
+        row-gap: 10px;
+      }
+      .seat-row-icon { align-self: flex-start; }
+      .seat-row-info {
+        /* flex-basis just under 100% minus (icon + gap) so info takes
+           the entire remaining first row and forces status+cta below. */
+        flex: 1 1 calc(100% - 60px);
+        min-width: 0;
+      }
+      .seat-row-status {
+        /* Second row start — indent past where the icon sits above so
+           the two rows visually stack under the info column. */
+        margin-left: 50px;
+        flex: 1 1 auto;
+        min-width: 0;
+      }
+      .seat-row-cta {
+        flex: 0 0 auto;
+      }
       .currency-toggle button { min-height: 44px; min-width: 60px; }
       .sort-sheet-item { min-height: 52px; }
       .phone-cc-trigger { min-height: 48px; min-width: 48px; }
