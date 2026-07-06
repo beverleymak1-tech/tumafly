@@ -14035,7 +14035,7 @@
     // M-Pesa stays disabled at launch
   }
 
-  async function startCardPayment({ _skipDriftCheck = false } = {}) {
+  async function startCardPayment({ _skipDriftCheck = false, _turnstileAutoRetry = false } = {}) {
     clearAlert('payment-alert');
     const btn = document.getElementById('card-start-btn');
     if (btn) { btn.classList.add('btn-loading'); btn.disabled = true; }
@@ -14085,6 +14085,29 @@
         resetTurnstile('payment');
         showSearchExpiredModal();
         return;
+      }
+
+      // 403 Turnstile verification failed — invisible retry once. Cloudflare
+      // tokens are one-shot and can go stale between mint and use (esp. on
+      // slow networks or during rapid retries). Rather than immediately
+      // showing the user an error, we reset the widget, wait for a fresh
+      // token, and retry silently. If the retry ALSO fails, we fall through
+      // to the visible Try-again UI so the user isn't stuck in an invisible
+      // loop.
+      //
+      // Guarded by _turnstileAutoRetry so a repeated 403 doesn't recurse.
+      // First 403 sets the flag on the retry call; retry's 403 skips this
+      // branch and lands in the generic error path below.
+      if (res.status === 403 && !_turnstileAutoRetry) {
+        console.warn('[startCardPayment] 403 verification failed — attempting invisible retry');
+        resetTurnstile('payment');
+        // ensureTurnstileToken awaits a fresh token from the reset widget.
+        // startCardPayment re-runs the full flow including a fresh
+        // ensureTurnstileToken call at its top, so we don't need to
+        // pre-await here — just delegate. Preserve _skipDriftCheck if the
+        // current call had it set (drift retry → 403 → invisible retry
+        // should still skip drift check).
+        return startCardPayment({ _skipDriftCheck, _turnstileAutoRetry: true });
       }
 
       // 409 PRICE_DRIFT — offer valid but base fare KES has shifted more
