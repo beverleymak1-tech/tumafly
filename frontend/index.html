@@ -252,9 +252,13 @@
       color: white;
     }
     @media (max-width: 640px) {
-      /* Hide nav text links on mobile but KEEP the currency toggle visible */
+      /* Hide nav text links on mobile — they live in the tray now. */
       .nav-links { gap: 8px; }
       .nav-links .nav-link { display: none; }
+      /* Batch 3 · #12 — Currency toggle moves to the mobile tray (see
+         #mobile-tray). Hide it in the nav bar on mobile so we don't
+         double-render. Desktop keeps the nav-level toggle unchanged. */
+      .nav-links .nav-currency { display: none !important; }
       /* Sign-in/user buttons get compressed to icon-only on mobile.
          IMPORTANT: only apply display: flex when NOT .hidden — otherwise we'd
          override the .hidden class and both buttons would render. */
@@ -295,10 +299,254 @@
       }
       /* Show Find Bookings icon only on mobile */
       .nav-find-mobile { display: flex !important; }
+      /* Batch 3 · #12 — Show hamburger on mobile; shrink logo slightly to
+         match Priceline's proportions in screenshot #4. */
+      .nav-hamburger { display: inline-flex !important; }
+      .brand-logo { height: 30px; }
     }
 
-    /* On home view only (desktop + mobile), hide currency toggle */
-    body[data-view="home"] .nav-currency { display: none !important; }
+    /* On home view only (desktop + mobile), hide currency toggle in the
+       nav — but not in the mobile tray (menu should always let the user
+       set their currency preference). Scoping to .nav-links leaves the
+       tray's copy untouched. */
+    body[data-view="home"] .nav-links .nav-currency { display: none !important; }
+
+    /* Batch 3 · #12 — Mobile hamburger.
+       Hidden on desktop, visible on mobile via the @media rule above.
+       Sits to the LEFT of the brand logo. Icon-only, 44px tap target. */
+    .nav-hamburger {
+      display: none;
+      align-items: center;
+      justify-content: center;
+      width: 44px;
+      height: 44px;
+      margin-left: -8px; /* pull toward the edge so the tap target still reads centered next to logo */
+      background: none;
+      border: none;
+      padding: 0;
+      color: var(--ink);
+      cursor: pointer;
+      border-radius: 8px;
+      transition: background 0.12s;
+    }
+    .nav-hamburger:hover { background: var(--bg); }
+    .nav-hamburger:active { background: var(--border); }
+
+    /* ─── Batch 3 · #12 — Mobile tray overlay ─────────────────────
+       Full-screen white sheet that slides in from the left when the
+       hamburger is tapped. Behaves like Priceline's mobile menu in
+       screenshot #5: X close top-left, logo top-right of the header,
+       big Sign-in button, list of menu items, currency toggle at
+       the bottom. Not URL-persisted; refresh drops you back on the
+       underlying view. Hidden on desktop entirely. */
+    .mobile-tray-scrim {
+      position: fixed;
+      inset: 0;
+      background: rgba(15, 25, 35, 0.45);
+      z-index: 998;
+      opacity: 0;
+      transition: opacity 0.2s;
+      display: none;
+    }
+    .mobile-tray-scrim.open {
+      display: block;
+      opacity: 1;
+    }
+    .mobile-tray {
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: min(88vw, 380px);
+      height: 100vh;
+      height: 100dvh; /* honour mobile URL bar collapse */
+      background: var(--surface);
+      z-index: 999;
+      display: flex;
+      flex-direction: column;
+      transform: translateX(-100%);
+      transition: transform 0.22s cubic-bezier(0.32, 0.72, 0, 1);
+      overflow-y: auto;
+      -webkit-overflow-scrolling: touch;
+      /* Respect notch on the left edge (landscape iPhones) and top */
+      padding-top: env(safe-area-inset-top);
+    }
+    .mobile-tray.open { transform: translateX(0); }
+    /* .tf-hidden is a global helper — with this class, tray is fully
+       display:none so it doesn't intercept taps while off-screen. */
+    .mobile-tray.tf-hidden, .mobile-tray-scrim.tf-hidden { display: none; }
+
+    .mobile-tray-header {
+      display: flex;
+      align-items: center;
+      gap: 14px;
+      padding: 16px 20px;
+      border-bottom: 1px solid var(--border);
+    }
+    .mobile-tray-close {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 40px;
+      height: 40px;
+      border-radius: 50%;
+      border: 1px solid var(--border-2);
+      background: var(--surface);
+      color: var(--ink);
+      cursor: pointer;
+      padding: 0;
+      transition: background 0.12s, border-color 0.12s;
+    }
+    .mobile-tray-close:hover {
+      background: var(--brand-soft);
+      border-color: var(--brand);
+    }
+    .mobile-tray-logo {
+      height: 28px;
+      width: auto;
+    }
+
+    /* Signed-out: big blue Sign-in button */
+    .mobile-tray-auth-out {
+      padding: 18px 20px 8px;
+    }
+    .mobile-tray-signin-btn {
+      display: block;
+      width: 100%;
+      min-height: 52px;
+      background: var(--brand);
+      color: white;
+      border: none;
+      border-radius: 999px;
+      font-family: inherit;
+      font-size: 16px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: background 0.12s;
+    }
+    .mobile-tray-signin-btn:hover { background: var(--brand-dark); }
+
+    /* Signed-in: chip with avatar + name */
+    .mobile-tray-auth-in {
+      padding: 18px 20px 8px;
+    }
+    .mobile-tray-user-chip {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 12px 14px;
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      background: var(--surface);
+    }
+    .mobile-tray-user-avatar {
+      width: 40px; height: 40px;
+      border-radius: 50%;
+      background: var(--brand-soft);
+      color: var(--brand-dark);
+      font-weight: 700;
+      display: grid; place-items: center;
+      flex-shrink: 0;
+    }
+    .mobile-tray-user-meta { min-width: 0; }
+    .mobile-tray-user-name {
+      font-size: 15px;
+      font-weight: 600;
+      color: var(--ink);
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .mobile-tray-user-sub {
+      font-size: 12px;
+      color: var(--text-3);
+      margin-top: 2px;
+    }
+
+    /* Menu items list */
+    .mobile-tray-nav {
+      display: flex;
+      flex-direction: column;
+      padding: 8px 12px 12px;
+      flex: 1;
+    }
+    .mobile-tray-item {
+      display: flex;
+      align-items: center;
+      gap: 14px;
+      padding: 14px 12px;
+      background: none;
+      border: none;
+      border-radius: 12px;
+      font-family: inherit;
+      font-size: 15px;
+      font-weight: 500;
+      color: var(--ink);
+      cursor: pointer;
+      text-align: left;
+      transition: background 0.12s;
+      min-height: 48px;
+    }
+    .mobile-tray-item:hover { background: var(--brand-soft); }
+    .mobile-tray-item:active { background: var(--border); }
+    .mobile-tray-icon {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 36px; height: 36px;
+      border-radius: 50%;
+      background: var(--bg);
+      color: var(--brand-dark);
+      flex-shrink: 0;
+    }
+    .mobile-tray-signout {
+      color: var(--danger);
+      margin-top: 6px;
+      border-top: 1px solid var(--border);
+      border-radius: 0;
+      padding-top: 18px;
+    }
+    .mobile-tray-signout .mobile-tray-icon {
+      color: var(--danger);
+      background: var(--danger-soft, #fde8e8);
+    }
+
+    /* Currency toggle at the bottom of the tray */
+    .mobile-tray-currency {
+      padding: 12px 20px calc(24px + env(safe-area-inset-bottom));
+      border-top: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+    }
+    .mobile-tray-currency-label {
+      font-size: 13px;
+      color: var(--text-2);
+      font-weight: 500;
+    }
+    .mobile-tray-currency-toggle {
+      /* Reuse .nav-currency base styles; the class is set on this element
+         too so setCurrency() finds it. Bump size on this instance. */
+      font-size: 14px;
+    }
+    .mobile-tray-currency-toggle button {
+      padding: 8px 16px;
+      font-size: 14px;
+      min-height: 40px;
+    }
+
+    /* Desktop lock — tray is a mobile-only affordance. */
+    @media (min-width: 641px) {
+      .mobile-tray, .mobile-tray-scrim { display: none !important; }
+    }
+
+    /* Prevent the underlying page from scrolling while the tray is open.
+       Touch events on the tray still scroll the tray itself (overflow-y:
+       auto on .mobile-tray handles that). */
+    body.tray-open {
+      overflow: hidden;
+      touch-action: none;
+    }
 
     /* ─── Nav auth controls ──────────────────────────────────────── */
     .nav-find-mobile {
@@ -5791,6 +6039,14 @@
 
 <nav class="nav">
   <div class="nav-inner">
+    <!-- Batch 3 · #12 — Mobile hamburger sits LEFT of the logo (Priceline
+         pattern from screenshot #4). Hidden on desktop. Opens the mobile
+         tray overlay (see #mobile-tray below). -->
+    <button class="nav-hamburger" id="nav-hamburger" onclick="openMobileMenu()" aria-label="Open menu" type="button">
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+        <path d="M4 7h16M4 12h16M4 17h16" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+      </svg>
+    </button>
     <button class="brand" onclick="showView('home')" aria-label="TumaFly — home">
       <img src="/logo.svg" alt="TumaFly" class="brand-logo">
     </button>
@@ -5827,6 +6083,135 @@
     </div>
   </div>
 </nav>
+
+<!-- Batch 3 · #12 — Mobile tray overlay.
+     Full-screen slide-in from the left when the hamburger is tapped.
+     Content mirrors Priceline's mobile menu (screenshot #5):
+       • X close button + logo in a header row
+       • Sign-in row (or signed-in "Account / My trips / Sign out" rows)
+       • Menu items (Home, Find my trip, Help, T&C, Privacy)
+       • Currency toggle at the bottom (mobile-only home for it — the
+         nav-level currency toggle is hidden on mobile so this is the
+         only way to switch KES/USD on phones)
+     Not persisted in URL/history — refresh drops you back on the
+     underlying view, tap X same. -->
+<div class="mobile-tray-scrim tf-hidden" id="mobile-tray-scrim" onclick="closeMobileMenu()"></div>
+<aside class="mobile-tray tf-hidden" id="mobile-tray" role="dialog" aria-modal="true" aria-label="Menu">
+  <div class="mobile-tray-header">
+    <button class="mobile-tray-close" onclick="closeMobileMenu()" aria-label="Close menu" type="button">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+        <path d="M6 6l12 12M18 6L6 18" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+      </svg>
+    </button>
+    <img src="/logo.svg" alt="TumaFly" class="mobile-tray-logo">
+  </div>
+
+  <!-- Signed-out state: single big Sign in button. Wired to auth modal. -->
+  <div class="mobile-tray-auth-out" id="mobile-tray-auth-out">
+    <button class="mobile-tray-signin-btn" onclick="_trayNav('sign-in')" type="button">Sign in</button>
+  </div>
+
+  <!-- Signed-in state: user chip + account/trips/signout inline. Toggled
+       by refreshMobileTrayAuth() from the same source of truth as
+       .nav-user-btn — sync happens in refreshNavAuthState. -->
+  <div class="mobile-tray-auth-in hidden" id="mobile-tray-auth-in">
+    <div class="mobile-tray-user-chip">
+      <div class="mobile-tray-user-avatar" id="mobile-tray-user-avatar">?</div>
+      <div class="mobile-tray-user-meta">
+        <div class="mobile-tray-user-name" id="mobile-tray-user-name"></div>
+        <div class="mobile-tray-user-sub">Signed in</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Menu items — icons match Priceline's visual weight. -->
+  <nav class="mobile-tray-nav" aria-label="Site navigation">
+    <button class="mobile-tray-item" onclick="_trayNav('home')" type="button">
+      <span class="mobile-tray-icon">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+          <path d="M3 11l9-7 9 7v9a2 2 0 0 1-2 2h-4v-6h-6v6H5a2 2 0 0 1-2-2v-9z" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/>
+        </svg>
+      </span>
+      <span>Home</span>
+    </button>
+    <button class="mobile-tray-item" onclick="_trayNav('find-booking')" type="button">
+      <span class="mobile-tray-icon">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+          <rect x="3" y="4" width="18" height="16" rx="2" stroke="currentColor" stroke-width="1.7"/>
+          <path d="M8 4V2M16 4V2M3 9h18" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/>
+        </svg>
+      </span>
+      <span>Find my trip</span>
+    </button>
+
+    <!-- Signed-in only: Account + My trips + Sign out. Hidden when
+         signed out (only Sign in button at top is shown). -->
+    <button class="mobile-tray-item hidden mobile-tray-authed" onclick="_trayNav('profile')" type="button">
+      <span class="mobile-tray-icon">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+          <circle cx="12" cy="8" r="3.5" stroke="currentColor" stroke-width="1.7"/>
+          <path d="M5 20c0-3.5 3.1-6 7-6s7 2.5 7 6" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/>
+        </svg>
+      </span>
+      <span>Account</span>
+    </button>
+    <button class="mobile-tray-item hidden mobile-tray-authed" onclick="_trayNav('my-trips')" type="button">
+      <span class="mobile-tray-icon">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+          <rect x="4" y="6" width="16" height="14" rx="2" stroke="currentColor" stroke-width="1.7"/>
+          <path d="M9 6V4h6v2" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/>
+        </svg>
+      </span>
+      <span>My trips</span>
+    </button>
+
+    <button class="mobile-tray-item" onclick="_trayNav('support')" type="button">
+      <span class="mobile-tray-icon">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+          <circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="1.7"/>
+          <path d="M9.5 10a2.5 2.5 0 1 1 4 2c-.9.6-1.5 1-1.5 2M12 17.5v.01" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/>
+        </svg>
+      </span>
+      <span>Help / Support</span>
+    </button>
+    <button class="mobile-tray-item" onclick="_trayNav('terms')" type="button">
+      <span class="mobile-tray-icon">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+          <path d="M6 3h9l4 4v14a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1z" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/>
+          <path d="M15 3v4h4M8 12h8M8 16h5" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/>
+        </svg>
+      </span>
+      <span>Terms &amp; Conditions</span>
+    </button>
+    <button class="mobile-tray-item" onclick="_trayNav('privacy')" type="button">
+      <span class="mobile-tray-icon">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+          <path d="M12 3l8 3v6c0 5-3.5 8.5-8 9-4.5-.5-8-4-8-9V6l8-3z" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/>
+        </svg>
+      </span>
+      <span>Privacy Policy</span>
+    </button>
+
+    <button class="mobile-tray-item hidden mobile-tray-authed mobile-tray-signout" onclick="_trayNav('sign-out')" type="button">
+      <span class="mobile-tray-icon">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+          <path d="M9 4H5a1 1 0 0 0-1 1v14a1 1 0 0 0 1 1h4M15 8l4 4-4 4M9 12h10" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/>
+        </svg>
+      </span>
+      <span>Sign out</span>
+    </button>
+  </nav>
+
+  <!-- Currency toggle — MOBILE ONLY home for the KES/USD switch. Same
+       state as the desktop nav-level toggle via setCurrency(). -->
+  <div class="mobile-tray-currency">
+    <div class="mobile-tray-currency-label">Currency</div>
+    <div class="nav-currency mobile-tray-currency-toggle">
+      <button id="tray-curr-kes" class="active" onclick="setCurrency('KES')" type="button">KES</button>
+      <button id="tray-curr-usd" onclick="setCurrency('USD')" type="button">USD</button>
+    </div>
+  </div>
+</aside>
 
 <!-- Mobile search summary strip — sits between nav and page content.
      Hidden on desktop; shown on mobile on results/booking/payment views.
@@ -10507,6 +10892,10 @@
     // Sync the global nav toggle
     document.getElementById('nav-curr-kes')?.classList.toggle('active', c === 'KES');
     document.getElementById('nav-curr-usd')?.classList.toggle('active', c === 'USD');
+    // Batch 3 · #12 — Sync the mobile tray's KES/USD buttons alongside the
+    // desktop nav toggle so both surfaces show the same active state.
+    document.getElementById('tray-curr-kes')?.classList.toggle('active', c === 'KES');
+    document.getElementById('tray-curr-usd')?.classList.toggle('active', c === 'USD');
     // Re-render any visible view that displays prices
     renderResults();
     updatePriceGauge();
@@ -16090,15 +16479,127 @@
     document.getElementById('nav-user-name').textContent = name.split(' ')[0];
     document.getElementById('nav-sign-in-btn').classList.add('hidden');
     document.getElementById('nav-user-btn').classList.remove('hidden');
+    // Batch 3 · #12 — Mirror auth state into the mobile tray so it
+    // reads correctly on open. Signed-out: big Sign-in button visible,
+    // Account/My trips/Sign out items hidden. Signed-in: user chip
+    // visible, auth-required items shown.
+    document.getElementById('mobile-tray-user-avatar').textContent = initial;
+    document.getElementById('mobile-tray-user-name').textContent = name.split(' ')[0];
+    document.getElementById('mobile-tray-auth-out').classList.add('hidden');
+    document.getElementById('mobile-tray-auth-in').classList.remove('hidden');
+    document.querySelectorAll('.mobile-tray-authed').forEach(el => el.classList.remove('hidden'));
   }
 
   function updateNavForGuest() {
     document.getElementById('nav-sign-in-btn').classList.remove('hidden');
     document.getElementById('nav-user-btn').classList.add('hidden');
+    // Batch 3 · #12 — Guest state for tray: Sign-in button shown,
+    // signed-in-only items hidden.
+    document.getElementById('mobile-tray-auth-out')?.classList.remove('hidden');
+    document.getElementById('mobile-tray-auth-in')?.classList.add('hidden');
+    document.querySelectorAll('.mobile-tray-authed').forEach(el => el.classList.add('hidden'));
   }
 
   // Call once on first paint so nav shows correct state even before session resolves
   updateNavForGuest();
+
+  // ────────────────────────────────────────────────────────────────
+  // Batch 3 · #12 — MOBILE TRAY OPEN / CLOSE / NAV
+  // ────────────────────────────────────────────────────────────────
+  // The tray is a UI overlay only — no URL/hash persistence. Refresh
+  // drops the user back on the underlying view (tray state is lost),
+  // which matches Bev's spec: "refreshing on the tray does the same"
+  // as tapping X.
+  //
+  // Simple pattern: two elements (.mobile-tray and .mobile-tray-scrim)
+  // get .open added/removed. Scrim tap = close. X tap = close. Menu
+  // item tap = close AND navigate.
+  //
+  // Body gets .tray-open which locks scroll on the underlying page so
+  // touch scrolls the tray, not the page behind it.
+  function openMobileMenu() {
+    const tray  = document.getElementById('mobile-tray');
+    const scrim = document.getElementById('mobile-tray-scrim');
+    if (!tray || !scrim) return;
+    // Un-hide first so the slide-in animation has something to animate FROM.
+    // The `.tf-hidden` display:none flip must happen before the transform.
+    tray.classList.remove('tf-hidden');
+    scrim.classList.remove('tf-hidden');
+    // Force reflow so the browser registers the pre-open state before
+    // we flip to .open (which triggers the transition).
+    // eslint-disable-next-line no-unused-expressions
+    tray.offsetHeight;
+    tray.classList.add('open');
+    scrim.classList.add('open');
+    document.body.classList.add('tray-open');
+  }
+
+  function closeMobileMenu() {
+    const tray  = document.getElementById('mobile-tray');
+    const scrim = document.getElementById('mobile-tray-scrim');
+    if (!tray || !scrim) return;
+    tray.classList.remove('open');
+    scrim.classList.remove('open');
+    document.body.classList.remove('tray-open');
+    // After the slide-out completes, hide fully so the tray doesn't
+    // intercept taps or shift layout in landscape.
+    setTimeout(() => {
+      // Only re-hide if still closed (user didn't re-open in the meantime).
+      if (!tray.classList.contains('open')) {
+        tray.classList.add('tf-hidden');
+        scrim.classList.add('tf-hidden');
+      }
+    }, 240);
+  }
+  // Expose so inline onclick handlers can call them
+  window.openMobileMenu  = openMobileMenu;
+  window.closeMobileMenu = closeMobileMenu;
+
+  // Route a tray menu-item tap.
+  // Closes the tray first so the underlying view isn't obstructed while
+  // it renders. For external links (support email, legal pages) we open
+  // in a new tab.
+  function _trayNav(key) {
+    closeMobileMenu();
+    switch (key) {
+      case 'sign-in':
+        if (typeof openAuthModal === 'function') openAuthModal();
+        break;
+      case 'sign-out':
+        if (typeof signOut === 'function') signOut();
+        break;
+      case 'home':
+        showView('home');
+        break;
+      case 'find-booking':
+        showView('find-booking');
+        break;
+      case 'profile':
+        showView('profile');
+        break;
+      case 'my-trips':
+        showView('my-trips');
+        break;
+      case 'support':
+        // Mail-to opens the user's mail app. No view change.
+        window.location.href = 'mailto:hello@tumafly.com';
+        break;
+      case 'terms':
+        window.open('/legal/terms', '_blank', 'noopener');
+        break;
+      case 'privacy':
+        window.open('/legal/privacy', '_blank', 'noopener');
+        break;
+    }
+  }
+  window._trayNav = _trayNav;
+
+  // Escape key closes the tray (accessibility + power-user affordance).
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && document.body.classList.contains('tray-open')) {
+      closeMobileMenu();
+    }
+  });
 
   // ── User dropdown ────────────────────────────────────────────
   function toggleUserDropdown() {
@@ -16842,6 +17343,9 @@
     if (!error && updates.first_name) {
       document.getElementById('nav-user-name').textContent = updates.first_name;
       document.getElementById('nav-avatar').textContent = updates.first_name[0].toUpperCase();
+      // Batch 3 · #12 — Mirror name edits into the tray chip.
+      document.getElementById('mobile-tray-user-name').textContent = updates.first_name;
+      document.getElementById('mobile-tray-user-avatar').textContent = updates.first_name[0].toUpperCase();
     }
   }
 
