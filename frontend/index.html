@@ -1023,6 +1023,11 @@
     .field input:focus, .field select:focus {
       border-color: var(--brand);
       box-shadow: 0 0 0 3px rgba(61, 149, 245, 0.15);
+      /* Batch 2 · #7 — Match the per-field wash we now give From/To on
+         the pill halves. Same visual "this field is active" cue across
+         From / To / Depart / Return / Travelers so the auto-advance chain
+         reads as continuous. */
+      background: var(--brand-soft, #e8f3ff);
     }
     .field input::placeholder { color: var(--text-3); }
 
@@ -1105,15 +1110,29 @@
       overflow: visible;
       transition: border-color 0.15s, box-shadow 0.15s;
     }
-    .from-to-pill:focus-within {
-      border-color: var(--brand);
-      box-shadow: 0 0 0 3px rgba(61, 149, 245, 0.15);
-    }
+    /* Batch 2 · #7 — Per-field outlines instead of pill-level.
+       The previous `.from-to-pill:focus-within` highlighted BOTH halves
+       (From + To) when EITHER was focused, giving no visual signal about
+       which field was active. Now the pill keeps its neutral border
+       always; the focused half gets its own light-blue wash so the user
+       can see exactly which one they're editing. */
     .from-to-pill .ft-field {
       /* Match .field input padding so pill body height equals the adjacent date input */
       padding: 12px 16px;
       min-width: 0;
       position: relative;
+      transition: background 0.15s;
+    }
+    .from-to-pill .ft-field:focus-within {
+      background: var(--brand-soft, #e8f3ff);
+    }
+    /* Round the wash's outer corners to hug the pill's rounded corners
+       — first field rounds left, second field rounds right. */
+    .from-to-pill .ft-field:first-of-type {
+      border-radius: calc(var(--radius-sm) - 1px) 0 0 calc(var(--radius-sm) - 1px);
+    }
+    .from-to-pill .ft-field:nth-of-type(2) {
+      border-radius: 0 calc(var(--radius-sm) - 1px) calc(var(--radius-sm) - 1px) 0;
     }
     .from-to-pill .ft-field + .ft-field {
       border-left: 1px solid var(--border);
@@ -1326,6 +1345,9 @@
     .tp-trigger.open {
       border-color: var(--brand);
       box-shadow: 0 0 0 3px rgba(61, 149, 245, 0.15);
+      /* Batch 2 · #7 — match Depart/Return wash so Travelers reads as the
+         current field in the auto-advance chain. */
+      background: var(--brand-soft, #e8f3ff);
     }
     /* Summary-bar variant — borderless to match other sf fields */
     .sf .tp-trigger {
@@ -4672,6 +4694,57 @@
       line-height: 1.25;
     }
 
+    /* Batch 2 · #11a — Filter icon button sitting to the right of the
+       summary pill in the mobile search strip. Icon-only, brand outlined.
+       Same visual weight as the pill's magnifying-glass icon so the two
+       read as a pair. Hidden by default; JS toggles visibility per view
+       (only visible on #results). */
+    .mobile-summary-filter-btn {
+      display: none;
+      flex: 0 0 auto;
+      width: 44px;
+      height: 44px;
+      align-items: center;
+      justify-content: center;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      color: var(--brand-dark);
+      cursor: pointer;
+      padding: 0;
+      transition: background 0.12s, border-color 0.12s;
+    }
+    .mobile-summary-filter-btn:hover {
+      background: var(--brand-soft);
+      border-color: var(--brand);
+    }
+    .mobile-summary-filter-btn:active { transform: scale(0.96); }
+    .mobile-summary-filter-btn svg { display: block; }
+
+    /* Batch 2 · #11a — Sort pill sitting in the leftmost slot of the
+       cabin-pill-row (where the "All" cabin pill used to live). Uses
+       the same base .cabin-pill styling but with an internal icon +
+       label layout, always visually "active" state so it stands apart
+       from the cabin filter pills next to it. Never highlights blue
+       via .active — its label carries the current state instead. */
+    .cabin-pill.sort-pill-in-row {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      /* Never treated as an "active" cabin filter — override any
+         accidental .active class propagation defensively. */
+      background: var(--surface);
+      color: var(--brand-dark);
+      border-color: var(--brand);
+    }
+    .cabin-pill.sort-pill-in-row svg { flex-shrink: 0; }
+    .cabin-pill.sort-pill-in-row.active,
+    .cabin-pill.sort-pill-in-row:hover {
+      /* Same visual as base cabin-pill hover — soft blue, not filled */
+      background: var(--brand-soft);
+      color: var(--brand-dark);
+    }
+
     /* ── Phase B — Mobile Filter + Sort pill row ────────────────── */
     /* Twin outlined pills that sit above the flight list on mobile,
        triggering the Filter and Sort bottom-sheets. Hidden on desktop. */
@@ -5090,7 +5163,9 @@
       /* Search strip: visible on mobile, sticky just below the 56px nav.
          JS toggles .hidden to show/hide per view. */
       .mobile-search-strip {
-        display: block;
+        display: flex;
+        align-items: center;
+        gap: 10px;
         background: var(--surface);
         border-bottom: 1px solid var(--border);
         padding: 8px 16px;
@@ -5098,6 +5173,11 @@
         top: 56px; /* nav height on mobile */
         z-index: 49; /* just under the nav's z-index: 50 */
       }
+      /* Batch 2 · #11a — .mobile-search-strip is now a flex row containing
+         the summary pill (fills) + the filter icon button (fixed). Filter
+         icon only visible on #results (JS adds .for-results). */
+      .mobile-search-strip .mobile-summary-pill { flex: 1; min-width: 0; }
+      .mobile-search-strip.for-results .mobile-summary-filter-btn { display: inline-flex; }
 
       /* Hero — matches the nav-inner pattern: outer full-bleed, inner
          holds the 16px gutter so its content column lines up with the header
@@ -5507,21 +5587,34 @@
         padding: 10px 14px;
       }
 
-      /* Bottom CTA bar — fixed to viewport bottom, not sticky (sticky misbehaves
-         inside grid/overflow containers on mobile browsers) */
+      /* Batch 2 · #5 — Continue-to-payment as a floating pill FAB on
+         mobile. Previously this was a full-width sticky bar glued to the
+         viewport with a white background + top border. It now:
+           • Floats free of the content edge (no background strip, no border)
+           • Centers horizontally
+           • Sizes to roughly the browser chrome bar width (viewport - 32px,
+             capped at 560px on tablets)
+           • Sits raised off the edge via safe-area-inset-bottom + 16px
+           • Casts a soft shadow so it lifts off the content behind
+         The container is still `.booking-cta-bar` (Batch 1 kept only the
+         primary button; the back button is display:none). */
       .booking-cta-bar {
         position: fixed;
-        bottom: 0;
-        left: 0;
-        right: 0;
-        background: var(--surface);
-        border-top: 1px solid var(--border);
-        padding: 12px 16px max(12px, env(safe-area-inset-bottom));
+        bottom: max(16px, calc(env(safe-area-inset-bottom) + 12px));
+        left: 50%;
+        right: auto;
+        transform: translateX(-50%);
+        width: calc(100vw - 32px);
+        max-width: 560px;
+        background: transparent;      /* pill is the button itself */
+        border-top: none;             /* no more strip look */
+        padding: 0;
         display: flex;
-        gap: 10px;
+        gap: 0;
         z-index: 30;
-        /* No negative margin needed with fixed positioning */
+        pointer-events: none;         /* let taps through gaps */
       }
+      .booking-cta-bar > * { pointer-events: auto; }
       .booking-cta-bar .btn-secondary {
         flex: 0 0 auto;
         min-width: 44px;
@@ -5531,8 +5624,16 @@
         flex: 1;
         min-height: 52px;
         font-size: 16px;
-        border-radius: 14px;
+        border-radius: 999px;
+        /* Elevation so the pill visually floats off content behind it */
+        box-shadow:
+          0 10px 28px rgba(15, 25, 35, 0.20),
+          0 3px 8px rgba(15, 25, 35, 0.10);
       }
+      /* Give the page enough bottom padding so the floating FAB never
+         covers the last content card at the scroll bottom. Previously
+         80px was enough for a bar; the raised FAB needs a bit more. */
+      #view-booking .page { padding-bottom: 110px; }
       /* Hide the inline back/continue row on mobile — replaced by sticky bar */
       .booking-inline-cta { display: none !important; }
       /* Show the sticky CTA bar on mobile */
@@ -5740,6 +5841,19 @@
       <span class="mobile-summary-pill-route" id="mobile-summary-route">Search</span>
       <span class="mobile-summary-pill-meta" id="mobile-summary-meta"></span>
     </span>
+  </button>
+  <!-- Batch 2 · #11a — Filter icon lives to the right of the summary pill
+       instead of below in a separate row. Icon-only; the "Filter" label was
+       redundant with the visual. Shown only on #results (JS toggles the
+       .for-results class to keep this hidden on booking/payment). -->
+  <button class="mobile-summary-filter-btn"
+          id="mobile-summary-filter-btn"
+          onclick="openFilterSheet()"
+          type="button"
+          aria-label="Filter results">
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+      <path d="M3 6h18M6 12h12M10 18h4" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+    </svg>
   </button>
 </div>
 
@@ -6057,27 +6171,29 @@
       </div>
 
       <div class="results-main">
-        <!-- Phase B — Mobile-only Filter + Sort row, above the route header.
-             Hidden on desktop; opens bottom-sheets on mobile. -->
-        <div class="mobile-fs-row">
-          <button class="mobile-fs-pill" onclick="openFilterSheet()" type="button">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-              <path d="M3 6h18M6 12h12M10 18h4" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
-            </svg>
-            Filter
-          </button>
-          <button class="mobile-fs-pill" onclick="openSortSheet()" type="button">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-              <path d="M7 4v16M7 4l-3 3M7 4l3 3" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-              <path d="M17 20V4M17 20l-3-3M17 20l3-3" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-            </svg>
-            Sort
-          </button>
-        </div>
+        <!-- Batch 2 · #11a — Old mobile-fs-row (Filter + Sort pills) is gone.
+             Filter icon lives inside .mobile-search-strip now (right of the
+             summary pill). Sort pill sits at the leftmost slot of the
+             cabin-pill-row below, where "All" used to live. -->
 
-        <!-- Phase B follow-up — Cabin pill row. Each pill calls setCabinFilter. -->
+        <!-- Cabin pill row + Sort pill. Sort pill on the far left,
+             followed by the cabin filter pills. All in one horizontally
+             scrollable row so users can slide sideways on narrow screens. -->
         <div class="cabin-pill-row" id="cabin-pill-row">
-          <button class="cabin-pill active" data-cabin="all"             onclick="setCabinFilter('all')"             type="button">All</button>
+          <!-- Sort pill: replaces the old "All" cabin pill in this slot.
+               Tapping opens the sort bottom sheet (see openSortSheet).
+               Label reflects current tray pick: "Sort: Recommended" by
+               default, or "All flights" when the user has picked All
+               from the tray. -->
+          <button class="cabin-pill sort-pill-in-row" id="sort-pill-mobile"
+                  onclick="openSortSheet()" type="button"
+                  aria-label="Sort results">
+            <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+              <path d="M4.5 3v9.5M4.5 12.5l-2.5-2.5M4.5 12.5l2.5-2.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+              <path d="M11.5 13V3.5M11.5 3.5l-2.5 2.5M11.5 3.5l2.5 2.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+            </svg>
+            <span id="sort-pill-label">Sort: Recommended</span>
+          </button>
           <button class="cabin-pill"        data-cabin="economy"         onclick="setCabinFilter('economy')"         type="button">Economy</button>
           <button class="cabin-pill"        data-cabin="premium_economy" onclick="setCabinFilter('premium_economy')" type="button">Premium Economy</button>
           <button class="cabin-pill"        data-cabin="business_first"  onclick="setCabinFilter('business_first')"  type="button">Business &amp; First</button>
@@ -8840,6 +8956,148 @@
     });
   }
 
+  // ─────────────────────────────────────────────────────────────
+  // Batch 2 · #7 — HOME SEARCH AUTO-ADVANCE CHAIN
+  // ─────────────────────────────────────────────────────────────
+  // When the user makes a pick in one home-form field, focus + open the
+  // next field's picker. Chain: From → To → Depart → Return → Travelers.
+  // One-way mode skips Return.
+  //
+  // Suspension rule (per Bev's C.3): if the user manually clicks a field
+  // OTHER than the one we just auto-advanced to, they've taken control.
+  // We suspend the chain for the rest of this widget's session so we
+  // don't yank them somewhere they didn't want to go.
+  //
+  // Reset points: setTripType (they're re-starting) and swap (still on
+  // the widget, chain stays whatever it was).
+  const _homeAutoAdv = {
+    suspended: false,
+    // Which stage we most recently auto-advanced TO. Any mousedown/pointerdown
+    // on a field NOT matching this = manual takeover → suspend.
+    justAdvancedTo: null,
+  };
+
+  function _homeAutoAdvance_resume() {
+    _homeAutoAdv.suspended = false;
+    _homeAutoAdv.justAdvancedTo = null;
+  }
+  // Exposed for setTripType and other reset points to call.
+  window._homeAutoAdvance_resume = _homeAutoAdvance_resume;
+
+  function _homeAutoAdvance_openDestDropdown() {
+    const dest = document.getElementById('destination');
+    if (!dest) return;
+    _homeAutoAdv.justAdvancedTo = 'destination';
+    dest.focus();
+    // Dispatching an 'input' event fires the airport-search render which
+    // shows the "recent + starter" dropdown when the field is empty.
+    dest.dispatchEvent(new Event('input', { bubbles: true }));
+  }
+
+  function _homeAutoAdvance_openDate() {
+    const dep = document.getElementById('date');
+    if (!dep) return;
+    _homeAutoAdv.justAdvancedTo = 'date';
+    dep.focus();
+    // showPicker() is HTML5, well-supported in Chrome 99+, Safari 16+,
+    // Firefox 101+. Wrap in try — some browsers throw if the input isn't
+    // in a user-activation gesture chain, in which case focus alone is
+    // still useful (tap the field to open native picker).
+    try { dep.showPicker?.(); } catch (e) { /* silent */ }
+  }
+
+  function _homeAutoAdvance_openReturn() {
+    const ret = document.getElementById('return-date');
+    if (!ret) return;
+    _homeAutoAdv.justAdvancedTo = 'return-date';
+    ret.focus();
+    try { ret.showPicker?.(); } catch (e) { /* silent */ }
+  }
+
+  function _homeAutoAdvance_openTravelers() {
+    const trigger = document.getElementById('tp-home-trigger');
+    if (!trigger) return;
+    _homeAutoAdv.justAdvancedTo = 'tp-home';
+    // Only open if closed. Idempotent: toggleTravelerPicker toggles state.
+    if (!trigger.classList.contains('open')) {
+      try { toggleTravelerPicker?.('home'); } catch (e) { /* silent */ }
+    }
+    trigger.focus();
+  }
+
+  // Called from pickAirport for 'origin' and 'destination', and from the
+  // change listeners on the date inputs. Advances to the next stage in
+  // the chain from whatever stage just completed. Respects suspension.
+  function _homeAutoAdvance_next(fromStage) {
+    if (_homeAutoAdv.suspended) return;
+    // Only advance if the origin the pick came from is the HOME form.
+    // Results-page picks (r-origin/r-destination) don't chain — those
+    // trigger onSummaryChange which does its own re-search.
+    if (fromStage === 'origin') {
+      _homeAutoAdvance_openDestDropdown();
+    } else if (fromStage === 'destination') {
+      _homeAutoAdvance_openDate();
+    } else if (fromStage === 'date') {
+      if (typeof tripType !== 'undefined' && tripType === 'round') {
+        _homeAutoAdvance_openReturn();
+      } else {
+        _homeAutoAdvance_openTravelers();
+      }
+    } else if (fromStage === 'return-date') {
+      _homeAutoAdvance_openTravelers();
+    }
+  }
+
+  // Wire the date-input change listeners for auto-advance. Attached once
+  // at DOMContentLoaded-adjacent time via wireHomeFormStashHooks's caller.
+  // Origin/destination advance is triggered from inside pickAirport
+  // (see the tail of that function).
+  (function _wireHomeAutoAdvance() {
+    const dep = document.getElementById('date');
+    if (dep && !dep.dataset.tfAutoAdv) {
+      dep.dataset.tfAutoAdv = '1';
+      dep.addEventListener('change', () => {
+        if (dep.value) _homeAutoAdvance_next('date');
+      });
+    }
+    const ret = document.getElementById('return-date');
+    if (ret && !ret.dataset.tfAutoAdv) {
+      ret.dataset.tfAutoAdv = '1';
+      ret.addEventListener('change', () => {
+        if (ret.value) _homeAutoAdvance_next('return-date');
+      });
+    }
+
+    // Suspension detection: if the user pointer-downs on a home-form
+    // field that ISN'T the stage we just advanced to, they've taken
+    // manual control of the flow. Silence the chain for the rest of
+    // this widget's session.
+    //
+    // We use pointerdown (not click) so this fires BEFORE focus/pick
+    // handlers, letting us set the flag before advance would trigger.
+    const homeFormRoot = document.querySelector('.search');
+    if (homeFormRoot && !homeFormRoot.dataset.tfAutoAdvGuard) {
+      homeFormRoot.dataset.tfAutoAdvGuard = '1';
+      homeFormRoot.addEventListener('pointerdown', (e) => {
+        // Which stage is being pointed at?
+        const t = e.target;
+        let stage = null;
+        if (t.closest('#origin-wrap'))            stage = 'origin';
+        else if (t.closest('#destination-wrap'))  stage = 'destination';
+        else if (t.closest('#date'))              stage = 'date';
+        else if (t.closest('#return-date'))       stage = 'return-date';
+        else if (t.closest('#tp-home-trigger'))   stage = 'tp-home';
+        if (!stage) return;
+        // If the pointerdown target isn't the field we just advanced to
+        // AND isn't the field the chain would next expect from where
+        // they last were, treat it as manual takeover.
+        if (_homeAutoAdv.justAdvancedTo && stage !== _homeAutoAdv.justAdvancedTo) {
+          _homeAutoAdv.suspended = true;
+        }
+      }, true /* capture, so we catch it even if handlers stopPropagation */);
+    }
+  })();
+
   // Handle the browser back/forward buttons
   window.addEventListener('popstate', (e) => {
     if (pollHandle) {
@@ -9234,6 +9492,11 @@
     applyReturnDatePrompt();
     // Step 2: trip-type toggle is part of the home-form state shadow.
     if (typeof stashHomeForm === 'function') stashHomeForm();
+    // Batch 2 · #7 — Trip-type flip is effectively a restart of the search
+    // widget's intent, so let the auto-advance chain resume from scratch.
+    if (typeof window._homeAutoAdvance_resume === 'function') {
+      window._homeAutoAdvance_resume();
+    }
   }
   // Adds/removes the .needs-input class on the return-date inputs depending on
   // whether we're in round-trip mode AND the field is empty. Used to draw the
@@ -9710,6 +9973,15 @@
     // On the results page, picking triggers a re-search (after both fields are set)
     if (which === 'r-origin' || which === 'r-destination') {
       onSummaryChange();
+    }
+
+    // Batch 2 · #7 — Auto-advance the home-search chain: From→To→Depart.
+    // Only for home-form picks (origin/destination). Results-page and
+    // edit-search picks have their own flows and don't chain.
+    if (which === 'origin' || which === 'destination') {
+      if (typeof _homeAutoAdvance_next === 'function') {
+        _homeAutoAdvance_next(which);
+      }
     }
   }
 
@@ -10597,6 +10869,11 @@
     if (mode === 'cheapest') arr.sort((a, b) => priceOfLowest(a) - priceOfLowest(b));
     else if (mode === 'fastest') arr.sort((a, b) => dur(a) - dur(b));
     else if (mode === 'earliest') arr.sort((a, b) => dep(a) - dep(b));
+    // Batch 2 · #11a — Latest departure sort (mirrors 'earliest' with the
+    // opposite comparator). Backs the "Latest Takeoff" entry in the sort
+    // tray. Users who prefer to leave later in the day (business folks,
+    // late-night flyers) grab this.
+    else if (mode === 'latest') arr.sort((a, b) => dep(b) - dep(a));
     else {
       // Recommended: normalized score combining price + duration + stops, lower better
       const maxPrice = Math.max(...arr.map(priceOfLowest));
@@ -10608,6 +10885,55 @@
       });
     }
     return arr;
+  }
+
+  // Batch 2 · #11a — Mobile sort tray state.
+  //
+  // The tray shows 6 options: All + 5 sort modes. Only ONE is checked at
+  // a time (radio behavior), but under the hood cabin-filter and sort-mode
+  // are independent — picking a sort doesn't clear cabin, and picking All
+  // doesn't touch sort. We track "last tray pick" as a separate variable
+  // so the tray's checkmark reflects user intent, and so the pill label
+  // can show either "Sort: X" (last pick was a sort) or "All flights"
+  // (last pick was All).
+  //
+  // Initial state: 'recommended' so the pill reads "Sort: Recommended"
+  // and the tray has that row checked. The user hasn't explicitly picked
+  // "All" — cabin defaults to 'all' as a starting cabin filter, but the
+  // pill still shows Sort: Recommended (sort-mode wins the label by
+  // default; only an explicit tap on "All" flips the label).
+  let _sortTrayLastPick = 'recommended';
+
+  // Human-readable labels for pill display. Kept short so the pill
+  // doesn't overflow narrow phones.
+  const _SORT_TRAY_LABEL = {
+    'all':          'All flights',
+    'recommended':  'Sort: Recommended',
+    'cheapest':     'Sort: Cheapest',
+    'fastest':      'Sort: Fastest',
+    'earliest':     'Sort: Earliest Takeoff',
+    'latest':       'Sort: Latest Takeoff',
+  };
+
+  function _updateSortPillLabel() {
+    const el = document.getElementById('sort-pill-label');
+    if (!el) return;
+    // Rule: pill label reflects what the user last picked in the TRAY
+    // (source of truth = _sortTrayLastPick). Exception: if the last pick
+    // was 'all' but the cabin filter has since been narrowed by tapping
+    // Economy/Business/etc. on the horizontal row, that "All" claim is
+    // stale — fall back to showing the current sort mode instead.
+    // This lets the horizontal cabin pills naturally take over the label
+    // when they're used, without needing extra sync logic.
+    let label;
+    const cabin = (typeof activeCabinFilter !== 'undefined') ? activeCabinFilter : 'all';
+    if (_sortTrayLastPick === 'all' && cabin === 'all') {
+      label = _SORT_TRAY_LABEL['all'];
+    } else {
+      const sortMode = document.getElementById('sort-by')?.value || 'recommended';
+      label = _SORT_TRAY_LABEL[sortMode] || 'Sort: Recommended';
+    }
+    el.textContent = label;
   }
 
   // Renders the step-row HTML: step label on left, sort pill (with up/down arrows icon) on right.
@@ -10626,7 +10952,8 @@
             <option value="recommended" ${sortValue === 'recommended' ? 'selected' : ''}>Sort: Recommended</option>
             <option value="cheapest" ${sortValue === 'cheapest' ? 'selected' : ''}>Sort: Cheapest</option>
             <option value="fastest" ${sortValue === 'fastest' ? 'selected' : ''}>Sort: Fastest</option>
-            <option value="earliest" ${sortValue === 'earliest' ? 'selected' : ''}>Sort: Earliest departure</option>
+            <option value="earliest" ${sortValue === 'earliest' ? 'selected' : ''}>Sort: Earliest Takeoff</option>
+            <option value="latest" ${sortValue === 'latest' ? 'selected' : ''}>Sort: Latest Takeoff</option>
           </select>
         </div>
       </div>
@@ -10669,6 +10996,10 @@
     document.getElementById('results-count').textContent = filtered.length;
     updateFilterCounts();
     updatePriceGauge();
+    // Batch 2 · #11a — Keep the mobile Sort pill label in sync with
+    // current state on every render. Cheap; runs no-op if the mobile
+    // pill isn't in DOM (desktop viewport).
+    if (typeof _updateSortPillLabel === 'function') _updateSortPillLabel();
 
     // Default: clear the outbound sidebar slot. We refill it below when picking a return.
     const sideSlot = document.getElementById('outbound-side-slot');
@@ -14659,13 +14990,22 @@
   // Sort sheet — small radio-style list. Tapping an option sets the
   // hidden #sort-by select value and re-renders, then closes the sheet.
   function openSortSheet() {
-    const current = document.getElementById('sort-by')?.value || 'recommended';
+    // Batch 2 · #11a — Tray now has 6 entries: All + 5 sort modes.
+    // Radio behavior (only the last-picked entry checked); underlying
+    // state is independent (cabin filter vs sort mode).
+    //
+    // Copy note: labels here match the pill display exactly except
+    // "All flights" is written as "All flights" (matches the pill
+    // label so users see continuity between tap and result).
     const options = [
-      ['recommended', 'Recommended'],
-      ['cheapest',    'Price (lowest to highest)'],
-      ['fastest',     'Duration (shortest first)'],
-      ['earliest',    'Departure (earliest first)'],
+      ['all',          'All flights'],
+      ['recommended',  'Recommended'],
+      ['cheapest',     'Cheapest'],
+      ['fastest',      'Fastest'],
+      ['earliest',     'Earliest Takeoff'],
+      ['latest',       'Latest Takeoff'],
     ];
+    const current = _sortTrayLastPick;
     const html = `
       <div class="sort-sheet-list">
         ${options.map(([val, label]) => `
@@ -14682,9 +15022,25 @@
   }
 
   function applySortChoice(value) {
-    const sel = document.getElementById('sort-by');
-    if (sel) sel.value = value;
-    renderResults();
+    // Batch 2 · #11a — Tray semantics:
+    //   'all'  → clear cabin filter (equivalent to old "All" cabin pill).
+    //            Sort mode is NOT changed. Pill label flips to "All flights".
+    //   sort   → change sort-by. Cabin filter is NOT changed.
+    //            Pill label flips to "Sort: X".
+    // In both cases we record `_sortTrayLastPick` so the tray's checkmark
+    // reflects the user's most-recent pick even though cabin+sort are
+    // independent underneath.
+    _sortTrayLastPick = value;
+    if (value === 'all') {
+      // Clear cabin filter. setCabinFilter handles the horizontal-pill
+      // highlight update + re-render.
+      if (typeof setCabinFilter === 'function') setCabinFilter('all');
+    } else {
+      const sel = document.getElementById('sort-by');
+      if (sel) sel.value = value;
+      renderResults();
+    }
+    _updateSortPillLabel();
     closeSheet();
   }
 
@@ -14987,6 +15343,9 @@
 
     const showStrip = ['results', 'booking', 'payment'].includes(viewName);
     if (!showStrip) { strip.classList.add('hidden'); return; }
+    // Batch 2 · #11a — Filter icon in the strip only makes sense on #results.
+    // Booking and payment views don't have filters to open.
+    strip.classList.toggle('for-results', viewName === 'results');
 
     // Build the route line. Prefer city names from airportsData; fall back to IATA.
     const fromIata = rOriginSelectedIata      || originSelectedIata      || '';
