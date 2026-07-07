@@ -4521,11 +4521,19 @@
     /* ─────────────────────────────────────────────────────────────
        PAYMENT
        ───────────────────────────────────────────────────────────── */
-    /* Base pay-tabs styles moved below (near .pay-tab-item / .pay-tab-pane)
-       so the layout is universal accordion (Step 4). Kept the visual
-       shorthand `margin-bottom: 18px` here so surrounding spacing stays
-       identical to prior desktop. */
-    .pay-tabs { margin-bottom: 18px; }
+    /* Desktop layout — restored to the original 2-column tab grid with
+       the pay-card-pane spanning the full row below (see .pay-tab-pane
+       further down). Mobile keeps the stacked accordion via the media
+       query at ~L6084. Refresh still runs restorePayment on both
+       viewports (contact + name preserved in the sessionStorage shadow;
+       iframe wrap reset to a fresh "Pay with card" state so the dead
+       merchant_ref doesn't linger). */
+    .pay-tabs {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 8px;
+      margin-bottom: 18px;
+    }
     .pay-tab {
       position: relative;
       padding: 16px;
@@ -4607,44 +4615,22 @@
        This lets us fully rehydrate the payment view on refresh without
        needing to resurrect a dead Pesapal iframe — the user just re-taps
        the Credit or Debit card and a fresh iframe loads with the same
-       customer details pre-filled from the shadow. */
-    .pay-tabs {
-      display: flex;
-      flex-direction: column;
-      gap: 10px;
-    }
-    .pay-tab-item { display: block; }
-    .pay-tab {
-      width: 100%;
-      min-height: 56px;
-      border-radius: 14px;
-    }
-    /* .active is meaningless as a stand-alone visual now — .open on the
-       wrapper is the sole source of truth for "this card is expanded." */
-    .pay-tab.active {
-      border-color: var(--border);
-      background: var(--surface);
-    }
-    .pay-tab-item.open > .pay-tab {
-      border-color: var(--brand);
-      background: var(--brand-soft);
-    }
-    /* Accordion pane collapsed by default; slides open on .open. */
+       customer details pre-filled from the shadow.
+
+       Reverted on desktop per Bev's ask — desktop stays as the original
+       2-column tab layout with pane spanning the full row below.
+       Mobile keeps the accordion (see the @media block ~L6084). */
+    /* Desktop: accordion wrapper is a display:contents ghost so the tab
+       button and the pane behave as direct grid children of .pay-tabs.
+       Pane spans the full row below via grid-column: 1 / -1. */
+    .pay-tab-item { display: contents; }
     .pay-tab-pane {
-      max-height: 0;
-      overflow: hidden;
-      opacity: 0;
-      margin-top: 0;
-      transition: max-height 0.32s ease, opacity 0.2s ease-out, margin-top 0.2s;
-      min-height: 0;
+      grid-column: 1 / -1;
+      margin-top: 8px;
     }
-    .pay-tab-item.open .pay-tab-pane {
-      max-height: 1200px;
-      opacity: 1;
-      margin-top: 10px;
-    }
-    /* Chevron cue — visible on both viewports now */
-    .pay-tab-chev { display: inline-block; }
+    /* Chevron is an accordion affordance — desktop uses tabs, so hidden by
+       default. Mobile override in the media query makes it visible. */
+    .pay-tab-chev { display: none; }
     .pay-tab-item.open .pay-tab-chev { transform: rotate(180deg); }
 
     .pay-iframe-wrap {
@@ -6094,9 +6080,49 @@
          screen: M-Pesa tab, Card tab, Card pane (nested inside its
          wrapper).
 
-         Step 4 update: these rules moved to the universal base at
-         ~L4612 so desktop and mobile share the same accordion behavior.
-         Nothing needed here. */
+         Desktop keeps the 2-column tab layout (see base rules at
+         ~L4524). Restore desktop shipped in the same commit that added
+         these rules back. */
+      .pay-tabs {
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+      }
+      .pay-tab-item { display: block; }
+      .pay-tab {
+        width: 100%;
+        min-height: 56px;
+        border-radius: 14px;
+      }
+      /* Neutralize .active on mobile so the initial "one tab hot-blue,
+         one grey" desktop look doesn't leak in — .open on the wrapper
+         is the sole source of truth for "this card is expanded" on
+         mobile. Desktop keeps the original .active branded tab. */
+      .pay-tab.active {
+        border-color: var(--border);
+        background: var(--surface);
+      }
+      .pay-tab-item.open > .pay-tab {
+        border-color: var(--brand);
+        background: var(--brand-soft);
+      }
+      /* Accordion pane collapsed by default; slides open on .open. */
+      .pay-tab-pane {
+        max-height: 0;
+        overflow: hidden;
+        opacity: 0;
+        margin-top: 0;
+        transition: max-height 0.32s ease, opacity 0.2s ease-out, margin-top 0.2s;
+        min-height: 0;
+        grid-column: auto; /* Reset the desktop grid-column: 1/-1 */
+      }
+      .pay-tab-item.open .pay-tab-pane {
+        max-height: 1200px;
+        opacity: 1;
+        margin-top: 10px;
+      }
+      /* Chevron cue visible on mobile only (accordion affordance) */
+      .pay-tab-chev { display: inline-block; }
 
       /* ── Phase G — 44px tap target sweep ────────────────────── */
 
