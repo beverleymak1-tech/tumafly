@@ -3833,7 +3833,18 @@
       border-radius: var(--radius-sm);
       padding: 20px 22px;
       margin-bottom: 16px;
+      /* Bev's scroll-anchor batch: give scrollIntoView breathing room
+         from the top of the viewport so the "Traveler N" heading isn't
+         pinned to the very edge (or worse, under a sticky header on
+         mobile). 80px covers the mobile booking header + fare timer
+         bar cleanly on both viewports. */
+      scroll-margin-top: 80px;
     }
+    /* Same scroll-anchor treatment for the Baggage + Seats cards so
+       saveTraveler's fallback (advance to Baggage after last save) and
+       skipBags' advance to Seats both land at the section's heading with
+       breathing room, not pinned to the viewport edge. */
+    .booking-layout .card { scroll-margin-top: 80px; }
     .pax-block-title {
       font-size: 17px;
       font-weight: 600;
@@ -4560,8 +4571,8 @@
     .pay-tab {
       position: relative;
       width: 100%;
-      min-height: 68px;
-      padding: 14px 18px;
+      min-height: 92px;
+      padding: 16px 18px;
       border: none;
       background: transparent;
       border-radius: 0;
@@ -6121,7 +6132,7 @@
          so the alpha sits at natural height instead of stretching to
          match a potentially very tall aside on mobile. */
       .pay-tab {
-        min-height: 68px;
+        min-height: 92px;
       }
       /* Mobile: don't stretch the aside grid; keep at natural heights so
          the alpha sits at its own height (not stretched to match a stacked
@@ -9088,6 +9099,41 @@
     // Reset the token unconditionally — single-use, backend rejects replays.
     resetTurnstile('payment');
 
+    // 403 auto-retry — mirrors startCardPayment's invisible retry pattern
+    // (line ~15764). Cloudflare Turnstile tokens are one-shot and can go
+    // stale between mint and use on slow networks (Kenya's Cloudflare
+    // challenge endpoints have shown ERR_NAME_NOT_RESOLVED intermittently,
+    // and rapid dev refreshes can trigger rate-limit cooldowns). A single
+    // silent retry with a fresh token covers most transient failures. If
+    // the retry also 403s, we fall through to the generic 4xx path below
+    // and bounce home cleanly. Guarded by a local flag so we don't loop.
+    if (res.status === 403) {
+      console.warn('[restoreBooking] 403 verification failed — attempting invisible retry with fresh token');
+      let retryToken = '';
+      try {
+        retryToken = await ensureTurnstileToken('payment');
+      } catch (e) {
+        console.warn('[restoreBooking] retry turnstile await failed:', e);
+      }
+      try {
+        res = await fetch(`${SUPABASE_URL}/functions/v1/get-offer`, {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${SUPABASE_ANON_KEY}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({ offer_id: offer, turnstile_token: retryToken }),
+        });
+        data = await res.json().catch(() => ({}));
+      } catch (e) {
+        console.warn('[restoreBooking] retry fetch failed:', e);
+        resetTurnstile('payment');
+        _restoreBookingBounceHome('Something went wrong loading your flight. Please search again.');
+        return false;
+      }
+      resetTurnstile('payment');
+    }
+
     if (res.status === 410) {
       // Duffel says the offer is dead. Modal, not toast — this needs the
       // user's attention because the CTA has to send them back to search.
@@ -9335,6 +9381,15 @@
       // block inside showView — the URL is already #payment, no rewrite
       // needed, and pushing again would create a duplicate history entry.
       showView('payment', { fromPopState: true });
+
+      // Step 4 REDESIGN — paint the payment sidebar shimmers synchronously
+      // BEFORE awaiting restoreBooking's get-offer round-trip. Booking view
+      // has done this since Step 3; adding it to the payment restore closes
+      // the gap where the sidebar was blank for 6-8s while get-offer ran.
+      // The trip + price panels appear immediately with static shimmery
+      // content; renderPaymentSummary (below, after await) swaps in real
+      // data once the offer is hydrated.
+      try { _paintPaymentShellShimmers(); } catch (e) { console.warn('[restorePaymentView] shell shimmers failed:', e); }
 
       // Delegate to restoreBooking for offer hydration. It does the get-offer
       // round-trip, populates selectedOutbound/selectedInbound, reconciles
@@ -9593,6 +9648,57 @@
     // cards; renderPassengerForms in Phase 3 will render without the flag
     // once fetchSavedTravelers resolves.
     document.querySelectorAll('.saved-trav-picker').forEach(el => el.classList.add('tf-shimmer-picker'));
+  }
+
+  // Step 4 REDESIGN — payment view shimmer painter. Mirrors
+  // _paintBookingShellShimmers but targets the payment view's own trip +
+  // price slots. Called synchronously in restorePaymentView Step 1 so the
+  // sidebar has real (shimmery) content from t=0 instead of blank slots
+  // during the ~6-8s get-offer round-trip.
+  //
+  // Renders into:
+  //   #payment-trip-slot     — sidebar trip card
+  //   #payment-price-slot    — sidebar price card
+  //   #payment-price-inline  — mobile inline price above the card
+  //
+  // Uses the same .trip-panel / .price-panel / .tf-shimmer* classes as the
+  // booking view — those classes are view-agnostic and already scoped for
+  // both. renderPaymentSummary in restorePaymentView (after await) replaces
+  // the shimmer HTML with real data.
+  function _paintPaymentShellShimmers() {
+    const tripShimmer = `
+      <div class="trip-panel">
+        <div class="leg-card tf-shimmer-card">
+          <div class="tf-shimmer-line tf-shimmer" style="width:40%;height:14px;"></div>
+          <div class="tf-shimmer-line tf-shimmer" style="width:70%;height:20px;margin-top:8px;"></div>
+          <div class="tf-shimmer-line tf-shimmer" style="width:55%;height:12px;margin-top:6px;"></div>
+        </div>
+        <div class="leg-card tf-shimmer-card">
+          <div class="tf-shimmer-line tf-shimmer" style="width:40%;height:14px;"></div>
+          <div class="tf-shimmer-line tf-shimmer" style="width:70%;height:20px;margin-top:8px;"></div>
+          <div class="tf-shimmer-line tf-shimmer" style="width:55%;height:12px;margin-top:6px;"></div>
+        </div>
+      </div>
+    `;
+    const priceShimmer = `
+      <div class="price-panel">
+        <h4>Estimated price</h4>
+        <div class="ppp"><span class="tf-shimmer-line tf-shimmer" style="width:100px;height:12px;display:inline-block;"></span></div>
+        <div class="line"><span class="label">Flight</span><span class="value"><span class="tf-shimmer-line tf-shimmer" style="width:80px;height:14px;display:inline-block;"></span></span></div>
+        <div class="line"><span class="label">TumaFly service fee</span><span class="value"><span class="tf-shimmer-line tf-shimmer" style="width:80px;height:14px;display:inline-block;"></span></span></div>
+        <div class="line"><span class="label">Payment processing</span><span class="value"><span class="tf-shimmer-line tf-shimmer" style="width:80px;height:14px;display:inline-block;"></span></span></div>
+        <div class="divider"></div>
+        <div class="total"><span>Total estimate</span><span class="value"><span class="tf-shimmer-line tf-shimmer" style="width:100px;height:16px;display:inline-block;"></span></span></div>
+      </div>
+    `;
+    const tripSlot = document.getElementById('payment-trip-slot');
+    if (tripSlot) tripSlot.innerHTML = tripShimmer;
+    const priceSlot = document.getElementById('payment-price-slot');
+    if (priceSlot) priceSlot.innerHTML = priceShimmer;
+    // Mobile inline price — same shimmer, feeds the price-inline slot
+    // above the payment card on narrow viewports.
+    const priceInline = document.getElementById('payment-price-inline');
+    if (priceInline) priceInline.innerHTML = priceShimmer;
   }
 
   // Phase 3 helper: swap shimmer placeholders for real content, expand pax
@@ -14165,6 +14271,39 @@
             </div>`;
         });
     }
+
+    // Scroll-anchor advance — Bev's batch:
+    //   1. If any UNSAVED traveler remains, scroll to the first one so
+    //      the user's eye lands on the next form they need to fill.
+    //   2. Else (last traveler saved), scroll to the Baggage card so the
+    //      user consciously considers ancillaries before Continue. This
+    //      fixes the pattern where testers were clicking Continue past
+    //      Baggage/Seats and being blocked for missing entries.
+    //
+    // Uses scrollIntoView + scroll-margin-top (defined in CSS) so we land
+    // exactly at the section's top edge with breathing room from any
+    // sticky header/timer bar — no overshoot on either viewport.
+    //
+    // 60ms defer lets renderPassengerForms finish its DOM mutations before
+    // we measure positions. Longer than 0ms because the re-render triggers
+    // a reflow that shifts the layout.
+    setTimeout(() => {
+      const nextUnsavedIdx = travelerStates.findIndex((s, idx) => idx > i && !s.saved);
+      if (nextUnsavedIdx >= 0) {
+        const nextCard = document.querySelector(`[data-traveler-card="${nextUnsavedIdx}"]`);
+        if (nextCard) {
+          nextCard.scrollIntoView({ behavior: 'smooth', block: 'start' });
+          return;
+        }
+      }
+      // All travelers saved — advance to Baggage. document.getElementById
+      // then .closest('.card') is the same pattern skipBags uses (line
+      // ~13786) so scroll targets are consistent across the booking flow.
+      const baggageCard = document.getElementById('baggage-list')?.closest('.card');
+      if (baggageCard) {
+        baggageCard.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      }
+    }, 60);
   }
 
   // ── Saved travelers cache ───────────────────────────────────
