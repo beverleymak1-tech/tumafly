@@ -4521,13 +4521,10 @@
     /* ─────────────────────────────────────────────────────────────
        PAYMENT
        ───────────────────────────────────────────────────────────── */
-    /* Desktop layout — restored to the original 2-column tab grid with
-       the pay-card-pane spanning the full row below (see .pay-tab-pane
-       further down). Mobile keeps the stacked accordion via the media
-       query at ~L6084. Refresh still runs restorePayment on both
-       viewports (contact + name preserved in the sessionStorage shadow;
-       iframe wrap reset to a fresh "Pay with card" state so the dead
-       merchant_ref doesn't linger). */
+    /* Desktop layout — original 2-column tab grid with the pay-card-pane
+       spanning the full row below (see .pay-tab-pane further down).
+       Mobile keeps the stacked accordion via the media query at ~L6084
+       (Batch 3 #10). */
     .pay-tabs {
       display: grid;
       grid-template-columns: 1fr 1fr;
@@ -4730,19 +4727,6 @@
       font-weight: 500;
       letter-spacing: 0.05em;
     }
-    /* Step 5 — "Confirmation emailed to X" line under the success ref.
-       Small icon + text, muted color, sits right below the ref pill so
-       the visual hierarchy reads: ✓ You're booked / [PNR] / emailed to X. */
-    .success-email-line {
-      display: inline-flex;
-      align-items: center;
-      gap: 8px;
-      margin-top: 12px;
-      font-size: 13px;
-      color: var(--text-2);
-    }
-    .success-email-line svg { color: var(--text-3); flex-shrink: 0; }
-    .success-email-line strong { color: var(--ink); font-weight: 600; }
 
     /* ─────────────────────────────────────────────────────────────
        ALERTS
@@ -7009,31 +6993,7 @@
       <div class="success-check">✓</div>
       <div class="success-title">You're booked.</div>
       <p style="color:var(--text-2);max-width:42ch;margin:8px auto 0;">A confirmation is on its way to your email. Your booking reference:</p>
-      <!-- Flash-fix followup — the static placeholder used to say
-           "TF-XXXXXXXX" here, which visually reads exactly like the
-           merchant_ref format (TF-abc123). Any code path that briefly
-           re-rendered the hero to defaults (which can happen mid-poll
-           when payment-status transitions state) would flash the
-           placeholder text through the confirmation code box —
-           sub-second, but visible. Empty innerHTML avoids the flash:
-           the box is briefly blank instead of showing a fake ref, which
-           is less alarming and matches shimmer-first patterns elsewhere.
-           The boot block paints the real PNR from the sessionStorage
-           stash almost immediately, so a blank flash is imperceptible
-           in practice. -->
-      <div class="success-ref" id="success-ref"></div>
-      <!-- Step 5 — "Confirmation emailed to X" line under the ref.
-           Hidden on entry; populated by whichever code path renders the
-           success page (Pesapal callback, boot-block stash, or refresh
-           restoreSuccess). Falls back to hidden if we can't determine
-           the email address. -->
-      <div class="success-email-line" id="success-email-line" style="display:none;">
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-          <rect x="3" y="5" width="18" height="14" rx="2" stroke="currentColor" stroke-width="1.7"/>
-          <path d="M3 7l9 6 9-6" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/>
-        </svg>
-        <span>Confirmation emailed to <strong id="success-email-addr"></strong></span>
-      </div>
+      <div class="success-ref" id="success-ref">TF-XXXXXXXX</div>
     </div>
     <div class="card" style="max-width:560px;margin:24px auto;">
       <h3 style="font-size:14px;">Before you travel</h3>
@@ -8079,19 +8039,6 @@
     } catch (_) { /* sandboxed context — ignore */ }
   }
 
-  // Step 5 — track the current view so popstate FROM success can be
-  // intercepted (Q_D.1: no back navigation from success page). We snapshot
-  // the view name each time showView commits, then in the popstate handler
-  // we check: if the user is browsing BACK from success and the target
-  // isn't 'home' or 'my-trips', override to home. This prevents the user
-  // from landing on a dead payment view or a stale booking view after
-  // completing their purchase.
-  //
-  // Uses `var` so it's hoisted above showView (which writes to it every
-  // commit). Reads default from body's data-view attribute set by the
-  // boot block or HTML default.
-  var _tfCurrentViewName = document.body.getAttribute('data-view') || 'home';
-
   function showView(name, opts = {}) {
     // Head-script flash guard cleanup. The <head> script may have injected
     // a <style data-tf-restore-guard> rule to pre-hide views during the
@@ -8106,10 +8053,6 @@
       document.getElementById('view-' + n).classList.toggle('hidden', n !== name);
     });
     document.body.setAttribute('data-view', name);
-    // Step 5 — snapshot for the popstate handler's from-success intercept.
-    // Kept up to date on every commit so the popstate handler can
-    // authoritatively answer "what view were we on JUST NOW."
-    _tfCurrentViewName = name;
     window.scrollTo({ top: 0, behavior: 'instant' });
     updateMobileSummaryPill(name); // Phase A — keep nav pill in sync
     if (pollHandle && name !== 'payment') {
@@ -8236,33 +8179,6 @@
         if (_bookingOfferId) {
           opts = { ...opts, params: { offer: _bookingOfferId } };
         }
-      }
-
-      // Step 4: mirror of the booking case above for the payment view. When
-      // the user hits Continue-to-payment, startCardPayment calls
-      // showView('payment') with no params (see call sites at ~L15287 /
-      // L15306 / L15326). Encode the offer_id so a browser refresh on
-      // #payment carries enough state for restoreFromUrl to bounce the
-      // user gracefully back to the booking view (Path A1) instead of
-      // dumping them on an empty half-broken payment shell.
-      //
-      // Same source-of-truth as booking: prefer inbound (round-trip case)
-      // over outbound. Both resolve to the same Duffel offer_id.
-      if (name === 'payment' && !opts.params) {
-        const _paymentOfferId = (selectedInbound || selectedOutbound)?.cabinPricing?.offer_id;
-        if (_paymentOfferId) {
-          opts = { ...opts, params: { offer: _paymentOfferId } };
-        }
-      }
-
-      // Step 5: same for the success view — encode the merchant_ref so a
-      // browser refresh on #success carries enough state for restoreSuccess
-      // to look up the booking and re-paint the confirmation. Source:
-      // activeMerchantRef (set in startCardPayment right before Pesapal
-      // iframe mount, and re-set by the Pesapal-callback handler on
-      // top-level redirect).
-      if (name === 'success' && !opts.params && activeMerchantRef) {
-        opts = { ...opts, params: { ref: activeMerchantRef } };
       }
 
       // Encode any view-specific params into the URL hash so browser refresh
@@ -8522,53 +8438,6 @@
       setTimeout(() => {
         try { restoreBooking(params); }
         catch (e) { console.warn('[restoreBooking] deferred failed:', e); }
-      }, 0);
-      return true;
-    }
-    // Step 4 — Payment view refresh-restore (full rehydrate).
-    //
-    // Scenario A (user refreshed mid-payment BEFORE Pesapal redirect):
-    // URL is #payment?offer=off_XXX. Call restorePayment to rebuild the
-    // full payment view — trip + price cards, passengers/contact in
-    // memory, baggage/seat picks reconciled, fare timer resumed, and the
-    // pay-tabs accordion collapsed with the iframe wrap reset. When the
-    // user re-taps Credit or Debit, startCardPayment creates a fresh
-    // merchant_ref and Pesapal pre-fills name/email/phone from what we
-    // restored to memory.
-    //
-    // Scenario B (Pesapal redirected back to root path with
-    // ?OrderMerchantReference=...) — handled by the head-script flash
-    // guard + Pesapal-callback handler upstream. Never reaches here.
-    //
-    // Same TDZ defer pattern as restoreBooking — restorePayment calls
-    // ensureTurnstileToken which reads turnstilePaymentToken (declared
-    // ~L15850). Runs one tick later to avoid TDZ.
-    if (view === 'payment') {
-      setTimeout(() => {
-        try { restorePayment(params); }
-        catch (e) { console.warn('[restorePayment] deferred failed:', e); }
-      }, 0);
-      return true;
-    }
-    // Step 5 — Success view refresh-restore (Q_C.ii: stay on success).
-    //
-    // URL: #success?ref=<merchant_ref>. On refresh we look up the booking
-    // by ref via the payment-status EF (same one that pollPostRedirect
-    // uses), then paint the confirmed hero. This lets users hit F5 on
-    // their confirmation page without being bounced away.
-    //
-    // Fast path: if the stash still holds a matching PNR + email, paint
-    // directly without an EF call. Cheap; typical when the user refreshes
-    // seconds/minutes after arrival (same session).
-    //
-    // Slow path: stash is empty (tab was closed and reopened via saved
-    // URL, or stash was cleared). Show a brief loading state, hit
-    // payment-status, paint the response. If EF fails or booking isn't
-    // found, bounce to my-trips so the user can look it up there.
-    if (view === 'success') {
-      setTimeout(() => {
-        try { restoreSuccess(params); }
-        catch (e) { console.warn('[restoreSuccess] deferred failed:', e); }
       }, 0);
       return true;
     }
@@ -9217,441 +9086,6 @@
     return true;
   }
 
-  // ============================================================
-  // STEP 4 — PAYMENT VIEW REFRESH-RESTORE (full rehydrate)
-  // ============================================================
-  //
-  // Bev's spec (locked): a browser refresh on #payment keeps the user on
-  // the payment view with:
-  //   - Trip summary + price summary re-fetched from Duffel (fresh drift
-  //     check runs naturally)
-  //   - Passenger + contact data restored from booking shadow (silently —
-  //     they aren't visible on payment view but startCardPayment needs
-  //     them for the fresh create-payment call, and Pesapal pre-fills
-  //     name/email/phone into its hosted form)
-  //   - Baggage + seat selections restored so the fresh Pesapal charge
-  //     matches what the user was about to pay
-  //   - Pay-tabs accordion collapsed (M-Pesa top, Credit/Debit bottom),
-  //     iframe wrap reset to fresh "Pay with card" state — the previous
-  //     Pesapal merchant_ref is dead once the iframe unmounts, so the
-  //     accordion re-opens on user tap and a new merchant_ref is created
-  //   - Fare timer resumes from the offer's expires_at
-  //
-  // Structural mirror of restoreBooking (see above): three-phase pattern
-  // (shell paint → get-offer → reconcile) with the payment view as target
-  // instead of booking. Bounce-home rules identical (410 → expired modal,
-  // any other failure → home with a soft error).
-  //
-  // Note on baggage/seat restore: on refresh the offer's fresh service_ids
-  // (baggage) may differ from what was cached. loadBaggageForBookingOffer
-  // runs after reconcile; when the resulting catalog contains matching
-  // options for our stashed baggage IDs, we re-tick them. Otherwise the
-  // user has to re-pick — better than silently charging a different
-  // total.
-  async function restorePayment(params) {
-    const offer = (params.offer || '').trim();
-    if (!/^off_[A-Za-z0-9]+$/.test(offer)) {
-      console.warn('[restorePayment] invalid offer param, bouncing home', params);
-      showView('home');
-      try { safeHistory('replace', { view: 'home' }, window.location.pathname); } catch (_) {}
-      return false;
-    }
-
-    // ── PHASE 1: shell paint ─────────────────────────────────────────
-    showView('payment', { fromPopState: true });
-
-    // Reset in-memory state so shell paints from defaults + shadow
-    travelers.adults = 1;
-    travelers.children = 0;
-    travelers.infantsSeat = 0;
-    travelers.infantsLap = 0;
-    recomputeTravelers();
-    initTravelerStates();
-    tripRequiresPassport = false;
-    fareTimerExpired = false;
-    passengerData = [];
-    contactData = {};
-    activeMerchantRef = null;
-    selectedSeats = {};
-    selectedBaggages = {};
-    // Step 2b parity — refresh means fresh service-id retry counter.
-    _bookingServiceIdRetryCount = 0;
-
-    // Restore shadowed passenger/contact data (silently — no visible pax
-    // cards on payment view; but we need it in-memory for the create-payment
-    // call when user re-taps Credit or Debit).
-    try { restoreBookingPassengers(); }
-    catch (e) { console.warn('[restorePayment] shell shadow restore failed:', e); }
-
-    // Read the stashed baggage/seat selections into memory so reconcile
-    // (Phase 3) can re-check them against the fresh service catalog.
-    let _stashedBaggages = {};
-    let _stashedSeats = {};
-    try {
-      const raw = sessionStorage.getItem(BOOKING_PASSENGER_SHADOW_KEY);
-      const p = raw ? JSON.parse(raw) : null;
-      _stashedBaggages = p?.selected_baggages || {};
-      _stashedSeats    = p?.selected_seats    || {};
-    } catch (_) {}
-
-    // Paint shimmer placeholders into the payment view's trip+price slots
-    _paintPaymentShellShimmers();
-
-    // Accordion COLLAPSED on refresh (Bev's spec). Also reset the iframe
-    // wrap to the fresh "Pay with card" state — the previous session's
-    // Pesapal merchant_ref is dead, so any leftover iframe DOM would be
-    // showing a broken form pointing at a dead payment.
-    document.getElementById('pay-card-item')?.classList.remove('open');
-    document.getElementById('paytab-card')?.classList.remove('active');
-    const wrap = document.getElementById('card-iframe-wrap');
-    if (wrap) {
-      wrap.innerHTML = `
-        <div>
-          <button class="btn btn-primary btn-lg" id="card-start-btn" onclick="startCardPayment()">Pay with card</button>
-          <div style="font-size:12px;color:var(--text-3);margin-top:14px;">Card details are handled by Pesapal. TumaFly never sees your card.</div>
-        </div>
-      `;
-    }
-    document.getElementById('poll-area')?.classList.add('hidden');
-    clearAlert('payment-alert');
-
-    // Fare timer optimistic from shadow (same pattern as restoreBooking)
-    try {
-      const raw = sessionStorage.getItem(BOOKING_PASSENGER_SHADOW_KEY);
-      const stashedExp = raw ? (JSON.parse(raw)?.fare_expires_at_ms || 0) : 0;
-      if (stashedExp && stashedExp > Date.now()) {
-        fareTimerExpiresAtMs = stashedExp;
-        fareTimerExpired = false;
-        if (fareTimerHandle) clearInterval(fareTimerHandle);
-        tickFareTimer();
-        fareTimerHandle = setInterval(tickFareTimer, 1000);
-      } else {
-        _paintPaymentFareTimerShell();
-      }
-    } catch (_) {
-      try { _paintPaymentFareTimerShell(); } catch (__) {}
-    }
-
-    // ── PHASE 2: fetch offer (Turnstile + get-offer) ────────────────
-    let token = '';
-    try { token = await ensureTurnstileToken('payment'); }
-    catch (e) { console.warn('[restorePayment] turnstile await failed:', e); }
-
-    let res, data;
-    try {
-      res = await fetch(`${SUPABASE_URL}/functions/v1/get-offer`, {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${SUPABASE_ANON_KEY}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ offer_id: offer, turnstile_token: token }),
-      });
-      data = await res.json().catch(() => ({}));
-    } catch (e) {
-      console.warn('[restorePayment] fetch failed:', e);
-      resetTurnstile('payment');
-      _restorePaymentBounceHome('Something went wrong loading your booking. Please search again.');
-      return false;
-    }
-    resetTurnstile('payment');
-
-    if (res.status === 410) {
-      _showFareExpiredModal();
-      return false;
-    }
-    if (!res.ok || !data.success) {
-      const msg = data?.error || "We couldn't load that booking. Please search again.";
-      console.warn('[restorePayment] EF error', res.status, msg);
-      _restorePaymentBounceHome(msg);
-      return false;
-    }
-
-    // ── PHASE 3: reconcile ─────────────────────────────────────────
-    const cabin = data.selected_cabin;
-    const cabinPricing = data.offer?.cabins?.[cabin];
-    if (!cabin || !cabinPricing) {
-      console.warn('[restorePayment] response missing cabin pricing', data);
-      _restorePaymentBounceHome('Something went wrong loading your booking. Please search again.');
-      return false;
-    }
-    const selection = { offer: data.offer, cabin, cabinPricing };
-    const isRoundTrip = Array.isArray(data.offer.slices) && data.offer.slices.length === 2;
-    selectedOutbound = selection;
-    selectedInbound  = isRoundTrip ? selection : null;
-    selectedOffer    = selection;
-
-    // Reset baggage/seat CACHES (not the selections we stashed — those
-    // are recovered post-catalog-load below). Fresh offer = fresh
-    // cabin-level metadata.
-    seatMapsByOffer = {};
-    seatMapsData = {};
-    baggageOptionsByOffer = {};
-    baggageOptionsByPax = {};
-    baggageOfferId = null;
-    baggagePassengerIds = [];
-
-    // Reconcile pax count + traveler states
-    const pax = Math.max(1, Math.min(9, parseInt(data.passengers_count, 10) || 1));
-    travelers.adults = pax;
-    recomputeTravelers();
-    tripRequiresPassport = computeTripInternational();
-
-    if (travelerStates.length < pax) {
-      for (let i = travelerStates.length; i < pax; i++) {
-        travelerStates.push({
-          saved: false,
-          data: {
-            title: 'mr', gender: '', given_name: '', middle_name: '', family_name: '',
-            born_on: '', nationality: '',
-            passport: { country: '', number: '', expires: '' },
-            frequent_flyer: [],
-            known_traveler_id: '', redress_number: '', special_assistance: '',
-            save_to_account: false,
-          },
-          openSections: new Set(),
-          showRequiredErrors: false,
-          showPassportErrors: false,
-        });
-      }
-    }
-    // Overlay shadow onto any newly-added cards too
-    try { restoreBookingPassengers(); } catch (_) {}
-
-    // Build passengerData + contactData from the restored shadow so
-    // startCardPayment has everything it needs when user re-taps the
-    // Credit or Debit tab. This mirrors what goToPayment does before
-    // calling startCardPayment.
-    passengerData = travelerStates.map(s => ({
-      title:       s.data.title || 'mr',
-      gender:      s.data.gender || '',
-      given_name:  s.data.given_name || '',
-      middle_name: s.data.middle_name || '',
-      family_name: s.data.family_name || '',
-      born_on:     s.data.born_on || '',
-      nationality: s.data.nationality || '',
-      passport:    s.data.passport || {},
-      frequent_flyer:    s.data.frequent_flyer || [],
-      known_traveler_id: s.data.known_traveler_id || '',
-      redress_number:    s.data.redress_number || '',
-    }));
-    contactData = {
-      email:        document.getElementById('contact-email')?.value || '',
-      phone_number: document.getElementById('contact-phone')?.value || '',
-    };
-
-    // Async: load baggage catalog. When it lands, reconcile stashed
-    // baggage picks against fresh service_ids (best-effort: match by
-    // pax_id + weight/category). Non-fatal; if the catalog changed,
-    // user re-picks.
-    (async () => {
-      try {
-        await loadBaggageForBookingOffer();
-        // Reconcile stashed baggage picks. Simple strategy: if a stashed
-        // selection's shape (pax_id keys pointing to a service_id) still
-        // matches an entry in baggageOptionsByPax, re-tick it. Otherwise
-        // drop and let the user re-pick.
-        if (_stashedBaggages && Object.keys(_stashedBaggages).length) {
-          Object.keys(_stashedBaggages).forEach(paxId => {
-            const wantedId = _stashedBaggages[paxId];
-            const opts = baggageOptionsByPax?.[paxId];
-            if (opts && Array.isArray(opts) && opts.some(o => o.id === wantedId)) {
-              selectedBaggages[paxId] = wantedId;
-            }
-          });
-        }
-        // Repaint with any reconciled baggage priced in.
-        renderPaymentSummary();
-      } catch (e) { console.warn('[restorePayment] baggage catalog fetch failed:', e); }
-    })();
-
-    // Async: load seat maps. Similar reconcile pattern.
-    (async () => {
-      try {
-        const uniqueOffers = [selection.cabinPricing.offer_id].filter(Boolean);
-        await Promise.all(uniqueOffers.map(loadSeatMapForOffer));
-        if (_stashedSeats && Object.keys(_stashedSeats).length) {
-          Object.keys(_stashedSeats).forEach(paxId => {
-            const wanted = _stashedSeats[paxId];
-            // Seats are keyed by seat_id + segment inside the map;
-            // best-effort restore by keeping the stashed value if the
-            // fresh map still contains a seat with matching designator.
-            if (wanted && seatMapsData) selectedSeats[paxId] = wanted;
-          });
-        }
-        renderPaymentSummary();
-      } catch (e) {
-        console.warn('[restorePayment] background seat-map fetch failed:', e);
-      }
-    })();
-
-    // Paint trip + price panels on payment slots (replaces shimmer).
-    renderPaymentSummary();
-
-    // Start fare timer bound to payment view.
-    startFareTimer('payment');
-
-    return true;
-  }
-
-  function _restorePaymentBounceHome(msg) {
-    showView('home');
-    try { safeHistory('replace', { view: 'home' }, window.location.pathname); } catch (_) {}
-    if (typeof showAlert === 'function') {
-      try { showAlert('search-alert', msg); } catch (_) {}
-    }
-  }
-
-  function _paintPaymentShellShimmers() {
-    // Trip panel — payment view uses the same trip-panel structure as
-    // booking view. Two-card shimmer covers both round-trip and one-way.
-    const tripSlot = document.getElementById('payment-trip-slot');
-    if (tripSlot) {
-      tripSlot.innerHTML = `
-        <div class="trip-panel">
-          <div class="leg-card tf-shimmer-card">
-            <div class="tf-shimmer-line tf-shimmer" style="width:40%;height:14px;"></div>
-            <div class="tf-shimmer-line tf-shimmer" style="width:70%;height:20px;margin-top:8px;"></div>
-            <div class="tf-shimmer-line tf-shimmer" style="width:55%;height:12px;margin-top:6px;"></div>
-          </div>
-          <div class="leg-card tf-shimmer-card">
-            <div class="tf-shimmer-line tf-shimmer" style="width:40%;height:14px;"></div>
-            <div class="tf-shimmer-line tf-shimmer" style="width:70%;height:20px;margin-top:8px;"></div>
-            <div class="tf-shimmer-line tf-shimmer" style="width:55%;height:12px;margin-top:6px;"></div>
-          </div>
-        </div>
-      `;
-    }
-    // Price panel + inline mobile price slot
-    const priceShimmer = `
-      <div class="price-panel">
-        <div class="tf-shimmer-line tf-shimmer" style="width:50%;height:14px;"></div>
-        <div class="tf-shimmer-line tf-shimmer" style="width:80%;height:24px;margin-top:10px;"></div>
-        <div class="tf-shimmer-line tf-shimmer" style="width:60%;height:12px;margin-top:6px;"></div>
-      </div>
-    `;
-    const priceSlot = document.getElementById('payment-price-slot');
-    if (priceSlot) priceSlot.innerHTML = priceShimmer;
-    const priceInline = document.getElementById('payment-price-inline');
-    if (priceInline) priceInline.innerHTML = priceShimmer;
-  }
-
-  function _paintPaymentFareTimerShell() {
-    const bar = document.getElementById('payment-fare-timer');
-    if (!bar) return;
-    bar.classList.remove('hidden', 'warning', 'expired');
-    bar.innerHTML = `
-      <div class="ft-label">
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-          <circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="1.7"/>
-          <path d="M12 7v5l3 2" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/>
-        </svg>
-        <span>Fare expires in <span class="ft-time tf-shimmer" style="display:inline-block;width:52px;height:14px;vertical-align:-2px;border-radius:4px;">&nbsp;</span></span>
-      </div>
-    `;
-  }
-
-  // ============================================================
-  // STEP 5 — SUCCESS VIEW REFRESH-RESTORE (Q_C.ii)
-  // ============================================================
-  //
-  // URL: #success?ref=<merchant_ref>
-  //
-  // Called from restoreFromUrl when the user refreshes on their
-  // confirmation page. Stays on success (doesn't bounce), re-verifies
-  // the booking, paints PNR + email.
-  //
-  // Fast path: sessionStorage still holds the PNR + email from the
-  // original pollOnce/redirect flow. Paint immediately, no EF call.
-  //
-  // Slow path: stash empty (tab was closed, URL saved and reopened
-  // later, or sessionStorage cleared). Show a loading state, hit
-  // payment-status EF, paint from response. If EF returns pending or
-  // fails, bounce to my-trips.
-  async function restoreSuccess(params) {
-    const ref = (params.ref || '').trim();
-    if (!ref) {
-      console.warn('[restoreSuccess] no ref param, bouncing to my-trips');
-      showView('my-trips');
-      try { safeHistory('replace', { view: 'my-trips' }, '#my-trips'); } catch (_) {}
-      return false;
-    }
-
-    // Paint the shell — success view visible, hero showing the loading
-    // state until we resolve the booking. If stash matches, we shortcut
-    // straight to painting the PNR.
-    showView('success', { fromPopState: true });
-
-    // Fast path: matching stash.
-    let stashedPnr = null, stashedRef = null, stashedEmail = null;
-    try {
-      stashedPnr   = sessionStorage.getItem('tumafly_post_pay_pnr');
-      stashedRef   = sessionStorage.getItem('tumafly_post_pay_ref');
-      stashedEmail = sessionStorage.getItem('tumafly_post_pay_email');
-    } catch (_) {}
-
-    if (stashedPnr && stashedRef === ref) {
-      // Paint from stash directly (mirror boot-block path).
-      const refSlot = document.getElementById('success-ref');
-      if (refSlot) refSlot.textContent = stashedPnr;
-      _paintSuccessEmailLine(stashedEmail || '');
-      _successConfirmedLatched = true;
-      return true;
-    }
-
-    // Slow path: EF lookup. Paint loading state first.
-    activeMerchantRef = ref;
-    renderPostRedirectSuccess('loading');
-
-    try {
-      const res = await fetch(
-        `${SUPABASE_URL}/functions/v1/payment-status?ref=${encodeURIComponent(ref)}`,
-        { headers: { 'Authorization': `Bearer ${SUPABASE_ANON_KEY}` } }
-      );
-      const data = await res.json();
-
-      if (data?.state === 'confirmed' && data?.booking?.booking_reference) {
-        // renderPostRedirectSuccess will latch and paint email if present.
-        renderPostRedirectSuccess('confirmed', data);
-        // Re-populate the stash so a subsequent refresh in this tab
-        // hits the fast path.
-        try {
-          sessionStorage.setItem('tumafly_post_pay_pnr', data.booking.booking_reference);
-          sessionStorage.setItem('tumafly_post_pay_ref', ref);
-          const _e = data.booking?.contact_email || data?.email || '';
-          if (_e) sessionStorage.setItem('tumafly_post_pay_email', _e);
-        } catch (_) {}
-        return true;
-      }
-
-      if (data?.state === 'failed') {
-        renderPostRedirectSuccess('failed', data);
-        return true;
-      }
-
-      if (data?.state === 'needs_support' || data?.state === 'processing') {
-        // Still-processing state — paint the friendly waiting hero with
-        // the merchantRef so the user can note it for support.
-        renderPostRedirectSuccess('still-processing', { merchantRef: ref });
-        return true;
-      }
-
-      // Pending / unknown state / not-found — bounce to my-trips where
-      // they can search by ref.
-      console.warn('[restoreSuccess] unresolved state', data?.state);
-      showView('my-trips');
-      try { safeHistory('replace', { view: 'my-trips' }, '#my-trips'); } catch (_) {}
-      return false;
-    } catch (e) {
-      console.warn('[restoreSuccess] payment-status fetch failed:', e);
-      // Network error — leave the loading state up briefly, then bounce
-      // to my-trips. The confirmation email is still the primary receipt
-      // channel; users don't lose data by us bouncing them.
-      showView('my-trips');
-      try { safeHistory('replace', { view: 'my-trips' }, '#my-trips'); } catch (_) {}
-      return false;
-    }
-  }
 
   // Phase 1 helper: paint the booking fare-timer bar with its static label
   // + a shimmering placeholder in the countdown slot. Called when we DON'T
@@ -9660,9 +9094,10 @@
   // replaces the entire innerHTML with the real countdown, so this shell
   // dissolves naturally with no extra teardown code.
   //
-  // Signature was accidentally clobbered during Step 5 insertion; restored
-  // here. Distinct from _paintPaymentFareTimerShell (further above) which
-  // targets #payment-fare-timer instead of #booking-fare-timer.
+  // We paint the bar VISIBLE (remove .hidden) because the whole point is
+  // that the "Fare expires in …" label is a known-good static string —
+  // making it invisible during the network wait is the very jarring
+  // pop-in-out effect we're trying to avoid.
   function _paintFareTimerShell() {
     const bar = document.getElementById('booking-fare-timer');
     if (!bar) return;
@@ -9845,16 +9280,6 @@
           phone_dial_iso: countryPickerState?.['contact']?.iso || '',
         },
         fare_expires_at_ms: expMs || 0,
-        // Step 4 — snapshot baggage + seat selections so payment refresh
-        // rehydrates the exact price the user was about to pay. Without
-        // these, refresh would silently drop paid-baggage/seat additions
-        // and quote a lower total — misleading (Pesapal iframe would then
-        // charge the un-baggaged base fare and the user's carry-on choice
-        // vanishes). Selections are keyed by passenger_id in-memory; we
-        // stash them as-is and reconcile after get-offer returns fresh
-        // service_ids (baggage) / seat metadata.
-        selected_baggages: (typeof selectedBaggages === 'object' && selectedBaggages) ? selectedBaggages : {},
-        selected_seats:    (typeof selectedSeats    === 'object' && selectedSeats)    ? selectedSeats    : {},
       };
       sessionStorage.setItem(BOOKING_PASSENGER_SHADOW_KEY, JSON.stringify(payload));
     } catch (_) { /* sessionStorage disabled — silent no-op */ }
@@ -10254,19 +9679,6 @@
   })();
 
   // Handle the browser back/forward buttons
-  // Step 5 — track the current view so popstate FROM success can be
-  // intercepted (Q_D.1: no back navigation from success page). We snapshot
-  // the view name each time showView commits, then in the popstate handler
-  // we check: if the user is browsing BACK from success and the target
-  // isn't 'home' or 'my-trips', override to home. This prevents the user
-  // from landing on a dead payment view or a stale booking view after
-  // completing their purchase.
-  //
-  // Declared as var (hoisted) so showView (at ~L8073) can write to it
-  // before this line is executed. Reads default from body's data-view
-  // attribute set by the boot block.
-  // (Now moved above showView — see block near L8060.)
-
   window.addEventListener('popstate', (e) => {
     if (pollHandle) {
       clearTimeout(pollHandle);
@@ -10282,23 +9694,6 @@
     const params = (e.state?.params && Object.keys(e.state.params).length) ? e.state.params
                   : (hashParams && Object.keys(hashParams).length) ? hashParams
                   : {};
-
-    // Step 5 — Q_D.1: intercept back-navigation FROM success. If the user
-    // was on success and pop takes them to a data-bearing view within the
-    // booking funnel (payment / booking / results), redirect to home
-    // instead. The Pesapal iframe is dead, the offer might be too, and
-    // dropping them back into the funnel post-purchase is confusing.
-    // Legitimate destinations from success (my-trips, profile, home)
-    // are allowed through.
-    const _wasOnSuccess = _tfCurrentViewName === 'success';
-    if (_wasOnSuccess && ['payment', 'booking', 'results'].includes(view)) {
-      console.log('[popstate] intercepting back-from-success →', view, '→ home');
-      _tfCurrentViewName = 'home';
-      showView('home');
-      try { safeHistory('replace', { view: 'home' }, window.location.pathname); } catch (_) {}
-      return;
-    }
-    _tfCurrentViewName = view;
 
     // Data-bearing views: dispatch to their restorer (deferred for the same
     // reason as restoreFromUrl — restoreResults / runSearch touch late-init
@@ -10410,53 +9805,6 @@
       }, 0);
       return;
     }
-
-    // Step 4 — popstate on the payment view. Same restorePayment path
-    // as refresh (browser back from #success to #payment, or forward from
-    // #booking to #payment via history navigation).
-    //
-    // Fast-path: if the offer is still in memory (in-session navigation,
-    // e.g. user clicked "Back to details" then forward), just paint the
-    // view without re-fetching. Otherwise dispatch the full restore.
-    if (view === 'payment') {
-      const offer = (params.offer || '').trim();
-      if (!/^off_[A-Za-z0-9]+$/.test(offer)) {
-        console.warn('[popstate payment] invalid offer param, bouncing home', params);
-        showView('home');
-        try { safeHistory('replace', { view: 'home' }, window.location.pathname); } catch (_) {}
-        return;
-      }
-      const currentOfferId = (selectedInbound || selectedOutbound)?.cabinPricing?.offer_id;
-      if (currentOfferId === offer) {
-        // Fast path — offer already in memory, just paint payment view.
-        // Ensure the accordion is collapsed (matches refresh behavior:
-        // browser navigation to payment implies iframe is gone) and reset
-        // the iframe wrap to fresh state.
-        showView('payment', { fromPopState: true });
-        document.getElementById('pay-card-item')?.classList.remove('open');
-        document.getElementById('paytab-card')?.classList.remove('active');
-        const wrap = document.getElementById('card-iframe-wrap');
-        if (wrap) {
-          wrap.innerHTML = `
-            <div>
-              <button class="btn btn-primary btn-lg" id="card-start-btn" onclick="startCardPayment()">Pay with card</button>
-              <div style="font-size:12px;color:var(--text-3);margin-top:14px;">Card details are handled by Pesapal. TumaFly never sees your card.</div>
-            </div>
-          `;
-        }
-        // Repaint trip + price panels so they show if this popstate came
-        // from an in-session forward and the panels' HTML was overwritten
-        // by other views since we were last here.
-        try { renderPaymentSummary(); } catch (_) {}
-        return;
-      }
-      setTimeout(() => {
-        try { restorePayment({ offer }); }
-        catch (err) { console.warn('[restorePayment popstate] failed:', err); }
-      }, 0);
-      return;
-    }
-
     showView(view, { fromPopState: true });
     // Q3: When the user navigates back to booking (e.g., Account → edit
     // a saved traveler → browser back), refresh _savedTravelers so the
@@ -10505,32 +9853,14 @@
     // the on-load handler kicks off the polling fallback.
     const _refSlot = document.getElementById('success-ref');
     if (_refSlot) {
-      let _stashedPnr = null, _stashedRef = null, _stashedEmail = null;
+      let _stashedPnr = null, _stashedRef = null;
       try {
-        _stashedPnr   = sessionStorage.getItem('tumafly_post_pay_pnr');
-        _stashedRef   = sessionStorage.getItem('tumafly_post_pay_ref');
-        _stashedEmail = sessionStorage.getItem('tumafly_post_pay_email');
+        _stashedPnr = sessionStorage.getItem('tumafly_post_pay_pnr');
+        _stashedRef = sessionStorage.getItem('tumafly_post_pay_ref');
       } catch (_) {}
       const _currentRef = _searchForCallback.get('OrderMerchantReference') || _searchForCallback.get('ref');
       if (_stashedPnr && _stashedRef === _currentRef) {
         _refSlot.textContent = _stashedPnr;
-        // Flash-fix followup — mark the success view so the later
-        // renderPostRedirectSuccess guard can pick up the latched state.
-        // The _successConfirmedLatched JS flag isn't declared yet at
-        // boot-block parse time, so we use a data attribute the later
-        // script reads on init.
-        _successView?.setAttribute('data-tf-confirmed', '1');
-        // Step 5 — paint email if stashed. Direct DOM writes here
-        // (no _paintSuccessEmailLine helper yet — that's declared later
-        // in the script). Same shape as the static HTML template.
-        if (_stashedEmail) {
-          const _line = document.getElementById('success-email-line');
-          const _addr = document.getElementById('success-email-addr');
-          if (_line && _addr) {
-            _addr.textContent = _stashedEmail;
-            _line.style.display = 'inline-flex';
-          }
-        }
         // Mark so the on-load handler can skip the loading/polling dance.
         try { sessionStorage.setItem('tumafly_post_pay_consumed', '1'); } catch (_) {}
       } else {
@@ -16026,26 +15356,6 @@
     pollOnce();
   }
 
-  // Step 5 — Paint the "Confirmation emailed to X" line under the success
-  // ref pill. Called from every path that renders the success hero:
-  //   1. pollOnce confirmed (payment view, JS state still in memory)
-  //   2. Boot block on Pesapal-redirect page load (reads stash)
-  //   3. renderPostRedirectSuccess('confirmed') after polling completes
-  //   4. restoreSuccess() refresh handler
-  // If email is empty (rare — stash was cleared / payment-status didn't
-  // include it), the line stays hidden.
-  function _paintSuccessEmailLine(email) {
-    const line = document.getElementById('success-email-line');
-    const addr = document.getElementById('success-email-addr');
-    if (!line || !addr) return;
-    if (email && typeof email === 'string' && email.trim()) {
-      addr.textContent = email.trim();
-      line.style.display = 'inline-flex';
-    } else {
-      line.style.display = 'none';
-    }
-  }
-
   async function pollOnce() {
     if (!activeMerchantRef) return;
     // Previously: a 5-minute "Still waiting…" amber alert. Removed —
@@ -16066,16 +15376,6 @@
       if (data.state === 'confirmed' && data.booking) {
         const ref = data.booking.booking_reference || activeMerchantRef;
         document.getElementById('success-ref').textContent = ref;
-        // Flash-fix followup — latch so any later transient
-        // renderPostRedirectSuccess call refuses to re-render the hero
-        // (see the flag declaration + guard around line 16810).
-        _successConfirmedLatched = true;
-        // Step 5 — paint "Confirmation emailed to X" under the ref.
-        // contactData.email was set on Continue-click; still in memory
-        // when pollOnce resolves. Stash it too so the Pesapal-redirect
-        // reload (a full page reload) can restore it.
-        const _email = contactData?.email || '';
-        _paintSuccessEmailLine(_email);
         // Stash for the inevitable Pesapal top-level redirect that follows.
         // Pesapal redirects the browser to /?OrderMerchantReference=... a few
         // seconds after payment confirms. That redirect blows away our JS
@@ -16086,10 +15386,6 @@
         try {
           sessionStorage.setItem('tumafly_post_pay_pnr', ref);
           sessionStorage.setItem('tumafly_post_pay_ref', activeMerchantRef || '');
-          // Step 5 — stash email too so post-redirect and refresh paths
-          // can paint the "Confirmation emailed to X" line without
-          // needing to hit payment-status again.
-          if (_email) sessionStorage.setItem('tumafly_post_pay_email', _email);
         } catch (_) {}
         // Step 3: booking complete → wipe the passenger shadow. Refreshing
         // on success shouldn't re-populate a stale booking form later.
@@ -17048,50 +16344,12 @@
 
   let _postRedirectPollHandle  = null;
   let _postRedirectPollStarted = null;
-  // Flash-fix followup — once we've painted the "confirmed" hero (with the
-  // real PNR), any subsequent renderPostRedirectSuccess() call with a
-  // non-terminal state (loading / still-processing) would wipe the PNR and
-  // flash placeholder text or the merchant_ref. That's the sub-second flash
-  // Bev noticed 10-15s after landing. Cause: payment-status EF occasionally
-  // returns a transient 'needs_support' response between confirmed responses
-  // (webhook eventual-consistency; harmless server-side but visually noisy).
-  // Solution: latch this flag once confirmed; refuse to render anything but
-  // 'confirmed' or 'failed' after that. failed is still allowed because it's
-  // a real terminal error state (rare — post-confirmation failure would be
-  // a Duffel issuance rollback, which needs to be surfaced).
-  //
-  // Boot-block sync: the boot block runs BEFORE this var is declared, so it
-  // marks the success view with data-tf-confirmed="1" and we pick that up
-  // here on script parse. Ensures the latch is honored across all entry
-  // paths (Pesapal-redirect stash consumption, pollOnce paint, later
-  // renderPostRedirectSuccess).
-  let _successConfirmedLatched = (() => {
-    try {
-      return document.getElementById('view-success')?.getAttribute('data-tf-confirmed') === '1';
-    } catch (_) { return false; }
-  })();
 
   // Swap the contents of #view-success's hero block to reflect the current
   // post-redirect state. Each branch is fully self-contained markup.
   function renderPostRedirectSuccess(state, payload) {
     const hero = document.querySelector('#view-success .success-hero');
     if (!hero) return;
-
-    // Flash guard — see _successConfirmedLatched declaration above.
-    if (_successConfirmedLatched && state !== 'confirmed' && state !== 'failed') {
-      console.log('[renderPostRedirectSuccess] latched, ignoring', state);
-      return;
-    }
-    if (state === 'confirmed') {
-      _successConfirmedLatched = true;
-      // Also stop any active post-redirect poll — no need to keep polling
-      // once we've landed on the terminal confirmed state. Prevents the
-      // next tick from flashing to a transient response.
-      if (_postRedirectPollHandle) {
-        clearTimeout(_postRedirectPollHandle);
-        _postRedirectPollHandle = null;
-      }
-    }
 
     if (state === 'loading') {
       hero.innerHTML = `
@@ -17106,27 +16364,11 @@
 
     if (state === 'confirmed') {
       const pnr = payload?.booking?.booking_reference || '';
-      // Step 5 — Prefer email from payload (payment-status response
-      // may include it after refresh flows), else fall back to stash.
-      let _email = payload?.booking?.contact_email || payload?.email || '';
-      if (!_email) {
-        try { _email = sessionStorage.getItem('tumafly_post_pay_email') || ''; } catch (_) {}
-      }
-      const _emailBlock = _email ? `
-        <div class="success-email-line" id="success-email-line" style="display:inline-flex;">
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-            <rect x="3" y="5" width="18" height="14" rx="2" stroke="currentColor" stroke-width="1.7"/>
-            <path d="M3 7l9 6 9-6" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/>
-          </svg>
-          <span>Confirmation emailed to <strong id="success-email-addr">${escapeHtml(_email)}</strong></span>
-        </div>
-      ` : '';
       hero.innerHTML = `
         <div class="success-check">✓</div>
         <div class="success-title">You're booked.</div>
         <p style="color:var(--text-2);max-width:42ch;margin:8px auto 0;">A confirmation is on its way to your email. Your booking reference:</p>
         <div class="success-ref" id="success-ref">${escapeHtml(pnr)}</div>
-        ${_emailBlock}
       `;
       return;
     }
