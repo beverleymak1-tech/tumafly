@@ -9284,14 +9284,23 @@
       // view from Step 1 above; do payment-specific DOM setup now.
 
       // Wipe the card iframe wrap — replace with a fresh "Pay with card"
-      // button. Markup mirrors the original at line ~6953 (id, class,
-      // helper text) so subsequent code paths that assume this button
-      // exists still work.
+      // button. IMPORTANT: this button fires _payFromRestore(), NOT
+      // startCardPayment() and NOT goToPayment() directly.
+      //
+      // Why the wrapper: on refresh, module-level passengerData +
+      // contactData reset to empty defaults, and travelerStates[i].saved
+      // is false (the shadow doesn't persist .saved). Additionally,
+      // born_on + passport aren't in the shadow (privacy / design choice).
+      // _payFromRestore bridges that gap by reconciling saved-traveler
+      // records from the DB before firing goToPayment — see the function
+      // for the full flow. If a traveler wasn't linked to a saved record
+      // (guest checkout, ad-hoc data), _payFromRestore routes back to
+      // booking view with a hint so the user can review + Save + Continue.
       const wrap = document.getElementById('card-iframe-wrap');
       if (wrap) {
         wrap.innerHTML = `
           <div>
-            <button class="btn btn-primary btn-lg" id="card-start-btn" onclick="startCardPayment()">Pay with card</button>
+            <button class="btn btn-primary btn-lg" id="card-start-btn" onclick="_payFromRestore()">Pay with card</button>
             <div style="font-size:12px;color:var(--text-3);margin-top:14px;">Card details are handled by Pesapal. TumaFly never sees your card.</div>
           </div>
         `;
@@ -9335,6 +9344,102 @@
       // of the view name passed to startFareTimer. Bar is already ticking.
     } finally {
       _restoreEndOnPayment = false;
+    }
+  }
+
+  // ─── _payFromRestore — Pay-with-card button on restored payment view ───
+  //
+  // The button on the ORIGINAL payment view fires startCardPayment directly.
+  // We can't do that after refresh because:
+  //   - travelerStates[i].saved is false (not in shadow)
+  //   - born_on + passport are not in shadow (privacy)
+  //   - passengerData + contactData module vars are empty (page reload)
+  //
+  // Strategy: pull the missing data from the DB copy of any linked saved
+  // traveler, then delegate to goToPayment (which does collectPassengers
+  // + validation + module-var setup + startCardPayment). If no reconcile
+  // is possible (guest checkout, ad-hoc travelers), route back to booking
+  // view with a hint.
+  //
+  // Called only from the restored payment view's Pay-with-card button.
+  // The fresh-entry payment view uses the original static button that
+  // fires startCardPayment (page HTML at ~L6953).
+  async function _payFromRestore() {
+    // Debounce — disable the button while we're working.
+    const btn = document.getElementById('card-start-btn');
+    if (btn) { btn.classList.add('btn-loading'); btn.disabled = true; }
+
+    try {
+      // 1. Make sure saved travelers are loaded. restoreBooking's Phase 3
+      //    kicks this off asynchronously; by the time the user taps
+      //    Pay-with-card it USUALLY has finished, but await it to be sure.
+      //    fetchSavedTravelers is a no-op for guests (currentUser null) and
+      //    idempotent for signed-in users.
+      try {
+        if (typeof fetchSavedTravelers === 'function') await fetchSavedTravelers();
+      } catch (e) {
+        console.warn('[_payFromRestore] fetchSavedTravelers failed (continuing):', e);
+      }
+
+      // 2. Mark any traveler with a valid _saved_traveler_id as saved so
+      //    reconcileSavedTravelerData will apply the DB record. Guard on
+      //    the record actually existing (user may have deleted the saved
+      //    traveler in Account since booking started).
+      travelerStates.forEach(s => {
+        const linkedId = s?.data?._saved_traveler_id;
+        if (!linkedId) return;
+        const stillExists = Array.isArray(_savedTravelers)
+          && _savedTravelers.some(t => t.id === linkedId);
+        if (stillExists) s.saved = true;
+      });
+
+      // 3. Reconcile — copies born_on / passport / other DB-only fields
+      //    from the saved_travelers row onto the live traveler card.
+      //    Idempotent; safe to call even if nothing to reconcile.
+      if (typeof reconcileSavedTravelerData === 'function') {
+        try { reconcileSavedTravelerData(); }
+        catch (e) { console.warn('[_payFromRestore] reconcile failed:', e); }
+      }
+
+      // 4. Repaint booking forms with the reconciled data. View is hidden
+      //    but the DOM will be correct if user hits Back-to-details.
+      try { renderPassengerForms(); } catch (_) {}
+
+      // 5. Check if all travelers are now saved. If any aren't (guest
+      //    checkout, or user typed a fresh traveler that didn't come from
+      //    the saved-travelers picker), we can't safely fire goToPayment
+      //    from the payment view — its validation errors surface on the
+      //    booking view which is hidden. Route to booking with a hint.
+      const anyUnsaved = travelerStates.some(s => !s.saved);
+      if (anyUnsaved) {
+        showView('booking');
+        // Small delay so the view swap paints before the alert scrolls.
+        setTimeout(() => {
+          if (typeof showAlert === 'function') {
+            showAlert('booking-alert', 'Please review each traveler\u2019s details and tap Save, then Continue to payment.');
+          }
+          const firstUnsaved = travelerStates.findIndex(s => !s.saved);
+          if (firstUnsaved >= 0) {
+            const card = document.querySelector(`[data-traveler-card="${firstUnsaved}"]`);
+            card?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+          }
+        }, 80);
+        return;
+      }
+
+      // 6. All saved + reconciled — fire goToPayment. It handles
+      //    collectPassengers, email/phone validation, module-var setup,
+      //    then startCardPayment. On success the user lands on the
+      //    Pesapal iframe. On failure (e.g. an edge-case validation miss)
+      //    goToPayment surfaces an alert via booking-alert; view is
+      //    still payment, so we swap to booking to make it visible.
+      const _wasPayment = !document.getElementById('view-payment')?.classList.contains('hidden');
+      goToPayment();
+      // Note: goToPayment is not async, but startCardPayment (which it
+      // calls) IS. Nothing to await here; the button loading state is
+      // handled by startCardPayment's own button management.
+    } finally {
+      if (btn) { btn.classList.remove('btn-loading'); btn.disabled = false; }
     }
   }
 
