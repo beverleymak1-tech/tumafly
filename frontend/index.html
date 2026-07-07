@@ -9626,6 +9626,18 @@
       return false;
     }
   }
+
+  // Phase 1 helper: paint the booking fare-timer bar with its static label
+  // + a shimmering placeholder in the countdown slot. Called when we DON'T
+  // have a stashed fare_expires_at_ms — either first-arrival refresh or
+  // shadow was cleared. Once startFareTimer('booking') runs, tickFareTimer
+  // replaces the entire innerHTML with the real countdown, so this shell
+  // dissolves naturally with no extra teardown code.
+  //
+  // Signature was accidentally clobbered during Step 5 insertion; restored
+  // here. Distinct from _paintPaymentFareTimerShell (further above) which
+  // targets #payment-fare-timer instead of #booking-fare-timer.
+  function _paintFareTimerShell() {
     const bar = document.getElementById('booking-fare-timer');
     if (!bar) return;
     bar.classList.remove('hidden', 'warning', 'expired');
