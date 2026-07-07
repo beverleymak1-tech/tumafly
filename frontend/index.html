@@ -4524,19 +4524,47 @@
     /* Desktop layout — original 2-column tab grid with the pay-card-pane
        spanning the full row below (see .pay-tab-pane further down).
        Mobile keeps the stacked accordion via the media query at ~L6084
-       (Batch 3 #10). */
+       (Batch 3 #10).
+       Step 4 REDESIGN (Bev's spec): the desktop 2-column grid is REPLACED
+       with a universal stacked accordion. Both cards (M-Pesa on top, Card
+       on bottom) live inside a single container with one subtle shadow.
+       Card row heights are fixed; only the pane expands/collapses. Both
+       cards land collapsed on view mount (both fresh and refresh). */
     .pay-tabs {
-      display: grid;
-      grid-template-columns: 1fr 1fr;
-      gap: 8px;
+      display: flex;
+      flex-direction: column;
+      gap: 0;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      box-shadow: 0 2px 10px rgba(15, 25, 35, 0.06);
+      overflow: hidden;
       margin-bottom: 18px;
     }
+    /* Helper text under h3, above the pay-tabs stack. */
+    .pay-helper-text {
+      color: var(--text-3);
+      font-size: 13px;
+      font-weight: 400;
+      margin: -4px 0 14px;
+    }
+    /* Each item is a row in the stacked accordion. Border-bottom separates
+       rows within the shared container; last item has none so the container's
+       own border/shadow closes the shape cleanly. */
+    .pay-tab-item {
+      display: block;
+      border-bottom: 1px solid var(--border);
+    }
+    .pay-tab-item:last-child { border-bottom: none; }
+
     .pay-tab {
       position: relative;
-      padding: 16px;
-      border: 1.5px solid var(--border);
-      background: var(--surface);
-      border-radius: var(--radius);
+      width: 100%;
+      min-height: 68px;
+      padding: 14px 18px;
+      border: none;
+      background: transparent;
+      border-radius: 0;
       cursor: pointer;
       font-family: inherit;
       font-size: 14px;
@@ -4546,11 +4574,12 @@
       display: flex;
       align-items: center;
       gap: 12px;
-      transition: border-color 0.15s, background 0.15s;
+      transition: background 0.15s;
     }
-    .pay-tab:hover:not(:disabled) { border-color: var(--brand); }
-    .pay-tab.active {
-      border-color: var(--brand);
+    .pay-tab:hover:not(:disabled) { background: rgba(15, 25, 35, 0.02); }
+    /* The open row gets a soft brand tint — mirrors the "selected" state
+       from Bev's reference screenshots. */
+    .pay-tab-item.open > .pay-tab {
       background: var(--brand-soft);
     }
     .pay-tab:disabled {
@@ -4582,17 +4611,17 @@
       margin-top: 4px;
       opacity: 0.85;
     }
-    /* Batch 3 · #10 — Chevron icon on the Card tab. Hidden on desktop
-       (tabs, not accordion). Visible on mobile as an accordion affordance,
-       rotates 180deg when the pane is open. */
+    /* Chevron on the Card row — universal now (was mobile-only). Rotates
+       180deg when the pane opens as an accordion affordance. */
     .pay-tab-chev {
-      display: none;
+      display: inline-block;
       margin-left: auto;
       font-size: 14px;
       color: var(--text-3);
       transition: transform 0.25s;
       flex-shrink: 0;
     }
+    .pay-tab-item.open .pay-tab-chev { transform: rotate(180deg); }
     .coming-soon {
       position: absolute;
       top: 8px;
@@ -4606,29 +4635,57 @@
       letter-spacing: 0.03em;
     }
 
-    /* Batch 3 · #10 / Step 4 — Accordion pattern applies to BOTH viewports.
-       Previously mobile-only; now desktop mirrors mobile per Bev's Step 4
-       spec (Shopify-style stacked payment cards, both collapsed on entry).
-       This lets us fully rehydrate the payment view on refresh without
-       needing to resurrect a dead Pesapal iframe — the user just re-taps
-       the Credit or Debit card and a fresh iframe loads with the same
-       customer details pre-filled from the shadow.
-
-       Reverted on desktop per Bev's ask — desktop stays as the original
-       2-column tab layout with pane spanning the full row below.
-       Mobile keeps the accordion (see the @media block ~L6084). */
-    /* Desktop: accordion wrapper is a display:contents ghost so the tab
-       button and the pane behave as direct grid children of .pay-tabs.
-       Pane spans the full row below via grid-column: 1 / -1. */
-    .pay-tab-item { display: contents; }
+    /* Pane collapse animation — universal (desktop + mobile). Sits inside
+       the shared shadow container as an accordion body; when .open is set
+       on the wrapper, the pane slides open with an eased max-height +
+       opacity transition. */
     .pay-tab-pane {
-      grid-column: 1 / -1;
-      margin-top: 8px;
+      max-height: 0;
+      overflow: hidden;
+      opacity: 0;
+      padding: 0 18px;
+      transition: max-height 0.32s ease, opacity 0.2s ease-out, padding 0.2s;
     }
-    /* Chevron is an accordion affordance — desktop uses tabs, so hidden by
-       default. Mobile override in the media query makes it visible. */
-    .pay-tab-chev { display: none; }
-    .pay-tab-item.open .pay-tab-chev { transform: rotate(180deg); }
+    .pay-tab-item.open .pay-tab-pane {
+      max-height: 1200px;
+      opacity: 1;
+      padding: 12px 18px 18px;
+    }
+
+    /* Step 4 — brand-soft alpha with lock + security messaging, sits BELOW
+       the pay-tabs stack. On desktop it flex-fills the remaining vertical
+       space in the payment-main-col so its bottom aligns with the sidebar
+       card bottom. On mobile it stays at natural height. */
+    .pay-stack-alpha {
+      background: var(--brand-soft);
+      border: 1px solid var(--brand-border);
+      border-radius: 14px;
+      padding: 20px 22px;
+      color: var(--text-2);
+      font-size: 13px;
+      line-height: 1.55;
+      display: flex;
+      align-items: flex-start;
+      gap: 14px;
+      margin-bottom: 18px;
+    }
+    .pay-stack-alpha svg {
+      flex-shrink: 0;
+      color: var(--brand-dark);
+      margin-top: 2px;
+    }
+    .pay-stack-alpha span { flex: 1; }
+
+    /* Desktop only: the payment-main-col becomes a flex column so the alpha
+       can flex-grow to fill space to the sidebar bottom. Booking-layout
+       for #view-payment uses align-items: stretch so the two grid children
+       (main col + aside) end at the same vertical position. */
+    #view-payment .booking-layout { align-items: stretch; }
+    .payment-main-col {
+      display: flex;
+      flex-direction: column;
+    }
+    .payment-main-col > .pay-stack-alpha { flex: 1; }
 
     .pay-iframe-wrap {
       background: var(--bg);
@@ -6056,57 +6113,21 @@
         margin-bottom: 0;
       }
 
-      /* Pay tabs — Batch 3 · #10.
-         Mobile: stacked accordion cards. .pay-tabs flips to flex-column
-         so pay-tab-item's `display: contents` (desktop grid ghost)
-         becomes a real block wrapper here — the item can then own its
-         pane visually as an accordion body. Order in DOM = order on
-         screen: M-Pesa tab, Card tab, Card pane (nested inside its
-         wrapper).
-
-         Desktop keeps the 2-column tab layout (see base rules at
-         ~L4524). Restore desktop shipped in the same commit that added
-         these rules back. */
-      .pay-tabs {
-        display: flex;
-        flex-direction: column;
-        gap: 10px;
-      }
-      .pay-tab-item { display: block; }
+      /* Pay tabs — Step 4 redesign (Bev's spec).
+         The pattern is universal now (see base rules at ~L4525): a single
+         shadow container with M-Pesa on top, Card on bottom, both landing
+         collapsed. Mobile-specific tweaks below just fine-tune the touch
+         target size (44+ px) and disable the desktop alpha flex-fill
+         so the alpha sits at natural height instead of stretching to
+         match a potentially very tall aside on mobile. */
       .pay-tab {
-        width: 100%;
-        min-height: 56px;
-        border-radius: 14px;
+        min-height: 68px;
       }
-      /* Neutralize .active on mobile so the initial "one tab hot-blue,
-         one grey" desktop look doesn't leak in — .open on the wrapper
-         is the sole source of truth for "this card is expanded" on
-         mobile. Desktop keeps the original .active branded tab. */
-      .pay-tab.active {
-        border-color: var(--border);
-        background: var(--surface);
-      }
-      .pay-tab-item.open > .pay-tab {
-        border-color: var(--brand);
-        background: var(--brand-soft);
-      }
-      /* Accordion pane collapsed by default; slides open on .open. */
-      .pay-tab-pane {
-        max-height: 0;
-        overflow: hidden;
-        opacity: 0;
-        margin-top: 0;
-        transition: max-height 0.32s ease, opacity 0.2s ease-out, margin-top 0.2s;
-        min-height: 0;
-        grid-column: auto; /* Reset the desktop grid-column: 1/-1 */
-      }
-      .pay-tab-item.open .pay-tab-pane {
-        max-height: 1200px;
-        opacity: 1;
-        margin-top: 10px;
-      }
-      /* Chevron cue visible on mobile only (accordion affordance) */
-      .pay-tab-chev { display: inline-block; }
+      /* Mobile: don't stretch the aside grid; keep at natural heights so
+         the alpha sits at its own height (not stretched to match a stacked
+         aside on mobile, which would be enormous). */
+      #view-payment .booking-layout { align-items: start; }
+      .payment-main-col > .pay-stack-alpha { flex: 0 0 auto; }
 
       /* ── Phase G — 44px tap target sweep ────────────────────── */
 
@@ -6909,41 +6930,44 @@
         <!-- Phase F: mobile-only inline price slot — above the payment card on mobile -->
         <div class="payment-price-inline" id="payment-price-inline"></div>
 
-        <div class="card">
+        <div class="card pay-card">
           <h3>Pay for your booking</h3>
+          <p class="pay-helper-text">Select your method of payment</p>
           <div class="pay-tabs">
             <!-- Batch 3 · #10 — M-Pesa stays disabled at launch. New hint
                  line under the meta gives users a persistent reason for
                  the "Coming soon" badge without needing a tap-response
                  toast. Wired to Daraja directly post-launch (Pesapal's
                  built-in M-Pesa will be disabled on our merchant account
-                 once we go live). -->
-            <button class="pay-tab" disabled id="paytab-mpesa">
-              <div class="pay-tab-icon" style="background:#1a9e4a;color:white;font-weight:600;font-size:11px;">M</div>
-              <div class="pay-tab-body">
-                <span class="tab-name">M-Pesa</span>
-                <span class="tab-meta">Pay from your phone</span>
-                <span class="tab-hint">Direct M-Pesa launching soon</span>
-              </div>
-              <span class="coming-soon">Coming soon</span>
-            </button>
-            <!-- Batch 3 · #10 — Card + pane wrapped in .pay-tab-item so
-                 the pane can accordion-collapse under the tab on mobile.
-                 On desktop, .pay-tab-item { display: contents } lets the
-                 button and pane behave as direct grid children of
-                 .pay-tabs (button in cell 2, pane spanning full row
-                 below via grid-column: 1/-1) so the desktop layout is
-                 pixel-identical to before. On mobile the wrapper
-                 re-materializes and .pay-tab-pane is a slide-open body. -->
+                 once we go live).
+                 Step 4 redesign: wrapped in .pay-tab-item so both cards
+                 share the same structural template inside the unified
+                 accordion container. Pane is unused (M-Pesa disabled)
+                 but the wrapper matches the Card's for consistent
+                 borders/hover/shadow rendering. -->
+            <div class="pay-tab-item pay-tab-item-mpesa" id="pay-mpesa-item">
+              <button class="pay-tab" disabled id="paytab-mpesa">
+                <div class="pay-tab-icon" style="background:#1a9e4a;color:white;font-weight:600;font-size:11px;">M</div>
+                <div class="pay-tab-body">
+                  <span class="tab-name">M-Pesa</span>
+                  <span class="tab-meta">Pay from your phone</span>
+                  <span class="tab-hint">Direct M-Pesa launching soon</span>
+                </div>
+                <span class="coming-soon">Coming soon</span>
+              </button>
+            </div>
+            <!-- Step 4 redesign — Card + pane. Both viewports now use the
+                 same accordion pattern (per Bev's spec). Land collapsed;
+                 first click on the card row opens the accordion AND
+                 triggers the payment iframe load via the click handler.
+                 Chevron is universal (was mobile-only). -->
             <div class="pay-tab-item" id="pay-card-item">
-              <button class="pay-tab active" id="paytab-card" onclick="selectPayTab('card')">
+              <button class="pay-tab" id="paytab-card" onclick="selectPayTab('card')">
                 <div class="pay-tab-icon">💳</div>
                 <div class="pay-tab-body">
                   <span class="tab-name">Credit or Debit (Pesapal)</span>
                   <span class="tab-meta">Visa, Mastercard, Amex</span>
                 </div>
-                <!-- Mobile-only chevron cue that this is an accordion.
-                     Rotated 180deg via CSS when .pay-tab-item.open. -->
                 <span class="pay-tab-chev" aria-hidden="true">▾</span>
               </button>
 
@@ -6961,6 +6985,17 @@
           <div id="payment-alert"></div>
 
           <div id="poll-area" class="hidden"></div>
+        </div>
+
+        <!-- Step 4 redesign: brand-soft alpha with lock + security messaging.
+             flex: 1 (desktop only) so its bottom aligns with the sidebar's
+             bottom. On mobile it sits at natural height below the card. -->
+        <div class="pay-stack-alpha">
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+            <rect x="4" y="10" width="16" height="10" rx="2" stroke="currentColor" stroke-width="1.8"/>
+            <path d="M8 10V7a4 4 0 018 0v3" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
+          </svg>
+          <span>Your payment is 100% safe and secure. We use encryption to protect your data and only work with verified payment gateways. Your trust is a priority for us.</span>
         </div>
 
         <p class="compliance">
@@ -8902,6 +8937,19 @@
   // param through Phase 1/2/3 would be more invasive than gating one line.
   let _restoreEndOnPayment = false;
 
+  // Step 4 REDESIGN (Bev's spec): universal collapsible-cards pattern on
+  // #payment. On fresh entry via Continue → goToPayment, the accordion
+  // stays collapsed while startCardPayment loads the iframe in the
+  // background. On refresh entry via restorePaymentView, the user's first
+  // tap on the Card row triggers _payFromRestore. These two flags let
+  // selectPayTab distinguish the two paths.
+  //   _paymentViewIsRestored: true only after restorePaymentView, false
+  //     after goToPayment. Signals to selectPayTab which loader to call.
+  //   _paymentRestoreLaunched: guards against re-firing on close+reopen.
+  //     Reset on error so the user can retry.
+  let _paymentViewIsRestored = false;
+  let _paymentRestoreLaunched = false;
+
   async function restoreBooking(params) {
     const offer = (params.offer || '').trim();
     if (!/^off_[A-Za-z0-9]+$/.test(offer)) {
@@ -9098,6 +9146,45 @@
     baggageOfferId = null;
     baggagePassengerIds = [];
 
+    // Rebuild lastSearchParams from the hydrated offer so a fare-timer
+    // expiry in this session (e.g. user refreshed with 3 min left on the
+    // timer) can trigger rerunSearchFromExpiry with real data instead of
+    // falling through to showView('home'). runSearch normally sets this
+    // module var, but restore-restore never called runSearch.
+    //
+    // Origin = first slice, first segment's origin.
+    // Destination = first slice, last segment's destination (handles multi-
+    //   segment/connecting flights correctly).
+    // Depart = first slice's departing_at date.
+    // Return = if 2 slices (round-trip), second slice's departing_at date.
+    try {
+      const slices = Array.isArray(data.offer?.slices) ? data.offer.slices : [];
+      if (slices.length > 0) {
+        const outSlice = slices[0];
+        const outSegs = Array.isArray(outSlice.segments) ? outSlice.segments : [];
+        if (outSegs.length > 0) {
+          const firstSeg = outSegs[0];
+          const lastSeg = outSegs[outSegs.length - 1];
+          const _iso = (v) => (typeof v === 'string' ? v.slice(0, 10) : '');
+          const rebuilt = {
+            origin: firstSeg.origin,
+            destination: lastSeg.destination,
+            date: _iso(firstSeg.departing_at || firstSeg.departure),
+            returnDate: null,
+          };
+          if (slices.length >= 2) {
+            const inSegs = Array.isArray(slices[1].segments) ? slices[1].segments : [];
+            if (inSegs.length > 0) {
+              rebuilt.returnDate = _iso(inSegs[0].departing_at || inSegs[0].departure);
+            }
+          }
+          if (rebuilt.origin && rebuilt.destination && rebuilt.date) {
+            lastSearchParams = rebuilt;
+          }
+        }
+      }
+    } catch (e) { console.warn('[restoreBooking] lastSearchParams rebuild failed:', e); }
+
     // Reconcile passenger count. If the offer says pax > 1, we need to add
     // cards. We preserve card 0 (which has shadow data + anything the user
     // typed during Phase 2 while waiting) and append fresh cards for the rest.
@@ -9283,38 +9370,26 @@
       // Success — offer is hydrated in memory. We're already on payment
       // view from Step 1 above; do payment-specific DOM setup now.
 
-      // Wipe the card iframe wrap — replace with a fresh "Pay with card"
-      // button. IMPORTANT: this button fires _payFromRestore(), NOT
-      // startCardPayment() and NOT goToPayment() directly.
-      //
-      // Why the wrapper: on refresh, module-level passengerData +
-      // contactData reset to empty defaults, and travelerStates[i].saved
-      // is false (the shadow doesn't persist .saved). Additionally,
-      // born_on + passport aren't in the shadow (privacy / design choice).
-      // _payFromRestore bridges that gap by reconciling saved-traveler
-      // records from the DB before firing goToPayment — see the function
-      // for the full flow. If a traveler wasn't linked to a saved record
-      // (guest checkout, ad-hoc data), _payFromRestore routes back to
-      // booking view with a hint so the user can review + Save + Continue.
-      const wrap = document.getElementById('card-iframe-wrap');
-      if (wrap) {
-        wrap.innerHTML = `
-          <div>
-            <button class="btn btn-primary btn-lg" id="card-start-btn" onclick="_payFromRestore()">Pay with card</button>
-            <div style="font-size:12px;color:var(--text-3);margin-top:14px;">Card details are handled by Pesapal. TumaFly never sees your card.</div>
-          </div>
-        `;
-      }
+      // Step 4 REDESIGN — signal to selectPayTab that a first-open of the
+      // Card accordion should trigger _payFromRestore. Fresh flow via
+      // goToPayment sets this false so the same accordion open is a
+      // no-op (iframe already loading in the background).
+      _paymentViewIsRestored = true;
+      _paymentRestoreLaunched = false;
 
-      // Collapse accordion — mobile-specific effect. On mobile the user
-      // must tap Card to expand, then tap Pay-with-card to launch a fresh
-      // iframe. On desktop `.pay-tab-item { display: contents }` makes
-      // the pane always visible, so these class removals are visually
-      // inert but harmless. Prevents the "was the pre-refresh iframe
-      // ever loaded?" confusion by making the interaction discrete.
+      // Wipe the card iframe wrap to an empty state. In the redesign,
+      // the Card row click (selectPayTab) is what triggers the load —
+      // showing a "Pay with card" button here would be a redundant
+      // second click. The pane is collapsed anyway; user won't see it
+      // until they tap the row.
+      const wrap = document.getElementById('card-iframe-wrap');
+      if (wrap) wrap.innerHTML = '';
+
+      // Ensure the accordion is collapsed — universal now, no .active
+      // class either (accordion .open is the source of truth in the
+      // redesign). Redundant on fresh page load (default HTML has
+      // neither class) but idempotent + protective for popstate flows.
       document.getElementById('pay-card-item')?.classList.remove('open');
-      // paytab-card was .active before refresh — clearing it too so the
-      // visual state matches the collapsed accordion.
       document.getElementById('paytab-card')?.classList.remove('active');
 
       // Hide any lingering poll/alert areas from the pre-refresh session.
@@ -15488,14 +15563,17 @@
     `;
     document.getElementById('poll-area').classList.add('hidden');
     clearAlert('payment-alert');
-    // Step 4 — accordion is universal (desktop + mobile). Auto-open the
-    // Card item so the "Loading secure payment…" spinner (and, moments
-    // later, the Pesapal iframe) is visible when the payment view mounts.
-    // On refresh-restore we deliberately leave it collapsed — that path
-    // never runs goToPayment, so this line only fires when the user just
-    // clicked Continue.
-    document.getElementById('pay-card-item')?.classList.add('open');
-    document.getElementById('paytab-card')?.classList.add('active');
+    // Step 4 REDESIGN — Bev's spec: land collapsed on BOTH fresh and refresh
+    // entry. Continue click no longer auto-opens the Card accordion; the
+    // user reveals the payment form by tapping the Card row. startCardPayment
+    // fires in the BACKGROUND so the iframe is loaded (invisible in the
+    // collapsed pane) by the time the user taps the row. Zero-delay reveal
+    // for the fresh path; the refresh path uses selectPayTab-triggered load
+    // (see _payFromRestore).
+    //
+    // Reset restore-mode flags — this is a fresh Continue, not a restore.
+    _paymentViewIsRestored = false;
+    _paymentRestoreLaunched = false;
     // switches views itself, but ONLY after clearing drift-check (409) and
     // expired-offer (410) branches. This keeps drift/expired modals showing
     // on the booking view where the user left off, avoiding the confusing
@@ -15523,16 +15601,39 @@
   }
 
   function selectPayTab(tab) {
-    document.getElementById('paytab-card').classList.toggle('active', tab === 'card');
-    // Step 4 — Accordion behavior is universal now (Bev's spec: desktop
-    // mirrors mobile stacked-cards pattern). Every tap toggles the Card
-    // item's .open state. First tap expands and lets the user see the
-    // Pesapal iframe; second tap collapses. Same everywhere.
-    //
     // M-Pesa branch never runs — that button is disabled at launch.
+    if (tab !== 'card') return;
     const cardItem = document.getElementById('pay-card-item');
     if (!cardItem) return;
+    const wasOpen = cardItem.classList.contains('open');
     cardItem.classList.toggle('open');
+    const nowOpen = cardItem.classList.contains('open');
+
+    // Step 4 REDESIGN: on the FIRST open in restore mode, trigger the
+    // reconcile+pay chain. Guarded by _paymentRestoreLaunched so a
+    // close+reopen doesn't re-fire (which would generate a second
+    // merchant_ref). Fresh entry doesn't need this — goToPayment already
+    // fired startCardPayment when the user clicked Continue and the
+    // iframe is loading in the background.
+    if (!wasOpen && nowOpen && _paymentViewIsRestored && !_paymentRestoreLaunched) {
+      _paymentRestoreLaunched = true;
+      // Immediate loading state so the accordion reveal isn't a jarring
+      // empty box while _payFromRestore does its work (fetch saved
+      // travelers, reconcile DB data, Turnstile, create-payment).
+      const wrap = document.getElementById('card-iframe-wrap');
+      if (wrap) {
+        wrap.innerHTML = `
+          <div style="display:flex;align-items:center;justify-content:center;padding:24px;color:var(--text-2);">
+            <div class="spinner" style="margin-right:10px;"></div>
+            Loading secure payment…
+          </div>
+        `;
+      }
+      try { _payFromRestore(); } catch (e) {
+        console.warn('[selectPayTab] _payFromRestore failed:', e);
+        _paymentRestoreLaunched = false;  // allow retry
+      }
+    }
   }
 
   async function startCardPayment({ _skipDriftCheck = false, _turnstileAutoRetry = false } = {}) {
