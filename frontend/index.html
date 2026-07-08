@@ -4664,9 +4664,10 @@
     }
 
     /* Step 4 — brand-soft alpha with lock + security messaging, sits BELOW
-       the pay-tabs stack. On desktop it flex-fills the remaining vertical
-       space in the payment-main-col so its bottom aligns with the sidebar
-       card bottom. On mobile it stays at natural height. */
+       the pay-tabs stack. Natural height (no flex-fill) so the box doesn't
+       balloon on tall-sidebar sessions (fresh entry with seat/baggage
+       line items) — the visual whitespace looked wrong. Sidebar and main
+       col are independent heights again. */
     .pay-stack-alpha {
       background: var(--brand-soft);
       border: 1px solid var(--brand-border);
@@ -4686,17 +4687,6 @@
       margin-top: 2px;
     }
     .pay-stack-alpha span { flex: 1; }
-
-    /* Desktop only: the payment-main-col becomes a flex column so the alpha
-       can flex-grow to fill space to the sidebar bottom. Booking-layout
-       for #view-payment uses align-items: stretch so the two grid children
-       (main col + aside) end at the same vertical position. */
-    #view-payment .booking-layout { align-items: stretch; }
-    .payment-main-col {
-      display: flex;
-      flex-direction: column;
-    }
-    .payment-main-col > .pay-stack-alpha { flex: 1; }
 
     .pay-iframe-wrap {
       background: var(--bg);
@@ -6128,17 +6118,10 @@
          The pattern is universal now (see base rules at ~L4525): a single
          shadow container with M-Pesa on top, Card on bottom, both landing
          collapsed. Mobile-specific tweaks below just fine-tune the touch
-         target size (44+ px) and disable the desktop alpha flex-fill
-         so the alpha sits at natural height instead of stretching to
-         match a potentially very tall aside on mobile. */
+         target size (44+ px). */
       .pay-tab {
         min-height: 92px;
       }
-      /* Mobile: don't stretch the aside grid; keep at natural heights so
-         the alpha sits at its own height (not stretched to match a stacked
-         aside on mobile, which would be enormous). */
-      #view-payment .booking-layout { align-items: start; }
-      .payment-main-col > .pay-stack-alpha { flex: 0 0 auto; }
 
       /* ── Phase G — 44px tap target sweep ────────────────────── */
 
@@ -8568,6 +8551,7 @@
       // brought the user here, but clear them defensively — a stray
       // #success URL (bookmark, back button chain) shouldn't leak old data.
       try { sessionStorage.removeItem(BOOKING_PASSENGER_SHADOW_KEY); } catch (_) {}
+      try { sessionStorage.removeItem(BOOKING_SECURE_SHADOW_KEY); } catch (_) {}
       clearPaymentReturn();
       showView('home');
       try { safeHistory('replace', { view: 'home' }, window.location.pathname); } catch (_) {}
@@ -9145,6 +9129,14 @@
     if (!res.ok || !data.success) {
       const msg = data?.error || 'We couldn\'t load that flight. Please search again.';
       console.warn('[restoreBooking] EF error', res.status, msg);
+      // Terminal 403 (both attempts failed) means Cloudflare Turnstile
+      // couldn't verify — surface a modal with an explicit Refresh CTA
+      // instead of a silent home bounce with a toast the user might miss.
+      // Other 4xx codes (e.g. 400 malformed) still use the generic bounce.
+      if (res.status === 403) {
+        _showVerificationFailedModal();
+        return false;
+      }
       _restoreBookingBounceHome(msg);
       return false;
     }
@@ -9511,6 +9503,46 @@
         console.warn('[_payFromRestore] fetchSavedTravelers failed (continuing):', e);
       }
 
+      // 1b. Just-in-time hydration from the SECURE shadow (born_on,
+      //     passport). This is the ONLY place we read
+      //     BOOKING_SECURE_SHADOW_KEY — restoreBookingPassengers
+      //     deliberately does NOT restore secure fields to memory so
+      //     they can't paint onto the #booking DOM (see
+      //     restoreBookingPassengers' NOTE block for the rationale).
+      //
+      //     Here on #payment F5 → tap Card, the user has already
+      //     consciously advanced past #booking and is choosing to pay,
+      //     so hydrating memory with previously-Saved sensitive values
+      //     is not an "invisible ship" — the user typed and Saved
+      //     them earlier. If they hit Back to details after this,
+      //     Mechanism 2's masking rules cover them: sensitive fields
+      //     render as masks until user clicks into them.
+      //
+      //     Only-fill-empty guard preserves anything the user typed
+      //     in this session (shouldn't happen post-F5 but cheap
+      //     insurance).
+      try {
+        const rawSecure = sessionStorage.getItem(BOOKING_SECURE_SHADOW_KEY);
+        if (rawSecure) {
+          const securePayload = JSON.parse(rawSecure);
+          if (securePayload && Array.isArray(securePayload.travelers)) {
+            securePayload.travelers.forEach((secure, i) => {
+              const ts = travelerStates[i];
+              if (!ts || !secure) return;
+              if (!ts.data.born_on && secure.born_on) ts.data.born_on = secure.born_on;
+              if (secure.passport && typeof secure.passport === 'object') {
+                if (!ts.data.passport) ts.data.passport = { country: '', number: '', expires: '' };
+                if (!ts.data.passport.country && secure.passport.country) ts.data.passport.country = secure.passport.country;
+                if (!ts.data.passport.number  && secure.passport.number)  ts.data.passport.number  = secure.passport.number;
+                if (!ts.data.passport.expires && secure.passport.expires) ts.data.passport.expires = secure.passport.expires;
+              }
+            });
+          }
+        }
+      } catch (e) {
+        console.warn('[_payFromRestore] secure shadow read failed (continuing):', e);
+      }
+
       // 2. Mark any traveler with a valid _saved_traveler_id as saved so
       //    reconcileSavedTravelerData will apply the DB record. Guard on
       //    the record actually existing (user may have deleted the saved
@@ -9535,11 +9567,41 @@
       //    but the DOM will be correct if user hits Back-to-details.
       try { renderPassengerForms(); } catch (_) {}
 
+      // 4b. Mark saved for any traveler whose data is now complete for
+      //     the trip's requirements. Two sources merge here:
+      //       - Signed-in with saved traveler: born_on/passport from DB
+      //         via reconcile above
+      //       - Guest OR fresh-typed signed-in: fields from the secure
+      //         shadow via step 1b hydration
+      //     Either way, if memory now has everything the trip needs,
+      //     the traveler is saved for purposes of the "route to booking"
+      //     check below. Completeness rules mirror saveTraveler:
+      //     title/name/gender/born_on required always; passport
+      //     (country/number/expires) required when tripRequiresPassport.
+      travelerStates.forEach(s => {
+        if (s.saved) return;
+        const d = s?.data;
+        if (!d) return;
+        const hasBasics = d.title && d.given_name && d.family_name && d.gender;
+        if (!hasBasics) return;
+        if (!d.born_on) return;
+        if (tripRequiresPassport) {
+          if (!d.passport?.number || !d.passport?.country || !d.passport?.expires) return;
+        }
+        s.saved = true;
+      });
+
       // 5. Check if all travelers are now saved. If any aren't (guest
-      //    checkout, or user typed a fresh traveler that didn't come from
-      //    the saved-travelers picker), we can't safely fire goToPayment
-      //    from the payment view — its validation errors surface on the
-      //    booking view which is hidden. Route to booking with a hint.
+      //    checkout with genuinely incomplete data, or user typed a
+      //    fresh traveler that didn't come from the saved-travelers
+      //    picker AND didn't finish before F5), we can't safely fire
+      //    goToPayment from the payment view — its validation errors
+      //    surface on the booking view which is hidden. Route to
+      //    booking with a hint.
+      //
+      //    With the secure shadow in place, guests with complete Saved
+      //    data flow through this check as saved (via step 4b above).
+      //    Only genuine edge cases hit the routing branch.
       const anyUnsaved = travelerStates.some(s => !s.saved);
       if (anyUnsaved) {
         showView('booking');
@@ -9748,6 +9810,44 @@
     }
   }
 
+  // Helper: modal for the "Turnstile verification failed even after retry"
+  // case. Called from restoreBooking's terminal 403 branch. This is
+  // materially different from a generic 4xx — the fare/offer is probably
+  // fine, we just couldn't get past Cloudflare's bot challenge (rate limit
+  // cooldown, ERR_NAME_NOT_RESOLVED on brunhild.*, or similar). A silent
+  // home bounce with a toast the user might not see is bad UX; a modal
+  // with an explicit "Refresh" button gives the user agency + a clear
+  // next step. Refreshing usually clears the Cloudflare cooldown after
+  // 15-30s.
+  function _showVerificationFailedModal() {
+    if (document.getElementById('verification-failed-modal')) return;
+    const modal = document.createElement('div');
+    modal.id = 'verification-failed-modal';
+    modal.className = 'search-loading-backdrop';
+    modal.setAttribute('role', 'alert');
+    modal.setAttribute('aria-live', 'assertive');
+    modal.innerHTML = `
+      <div class="search-loading-card" style="max-width:420px;text-align:center;padding:28px 24px;">
+        <div style="display:flex;justify-content:center;margin-bottom:14px;">
+          <div style="width:48px;height:48px;border-radius:50%;background:var(--warning-soft,#FEF6E7);display:flex;align-items:center;justify-content:center;">
+            <svg width="26" height="26" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+              <circle cx="12" cy="12" r="10" stroke="var(--warning,#B45309)" stroke-width="2"/>
+              <path d="M12 8v5M12 16.5v.01" stroke="var(--warning,#B45309)" stroke-width="2" stroke-linecap="round"/>
+            </svg>
+          </div>
+        </div>
+        <div style="font-size:18px;font-weight:600;color:var(--ink,#0F1923);margin-bottom:8px;">
+          Verification hiccup
+        </div>
+        <div style="font-size:14px;color:var(--text-2,#4A5568);line-height:1.5;margin-bottom:22px;">
+          We couldn't verify your session. This usually clears after a moment — please refresh the page and try again.
+        </div>
+        <button class="btn btn-primary" style="min-width:160px;" onclick="window.location.reload()">Refresh page</button>
+      </div>
+    `;
+    document.body.appendChild(modal);
+  }
+
   // Helper: modal for the 410-Gone fare-expired case. Reuses the same modal
   // pattern the fare timer already uses (showSearchExpiredModal at ~L7333)
   // so the UI is familiar. Kept as a thin wrapper so we can iterate on copy.
@@ -9796,6 +9896,22 @@
   //     contact:   {email, phone_number, phone_dial_iso} }
   const BOOKING_PASSENGER_SHADOW_KEY = 'tf_booking_passengers_v1';
 
+  // Secure shadow — sensitive per-traveler fields (born_on, passport).
+  // Separate key from BOOKING_PASSENGER_SHADOW_KEY so the "surface on
+  // restore" behavior can differ per key:
+  //   - Non-sensitive shadow: restored to DOM + memory on #booking F5
+  //   - Secure shadow: restored to MEMORY ONLY. DOM inputs on #booking
+  //     stay blank; user must re-type to Save. On #payment F5, memory
+  //     hydration lets goToPayment fire a valid create-payment payload
+  //     without ever surfacing the fields to the user.
+  //
+  // Same write cadence + same clear points as BOOKING_PASSENGER_SHADOW_KEY.
+  // Cleared alongside it on Pesapal-callback success and resetAndGoHome.
+  //
+  // Shape stored:
+  //   { travelers: [{born_on, passport: {country, number, expires}}, ...] }
+  const BOOKING_SECURE_SHADOW_KEY = 'tf_booking_secure_v1';
+
   function stashBookingPassengers() {
     try {
       // Include the offer's expires_at so refresh-restore can start the fare
@@ -9803,6 +9919,8 @@
       // takes 6-8s on some networks due to Turnstile). The timer will
       // resync to the fresher value once get-offer returns.
       const expMs = getEffectiveExpiresAtMs();
+      // Non-sensitive shadow — title, name, gender, nationality, contact.
+      // These CAN be repainted to the DOM on restore.
       const payload = {
         travelers: (travelerStates || []).map(s => ({
           title:       s?.data?.title || '',
@@ -9820,6 +9938,20 @@
         fare_expires_at_ms: expMs || 0,
       };
       sessionStorage.setItem(BOOKING_PASSENGER_SHADOW_KEY, JSON.stringify(payload));
+      // Secure shadow — born_on + passport. Written every time the
+      // non-sensitive shadow writes (same call sites, same cadence).
+      // MUST NOT be surfaced to DOM on restore (see restoreBookingPassengers).
+      const securePayload = {
+        travelers: (travelerStates || []).map(s => ({
+          born_on: s?.data?.born_on || '',
+          passport: {
+            country: s?.data?.passport?.country || '',
+            number:  s?.data?.passport?.number  || '',
+            expires: s?.data?.passport?.expires || '',
+          },
+        })),
+      };
+      sessionStorage.setItem(BOOKING_SECURE_SHADOW_KEY, JSON.stringify(securePayload));
     } catch (_) { /* sessionStorage disabled — silent no-op */ }
   }
 
@@ -9862,6 +9994,16 @@
         }
       });
     }
+
+    // NOTE: sensitive fields (born_on, passport) are stored in
+    // BOOKING_SECURE_SHADOW_KEY but INTENTIONALLY NOT restored to memory
+    // here. If we populated travelerStates[i].data.born_on now,
+    // renderPassengerForms would paint it into the DOM DOB input on
+    // #booking F5 — violating the "DOM blank for sensitive fields on
+    // #booking F5" rule. Instead, _payFromRestore reads the secure
+    // shadow just-in-time on tap Card on the restored #payment view —
+    // hydrating memory only at the moment it's needed for goToPayment.
+    // #booking F5 users never see the sensitive fields populated.
 
     // Contact — the fields are static DOM elements (not per-traveler state),
     // so we write them directly. Same "only-if-empty" guard as the D5 guest
@@ -14114,16 +14256,22 @@
     const s = travelerStates[i];
     if (!s || s.saved) return;
     const g = id => document.getElementById(`p${i}-${id}`);
+    // Mechanism 2: fields with data-masked="true" are showing masks (like
+    // **/**/1990) and haven't been touched by the user. Skip them so
+    // memory keeps the previously-Saved value. First focus clears the
+    // attribute (see _installMaskedFieldHandler) and then subsequent
+    // snapshots read normally.
+    const readVal = el => (el && !el.hasAttribute('data-masked')) ? el.value : null;
     if (g('title')) s.data.title = g('title').value;
     if (g('gender')) s.data.gender = g('gender').value;
     if (g('given')) s.data.given_name = g('given').value.trim();
     if (g('middle')) s.data.middle_name = g('middle').value.trim();
     if (g('family')) s.data.family_name = g('family').value.trim();
-    if (g('dob')) s.data.born_on = g('dob').value;
+    { const v = readVal(g('dob')); if (v !== null) s.data.born_on = v; }
     if (g('nationality')) s.data.nationality = g('nationality').value.trim();
     if (g('pp-country')) s.data.passport.country = g('pp-country').value.trim();
-    if (g('pp-number')) s.data.passport.number = g('pp-number').value.trim();
-    if (g('pp-expires')) s.data.passport.expires = g('pp-expires').value;
+    { const v = readVal(g('pp-number')); if (v !== null) s.data.passport.number = v.trim(); }
+    { const v = readVal(g('pp-expires')); if (v !== null) s.data.passport.expires = v; }
     if (g('kti')) s.data.known_traveler_id = g('kti').value.trim();
     if (g('redress')) s.data.redress_number = g('redress').value.trim();
     if (g('assist')) s.data.special_assistance = g('assist').value.trim();
@@ -14240,6 +14388,9 @@
     s.showPassportErrors = false;
     s.showRequiredErrors = false;
     s.openSections.clear();
+    // Mechanism 2: clear the pencil-open flag. Next time this card is
+    // re-opened via pencil, it'll re-set from the newly-saved state.
+    s._openedFromSaved = false;
     renderPassengerForms();
     // Bag/seat rows are gated on saved===true (see renderSeatsList +
     // renderBaggageList). Without these re-renders here, those sections
@@ -14532,9 +14683,68 @@
     if (error) throw error;
   }
 
+  // Mask helpers for Mechanism 2 (masking on saved cards re-opened via
+  // pencil). Applied only when travelerStates[i]._openedFromSaved === true.
+  //
+  // Rules:
+  //   DOB (born_on)      "1990-01-15"  →  "**/**/1990"
+  //   Passport expiry    "2028-08-20"  →  "**/**/2028"
+  //   Passport number    "A12345678"   →  "A********"
+  //   Passport country                 →  fully visible (dropdown, low sensitivity)
+  //
+  // The masked input is rendered with type="text" (so the date-picker
+  // affordance doesn't leak the underlying value) plus data-masked="true"
+  // and readonly. The global focusin handler in _installMaskedFieldHandler
+  // clears the value + swaps back to the original type on first focus.
+  // snapshotTraveler checks for the data-masked attribute and skips those
+  // fields so memory keeps its Saved-time value if the user reviews
+  // without editing.
+  function _maskDob(iso) {
+    if (!iso || typeof iso !== 'string' || iso.length < 4) return '';
+    return `**/**/${iso.slice(0, 4)}`;
+  }
+  function _maskPassportNumber(num) {
+    if (!num || typeof num !== 'string') return '';
+    return num[0] + '*'.repeat(Math.max(1, num.length - 1));
+  }
+
+  // Mechanism 2 focus handler — clears masked inputs on first focus so
+  // the user can type fresh. Installed once at module load via a
+  // document-level delegated listener (input elements are frequently
+  // rebuilt by renderPassengerForms; document-level lets us not care).
+  //
+  // On focus:
+  //   - clear the value (mask goes away, empty field ready for typing)
+  //   - swap type back to the stored original (date fields get their
+  //     native picker back)
+  //   - remove data-masked so snapshotTraveler starts reading normally
+  //   - remove readonly
+  (function _installMaskedFieldHandler() {
+    if (window.__tfMaskedFocusInstalled) return;
+    window.__tfMaskedFocusInstalled = true;
+    document.addEventListener('focusin', (e) => {
+      const el = e.target;
+      if (!el || !el.hasAttribute || !el.hasAttribute('data-masked')) return;
+      const originalType = el.getAttribute('data-original-type');
+      el.removeAttribute('data-masked');
+      el.removeAttribute('readonly');
+      el.value = '';
+      if (originalType) {
+        try { el.type = originalType; } catch (_) { /* some browsers block */ }
+        el.removeAttribute('data-original-type');
+      }
+    });
+  })();
+
   function editTraveler(i) {
     if (!travelerStates[i]) return;
     travelerStates[i].saved = false;
+    // Mechanism 2: this card was Saved before the pencil was clicked.
+    // Flag it so renderPassengerForms renders DOB + passport as masks
+    // instead of leaking the actual values. Cleared per-field on first
+    // user focus (see _installMaskedFieldHandler) or globally on
+    // saveTraveler success.
+    travelerStates[i]._openedFromSaved = true;
     renderPassengerForms();
   }
 
@@ -14675,12 +14885,18 @@
         </div>
         <div>
           <label class="pax-label ${ppNumberErr ? 'pax-label-err' : ''}">Passport number${passportRequired ? REQ : ''}</label>
-          <input id="p${i}-pp-number" type="text" class="pax-input ${ppNumberErr ? 'pax-input-err' : ''}" value="${escapeHtml(d.passport.number)}">
+          ${s._openedFromSaved && d.passport.number
+            ? `<input id="p${i}-pp-number" type="text" readonly class="pax-input" value="${escapeHtml(_maskPassportNumber(d.passport.number))}" data-masked="true" data-original-type="text">`
+            : `<input id="p${i}-pp-number" type="text" class="pax-input ${ppNumberErr ? 'pax-input-err' : ''}" value="${escapeHtml(d.passport.number)}">`
+          }
           ${ppNumberErr ? '<div class="pax-error">Please enter the passport number</div>' : ''}
         </div>
         <div>
           <label class="pax-label ${ppExpiresErr ? 'pax-label-err' : ''}">Passport expiration${passportRequired ? REQ : ''}</label>
-          <input id="p${i}-pp-expires" type="date" class="pax-input ${ppExpiresErr ? 'pax-input-err' : ''}" value="${escapeHtml(d.passport.expires)}" min="${todayIso()}">
+          ${s._openedFromSaved && d.passport.expires
+            ? `<input id="p${i}-pp-expires" type="text" readonly class="pax-input" value="${escapeHtml(_maskDob(d.passport.expires))}" data-masked="true" data-original-type="date">`
+            : `<input id="p${i}-pp-expires" type="date" class="pax-input ${ppExpiresErr ? 'pax-input-err' : ''}" value="${escapeHtml(d.passport.expires)}" min="${todayIso()}">`
+          }
           ${ppExpiresErr ? '<div class="pax-error">Please enter the passport expiration date</div>' : ''}
         </div>
       </div>
@@ -14753,7 +14969,10 @@
           </div>
           <div>
             <label class="pax-label ${dobErr ? 'pax-label-err' : ''}">Date of birth${REQ}</label>
-            <input id="p${i}-dob" type="date" class="pax-input ${dobErr ? 'pax-input-err' : ''}" value="${escapeHtml(d.born_on)}" max="${todayIso()}">
+            ${s._openedFromSaved && d.born_on
+              ? `<input id="p${i}-dob" type="text" readonly class="pax-input" value="${escapeHtml(_maskDob(d.born_on))}" data-masked="true" data-original-type="date">`
+              : `<input id="p${i}-dob" type="date" class="pax-input ${dobErr ? 'pax-input-err' : ''}" value="${escapeHtml(d.born_on)}" max="${todayIso()}">`
+            }
             ${dobErr ? '<div class="pax-error">Please enter the date of birth</div>' : ''}
           </div>
           <div>
@@ -16042,6 +16261,8 @@
         // Step 3: booking complete → wipe the passenger shadow. Refreshing
         // on success shouldn't re-populate a stale booking form later.
         try { sessionStorage.removeItem(BOOKING_PASSENGER_SHADOW_KEY); } catch (_) {}
+        // Also wipe the secure shadow (DOB, passport) — same lifecycle.
+        try { sessionStorage.removeItem(BOOKING_SECURE_SHADOW_KEY); } catch (_) {}
         showView('success');
         return;
       }
@@ -17122,6 +17343,8 @@
         location.hash = 'success';
         // Step 3: booking complete → wipe the passenger shadow.
         try { sessionStorage.removeItem(BOOKING_PASSENGER_SHADOW_KEY); } catch (_) {}
+        // Also wipe the secure shadow (DOB, passport) — same lifecycle.
+        try { sessionStorage.removeItem(BOOKING_SECURE_SHADOW_KEY); } catch (_) {}
         // Step 4 (Path A1): also wipe the payment-return shadow. Booking
         // succeeded, so a stray #payment URL (bookmark, back button)
         // should NOT recover into this now-dead offer.
