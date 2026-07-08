@@ -474,3 +474,12 @@ verify_jwt = false
 
 [functions.get-user-trips]
 verify_jwt = false
+
+[functions.initialize-payment]
+verify_jwt = false
+
+[functions.paystack-webhook]
+verify_jwt = false
+
+[functions.verify-payment]
+verify_jwt = false
