@@ -8946,6 +8946,28 @@
   let _paymentViewIsRestored = false;
   let _paymentRestoreLaunched = false;
 
+  // ─── Path 1 + Option B — auto-fire create-payment on #payment F5 ─────
+  //
+  // On refresh, restorePaymentView paints shimmer on the trip + price
+  // panels. Without auto-fire, the user waits until they tap Card before
+  // create-payment runs, meaning the price panel would flash from client
+  // estimate → server breakdown as create-payment resolves.
+  //
+  // With auto-fire, we silently run _payFromRestore in the background right
+  // after restore hydration completes. The iframe loads invisibly (accordion
+  // stays collapsed), and the price shimmer is HELD until the server
+  // breakdown arrives — no client-estimate flash ever visible.
+  //
+  //   _paymentPriceShimmerLocked: renderPaymentSummary treats client-estimate
+  //     calls (no breakdown arg) as a no-op while true. Set at restore start,
+  //     cleared when renderPaymentSummary(breakdown) fires from the
+  //     create-payment success path, OR when the safety timeout expires.
+  //   _restoreCreatePaymentInFlight: prevents rapid F5s from stacking
+  //     multiple concurrent auto-fires (each mints its own Pesapal session
+  //     + pending_bookings row).
+  let _paymentPriceShimmerLocked = false;
+  let _restoreCreatePaymentInFlight = false;
+
   async function restoreBooking(params) {
     const offer = (params.offer || '').trim();
     if (!/^off_[A-Za-z0-9]+$/.test(offer)) {
@@ -9471,15 +9493,60 @@
         if (restoredOfferId) restoreBookingExtras(restoredOfferId);
       } catch (e) { console.warn('[restorePaymentView] restoreBookingExtras failed:', e); }
 
+      // Path 1 + Option B: hold the price shimmer until the server
+      // breakdown arrives. Set BEFORE renderPaymentSummary is called so
+      // its client-estimate paint becomes a no-op. Cleared inside
+      // renderPaymentSummary when a breakdown is passed (create-payment
+      // success), or by the safety timeout below if something goes wrong.
+      _paymentPriceShimmerLocked = true;
+
       // Payment view has its OWN slots for trip + price (#payment-trip-slot,
       // #payment-price-slot, #payment-price-inline). restoreBooking populated
       // the BOOKING view's slots. Populate ours now — selectedOutbound is
       // hydrated so this reads correctly. lastPaymentBreakdown is null (we
-      // don't have a create-payment response) so the price panel shows the
-      // pre-payment estimate. That's the same state a user would see on
-      // arrival via Continue → payment before the create-payment round-trip
-      // updates the breakdown.
+      // don't have a create-payment response) so the price panel WOULD show
+      // the pre-payment estimate, except the shimmer lock above holds the
+      // shimmer in place. The trip panel still renders normally.
       try { renderPaymentSummary(); } catch (e) { console.warn('[restorePaymentView] renderPaymentSummary failed:', e); }
+
+      // Auto-fire _payFromRestore in the background so the iframe loads
+      // silently and the price shimmer resolves to the real server
+      // breakdown without any client-estimate flash. Accordion stays
+      // collapsed — user reveals iframe by tapping Card (selectPayTab's
+      // _paymentRestoreLaunched guard prevents re-firing).
+      //
+      // In-flight guard: rapid F5 (< 30s apart) would otherwise stack
+      // concurrent create-payment calls, each generating orphan Pesapal
+      // sessions + pending_bookings rows.
+      if (!_restoreCreatePaymentInFlight) {
+        _restoreCreatePaymentInFlight = true;
+        // Mark launched so selectPayTab's tap-Card handler doesn't re-fire
+        // _payFromRestore when the user opens the accordion later. Iframe
+        // is loading via this auto-fire path already.
+        _paymentRestoreLaunched = true;
+        (async () => {
+          try {
+            await _payFromRestore();
+          } catch (e) {
+            console.warn('[restorePaymentView] auto-fire _payFromRestore failed:', e);
+          } finally {
+            _restoreCreatePaymentInFlight = false;
+          }
+        })();
+
+        // Safety timeout — if breakdown never arrives (network wedge,
+        // create-payment error we didn't hook, user navigates away and
+        // back), release the lock after 30s and reveal the client
+        // estimate so the user isn't stuck on infinite shimmer. On the
+        // happy path breakdown arrives in 8-16s and this is a no-op.
+        setTimeout(() => {
+          if (_paymentPriceShimmerLocked) {
+            console.warn('[restorePaymentView] shimmer safety timeout — revealing client estimate');
+            _paymentPriceShimmerLocked = false;
+            try { renderPaymentSummary(); } catch (_) {}
+          }
+        }, 30000);
+      }
 
       // Fare timer note: we do NOT call startFareTimer('payment') here.
       // Phase 3 of restoreBooking already called startFareTimer('booking'),
@@ -15504,8 +15571,22 @@
   let lastPaymentBreakdown = null;
 
   function renderPaymentSummary(breakdown) {
-    if (breakdown) lastPaymentBreakdown = breakdown;
+    if (breakdown) {
+      lastPaymentBreakdown = breakdown;
+      // Server breakdown arrived — release the shimmer lock so any
+      // subsequent estimate call (there shouldn't be one, but defensive)
+      // renders normally.
+      _paymentPriceShimmerLocked = false;
+    }
+    // Trip panel is always safe to render — it reads from selectedOutbound
+    // which is fully hydrated post-restoreBooking. Only the price panel
+    // needs the shimmer hold.
     renderTripPanel('payment-trip-slot');
+    // If the shimmer is locked (a #payment F5 auto-fire is in flight),
+    // skip painting the client estimate. Shimmer stays visible until the
+    // server breakdown arrives via startCardPayment's L16294 call. Any
+    // breakdown call ignores the lock (unlocked above).
+    if (!breakdown && _paymentPriceShimmerLocked) return;
     renderPricePanel('payment-price-slot', breakdown, { isPayment: true });
     // Phase F: also populate the mobile-only inline price slot
     renderPricePanel('payment-price-inline', breakdown, { isPayment: true });
