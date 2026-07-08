@@ -7414,6 +7414,15 @@
   let _paystackHandle = null;
   // Cached access_code from initialize-payment, consumed by _openPaystackModal.
   let _paystackAccessCode = null;
+  // One-tap flow (Session 19): if true, startCardPayment auto-opens the
+  // Paystack modal on success. Set by selectPayTab when the user tapped
+  // Card row BEFORE initialize-payment resolved (restore path); reset on
+  // fresh Continue so the modal doesn't auto-launch on view arrival.
+  let _paystackOpenOnReady = false;
+  // Guard against concurrent initialize-payment fetches (restore auto-fire
+  // racing with a Card-row tap). selectPayTab reads this to avoid stacking
+  // second calls; startCardPayment owns set/clear.
+  let _paystackInitInFlight = false;
 
   const AFRICAN_CARRIERS = [
     'Kenya Airways', 'Air Tanzania', 'Precision Air', 'RwandAir',
@@ -9774,10 +9783,18 @@
 
       // 6. All saved + reconciled — fire goToPayment. It handles
       //    collectPassengers, email/phone validation, module-var setup,
-      //    then startCardPayment. On success the user lands on the
-      //    Pesapal iframe. On failure (e.g. an edge-case validation miss)
-      //    goToPayment surfaces an alert via booking-alert; view is
+      //    then startCardPayment. On failure (e.g. an edge-case validation
+      //    miss) goToPayment surfaces an alert via booking-alert; view is
       //    still payment, so we swap to booking to make it visible.
+      //
+      // Session 19 race guard: if the user tapped Card row during our
+      // reconcile and selectPayTab's own startCardPayment already ran to
+      // completion (access_code cached), skip goToPayment — otherwise
+      // we'd fire a SECOND initialize-payment, generate an orphan
+      // merchant_ref, and the modal is already reachable / open.
+      if (_paystackAccessCode || _paystackInitInFlight) {
+        return;
+      }
       const _wasPayment = !document.getElementById('view-payment')?.classList.contains('hidden');
       goToPayment();
       // Note: goToPayment is not async, but startCardPayment (which it
@@ -16211,26 +16228,19 @@
     stashGuestPrefill();
 
     renderPaymentSummary();
-    // Show a loading state immediately — the iframe loads itself, no gate.
-    // If startCardPayment fails (Turnstile, mode/key, etc.) the user gets a
-    // retry button via the error path inside startCardPayment.
-    document.getElementById('card-iframe-wrap').innerHTML = `
-      <div style="display:flex;align-items:center;justify-content:center;padding:24px;color:var(--text-2);">
-        <div class="spinner" style="margin-right:10px;"></div>
-        Loading secure payment…
-      </div>
-    `;
+    // Session 19: no spinner render into card-iframe-wrap — the pane no
+    // longer opens (one-tap flow), so it's invisible. Feedback during
+    // the ~6-8s Turnstile + initialize-payment round-trip is the spinner
+    // on the Continue button below.
     document.getElementById('poll-area').classList.add('hidden');
     clearAlert('payment-alert');
-    // Step 4 REDESIGN — Bev's spec: land collapsed on BOTH fresh and refresh
-    // entry. Continue click no longer auto-opens the Card accordion; the
-    // user reveals the payment form by tapping the Card row. startCardPayment
-    // fires in the BACKGROUND so the iframe is loaded (invisible in the
-    // collapsed pane) by the time the user taps the row. Zero-delay reveal
-    // for the fresh path; the refresh path uses selectPayTab-triggered load
-    // (see _payFromRestore).
-    //
-    // Reset restore-mode flags — this is a fresh Continue, not a restore.
+    // Session 19 ONE-TAP: clear any stale access_code and open-on-ready
+    // flag so the modal doesn't auto-launch the moment the background
+    // fetch resolves. The user must reach #payment and tap Card row.
+    _paystackAccessCode = null;
+    _paystackOpenOnReady = false;
+    // Legacy restore-mode flags — no longer read by selectPayTab, but
+    // kept reset here for any downstream code that may still consult them.
     _paymentViewIsRestored = false;
     _paymentRestoreLaunched = false;
     // switches views itself, but ONLY after clearing drift-check (409) and
@@ -16260,42 +16270,43 @@
   }
 
   function selectPayTab(tab) {
-    // M-Pesa branch never runs — that button is disabled at launch.
+    // M-Pesa disabled at launch — Card is the only interactive row.
     if (tab !== 'card') return;
-    const cardItem = document.getElementById('pay-card-item');
-    if (!cardItem) return;
-    const wasOpen = cardItem.classList.contains('open');
-    cardItem.classList.toggle('open');
-    const nowOpen = cardItem.classList.contains('open');
 
-    // Step 4 REDESIGN: on the FIRST open in restore mode, trigger the
-    // reconcile+pay chain. Guarded by _paymentRestoreLaunched so a
-    // close+reopen doesn't re-fire (which would generate a second
-    // merchant_ref). Fresh entry doesn't need this — goToPayment already
-    // fired startCardPayment when the user clicked Continue and the
-    // iframe is loading in the background.
-    if (!wasOpen && nowOpen && _paymentViewIsRestored && !_paymentRestoreLaunched) {
-      _paymentRestoreLaunched = true;
-      // Immediate loading state so the accordion reveal isn't a jarring
-      // empty box while _payFromRestore does its work (fetch saved
-      // travelers, reconcile DB data, Turnstile, create-payment).
-      const wrap = document.getElementById('card-iframe-wrap');
-      if (wrap) {
-        wrap.innerHTML = `
-          <div style="display:flex;align-items:center;justify-content:center;padding:24px;color:var(--text-2);">
-            <div class="spinner" style="margin-right:10px;"></div>
-            Loading secure payment…
-          </div>
-        `;
-      }
-      try { _payFromRestore(); } catch (e) {
-        console.warn('[selectPayTab] _payFromRestore failed:', e);
-        _paymentRestoreLaunched = false;  // allow retry
-      }
+    // Session 19: ONE-TAP flow. Card row now opens the Paystack modal
+    // directly — no accordion pane slide-out. If the access_code is
+    // cached from a completed initialize-payment (fresh Continue path
+    // always completes before the view switches; restore path may still
+    // be in flight when the user taps), open the modal now.
+    if (_paystackAccessCode) {
+      _openPaystackModal();
+      return;
+    }
+
+    // Access code not ready. Two cases:
+    //   1. Restore path in flight (_payFromRestore auto-fired at
+    //      restorePaymentView end; user tapped Card before it resolved).
+    //   2. Prior error cleared _paystackAccessCode; user is retrying.
+    // Queue the open so startCardPayment's success path fires the modal
+    // automatically once the access_code arrives. Kick a fresh
+    // initialize-payment if one isn't already in flight.
+    _paystackOpenOnReady = true;
+    if (_paystackInitInFlight) {
+      // Restore auto-fire already running — give a quick note so the
+      // tap doesn't feel dead.
+      showAlert('payment-alert', 'Just a moment — preparing your payment…', 'info');
+    } else {
+      startCardPayment();
     }
   }
 
   async function startCardPayment({ _skipDriftCheck = false, _turnstileAutoRetry = false } = {}) {
+    // Session 19: concurrent-fetch guard. selectPayTab checks the flag
+    // before firing a second call; this belt-and-braces prevents any
+    // other entrypoint (goToPayment, restore auto-fire, resetPaymentPane)
+    // from stacking a duplicate initialize-payment mid-flight.
+    if (_paystackInitInFlight) return;
+    _paystackInitInFlight = true;
     clearAlert('payment-alert');
     const btn = document.getElementById('card-start-btn');
     if (btn) { btn.classList.add('btn-loading'); btn.disabled = true; }
@@ -16460,19 +16471,15 @@
       if (!res.ok || data.error || !data.access_code) {
         // Reset so the next attempt gets a fresh token
         resetTurnstile('payment');
-        // Step 2b: switch to payment view so the "Try again" button appears
-        // in context. Otherwise the user is stuck on booking with a hidden
-        // error and no visible retry.
+        // Switch to payment view so the alert appears in context. The
+        // pane no longer opens (one-tap flow), so we surface retry via
+        // the visible #payment-alert rather than an in-pane button.
         showView('payment');
-        showAlert('payment-alert', data.error || 'Could not start payment. Please try again.');
-        // Surface a retry button inline since the initial CTA render below
-        // won't fire (we returned above), and the loading spinner would
-        // otherwise hang.
-        document.getElementById('card-iframe-wrap').innerHTML = `
-          <div style="text-align:center;padding:18px;">
-            <button class="btn btn-primary btn-lg" onclick="resetPaymentPane()">Try again</button>
-          </div>
-        `;
+        _paystackAccessCode = null;
+        _paystackOpenOnReady = false;
+        showAlert('payment-alert',
+          (data.error || 'Could not start payment.') +
+          ' Tap Credit or debit card to try again.');
         return;
       }
       activeMerchantRef = data.merchant_ref;
@@ -16486,21 +16493,19 @@
       showView('payment');
 
       // Cache the Paystack access_code so _openPaystackModal can resume
-      // the transaction. The button below is what actually opens the modal.
+      // the transaction. The Card row tap is what actually opens the modal
+      // (see selectPayTab); no in-pane button anymore.
       _paystackAccessCode = data.access_code || null;
 
-      // Render a "Pay with card" CTA in place of the iframe. Tapping it
-      // opens the Paystack modal via resumeTransaction(access_code, ...).
-      // The card-iframe-wrap container is reused as the CTA slot — its
-      // padded card styling still works for the button. If _openPaystackModal
-      // is called before the Paystack SDK finishes loading, it shows an
-      // inline alert and no-ops.
-      document.getElementById('card-iframe-wrap').innerHTML = `
-        <div style="text-align:center;padding:24px;">
-          <button class="btn btn-primary btn-lg" onclick="_openPaystackModal()">Pay with card</button>
-          <p style="margin-top:12px;color:var(--text-3);font-size:13px;">You'll be shown a secure card entry form.</p>
-        </div>
-      `;
+      // Session 19 ONE-TAP: if the user already tapped Card row before
+      // this fetch resolved (restore path), or resetPaymentPane fired
+      // from a poll-area retry, open the modal automatically now.
+      // Otherwise (fresh Continue path — user hasn't reached #payment
+      // yet), wait for the tap.
+      if (_paystackOpenOnReady) {
+        _paystackOpenOnReady = false;
+        _openPaystackModal();
+      }
 
       // Keep the fare timer ticking through this step. If it expires while
       // the Paystack modal is open, _cancelPaystackModalOnFareExpiry closes
@@ -16509,16 +16514,16 @@
       // No startPolling() here — polling only starts on the #success view
       // after Paystack's onSuccess callback fires (see _handlePaystackSuccess).
     } catch (e) {
-      // Step 2b: switch to payment view so the Try again button appears in
-      // context (booking view would leave the user with no visible retry).
+      // Switch to payment view so the alert appears in context. The pane
+      // no longer opens (one-tap flow), so retry goes through the visible
+      // #payment-alert rather than an in-pane button.
       showView('payment');
-      showAlert('payment-alert', 'Could not connect. Please check your network and try again.');
-      document.getElementById('card-iframe-wrap').innerHTML = `
-        <div style="text-align:center;padding:18px;">
-          <button class="btn btn-primary btn-lg" onclick="resetPaymentPane()">Try again</button>
-        </div>
-      `;
+      _paystackAccessCode = null;
+      _paystackOpenOnReady = false;
+      showAlert('payment-alert',
+        'Could not connect. Please check your network and tap Credit or debit card to try again.');
     } finally {
+      _paystackInitInFlight = false;
       if (btn) { btn.classList.remove('btn-loading'); btn.disabled = false; }
     }
   }
@@ -16556,13 +16561,19 @@
         onError: (err) => {
           console.error('[Paystack] SDK error:', err);
           _paystackHandle = null;
-          showAlert('payment-alert', 'Something went wrong. Please try again.');
+          // Clear access_code so the next Card row tap fires a fresh
+          // initialize-payment rather than reusing a possibly-bad code.
+          _paystackAccessCode = null;
+          showAlert('payment-alert',
+            'Something went wrong. Tap Credit or debit card to try again.');
         },
       });
     } catch (e) {
       console.error('[Paystack] popup threw:', e);
       _paystackHandle = null;
-      showAlert('payment-alert', 'We couldn\'t open the payment window. Please try again.');
+      _paystackAccessCode = null;
+      showAlert('payment-alert',
+        'We couldn\'t open the payment window. Tap Credit or debit card to try again.');
     }
   }
 
@@ -16702,21 +16713,15 @@
   }
 
   function resetPaymentPane() {
+    // Called only from the #poll-area failed-state Try-again button
+    // (poll-area is outside the pane, so it's visible). Session 19:
+    // clear state, queue modal auto-open on the fresh initialize-payment
+    // success, and fire. No accordion .open toggle — pane is dead code.
     activeMerchantRef = null;
-    // Show loading state and retry the iframe load — same as fresh entry
-    document.getElementById('card-iframe-wrap').innerHTML = `
-      <div style="display:flex;align-items:center;justify-content:center;padding:24px;color:var(--text-2);">
-        <div class="spinner" style="margin-right:10px;"></div>
-        Reloading secure payment…
-      </div>
-    `;
+    _paystackAccessCode = null;
     document.getElementById('poll-area').classList.add('hidden');
     clearAlert('payment-alert');
-    // Step 4 — Defensive re-open in case the accordion collapsed at some
-    // point (unlikely on retry — user was interacting with the pane —
-    // but idempotent add costs nothing).
-    document.getElementById('pay-card-item')?.classList.add('open');
-    document.getElementById('paytab-card')?.classList.add('active');
+    _paystackOpenOnReady = true;
     startCardPayment();
   }
 
