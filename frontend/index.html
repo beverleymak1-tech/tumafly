@@ -15706,13 +15706,20 @@
   }
 
   // Renders the price panel. `breakdown` (optional) is the server-computed
-  // fee breakdown returned by create-payment; otherwise we show an estimate.
-  // Fee constants — kept in sync with create-payment.ts so the booking-page
+  // fee breakdown returned by initialize-payment; otherwise we show an estimate.
+  // Fee constants — kept in sync with initialize-payment.ts so the booking-page
   // estimate matches the amount the customer is charged on the payment page.
-  // Pesapal's 3.5% applies to the GROSS amount they receive, so we gross-up
-  // with rate / (1 - rate) to make sure we net the full subtotal.
+  // Paystack takes 1.95% of the gross charge + 30 KES flat, so we gross up
+  // `(subtotal + flat) / (1 - rate)` and net out the subtotal to get the fee we
+  // must add so Paystack's take still leaves us with the full subtotal.
+  //
+  // These constants MUST match `PAYSTACK_FEE_RATE` and `PAYSTACK_FEE_FLAT_KES`
+  // in supabase/functions/initialize-payment/index.ts. If they drift, customers
+  // see one number on #booking and a different total in the Paystack modal on
+  // #payment. Change here → change the EF too, same commit.
   const TUMAFLY_SERVICE_FEE_KES = 1500;
-  const PESAPAL_FEE_RATE = 0.035;
+  const PAYSTACK_FEE_RATE = 0.0195;
+  const PAYSTACK_FEE_FLAT_KES = 30;
 
   function estimateBreakdown() {
     // ROUND-TRIP PRICING MODEL — IMPORTANT
@@ -15737,7 +15744,10 @@
     const seatsKes = seatTotalCostKes();
     const baggageKes = baggageTotalCostKes();
     const subtotal = baseKes + seatsKes + baggageKes + TUMAFLY_SERVICE_FEE_KES;
-    const processingFeeKes = Math.ceil(subtotal * PESAPAL_FEE_RATE / (1 - PESAPAL_FEE_RATE));
+    // Paystack gross-up: charge grossCharge so grossCharge * (1 - rate) - flat = subtotal.
+    // fee = ceil((subtotal + flat) / (1 - rate)) - subtotal
+    const grossCharge = Math.ceil((subtotal + PAYSTACK_FEE_FLAT_KES) / (1 - PAYSTACK_FEE_RATE));
+    const processingFeeKes = grossCharge - subtotal;
     const totalKes = subtotal + processingFeeKes;
     return {
       base_kes: baseKes,
