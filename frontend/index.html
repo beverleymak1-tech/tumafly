@@ -25,6 +25,7 @@
     window.__turnstileFiredEarly = false;
     window.onTurnstileLoad = function () { window.__turnstileFiredEarly = true; };
   </script>
+  <script src="https://js.paystack.co/v2/inline.js" async defer></script>
   <script src="https://challenges.cloudflare.com/turnstile/v0/api.js?onload=onTurnstileLoad" defer></script>
   <!-- Google Identity Services — popup sign-in, no page redirect -->
   <script src="https://accounts.google.com/gsi/client" async></script>
@@ -66,13 +67,11 @@
       try {
         var search = new URLSearchParams(window.location.search);
         var hash   = (window.location.hash || '').replace(/^#/, '');
-        var isPesapal = search.has('OrderMerchantReference')
-                     || search.has('OrderTrackingId')
-                     || search.has('ref');
+        var isPesapal = false; // Removed: Paystack uses inline callbacks, not URL params
         var isOAuth   = hash.indexOf('access_token=') > -1
                      || hash.indexOf('error=') > -1;
 
-        var allViews = ['home','results','booking','payment','success','profile','my-trips','find-booking','itinerary'];
+        var allViews = ['home','results','booking','success','profile','my-trips','find-booking','itinerary'];
         var target = null;
 
         if (isPesapal) {
@@ -1801,7 +1800,7 @@
     }
 
     /* The "sand" results page background */
-    #view-results, #view-booking, #view-payment, #view-success {
+    #view-results, #view-booking, #view-success {
       background: var(--sand);
       min-height: calc(100vh - 64px);
       /* Prevent any descendant element from extending past the viewport edge.
@@ -6907,111 +6906,7 @@
 <!-- ============================================================
      PAYMENT VIEW (Mookh-style)
      ============================================================ -->
-<div id="view-payment" class="hidden">
-  <div class="page">
-    <!-- Phase F: mobile-only back link -->
-    <div class="payment-mobile-header">
-      <button class="booking-back-link" onclick="showView('booking')" type="button">
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-          <path d="M15 18l-6-6 6-6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-        </svg>
-        Back to details
-      </button>
-    </div>
-    <div id="payment-fare-timer" class="fare-timer-bar hidden"></div>
-    <div class="booking-layout">
-      <div class="payment-main-col">
-        <!-- Phase F: mobile-only inline price slot — above the payment card on mobile -->
-        <div class="payment-price-inline" id="payment-price-inline"></div>
 
-        <div class="card pay-card">
-          <h3>Pay for your booking</h3>
-          <p class="pay-helper-text">Select your method of payment</p>
-          <div class="pay-tabs">
-            <!-- Batch 3 · #10 — M-Pesa stays disabled at launch. New hint
-                 line under the meta gives users a persistent reason for
-                 the "Coming soon" badge without needing a tap-response
-                 toast. Wired to Daraja directly post-launch (Pesapal's
-                 built-in M-Pesa will be disabled on our merchant account
-                 once we go live).
-                 Step 4 redesign: wrapped in .pay-tab-item so both cards
-                 share the same structural template inside the unified
-                 accordion container. Pane is unused (M-Pesa disabled)
-                 but the wrapper matches the Card's for consistent
-                 borders/hover/shadow rendering. -->
-            <div class="pay-tab-item pay-tab-item-mpesa" id="pay-mpesa-item">
-              <button class="pay-tab" disabled id="paytab-mpesa">
-                <div class="pay-tab-icon" style="background:#1a9e4a;color:white;font-weight:600;font-size:11px;">M</div>
-                <div class="pay-tab-body">
-                  <span class="tab-name">M-Pesa</span>
-                  <span class="tab-meta">Pay from your phone</span>
-                  <span class="tab-hint">Direct M-Pesa launching soon</span>
-                </div>
-                <span class="coming-soon">Coming soon</span>
-              </button>
-            </div>
-            <!-- Step 4 redesign — Card + pane. Both viewports now use the
-                 same accordion pattern (per Bev's spec). Land collapsed;
-                 first click on the card row opens the accordion AND
-                 triggers the payment iframe load via the click handler.
-                 Chevron is universal (was mobile-only). -->
-            <div class="pay-tab-item" id="pay-card-item">
-              <button class="pay-tab" id="paytab-card" onclick="selectPayTab('card')">
-                <div class="pay-tab-icon">💳</div>
-                <div class="pay-tab-body">
-                  <span class="tab-name">Credit or Debit (Pesapal)</span>
-                  <span class="tab-meta">Visa, Mastercard, Amex</span>
-                </div>
-                <span class="pay-tab-chev" aria-hidden="true">▾</span>
-              </button>
-
-              <div class="pay-tab-pane" id="pay-card-pane">
-                <div class="pay-iframe-wrap" id="card-iframe-wrap">
-                  <div>
-                    <button class="btn btn-primary btn-lg" id="card-start-btn" onclick="startCardPayment()">Pay with card</button>
-                    <div style="font-size:12px;color:var(--text-3);margin-top:14px;">Card details are handled by Pesapal. TumaFly never sees your card.</div>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
-
-          <div id="payment-alert"></div>
-
-          <div id="poll-area" class="hidden"></div>
-        </div>
-
-        <!-- Step 4 redesign: brand-soft alpha with lock + security messaging.
-             flex: 1 (desktop only) so its bottom aligns with the sidebar's
-             bottom. On mobile it sits at natural height below the card. -->
-        <div class="pay-stack-alpha">
-          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-            <rect x="4" y="10" width="16" height="10" rx="2" stroke="currentColor" stroke-width="1.8"/>
-            <path d="M8 10V7a4 4 0 018 0v3" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
-          </svg>
-          <span>Your payment is 100% safe and secure. We use encryption to protect your data and only work with verified payment gateways. Your trust is a priority for us.</span>
-        </div>
-
-        <p class="compliance">
-          By confirming this booking, you confirm that you agree to the
-          <a href="/legal/privacy" target="_blank" rel="noopener">Privacy Notice</a> and
-          <a href="/legal/terms" target="_blank" rel="noopener">Terms of Service</a>,
-          and the policies of this booking.
-        </p>
-
-        <!-- Desktop back link (hidden on mobile — replaced by header above) -->
-        <div class="payment-back-desktop" style="display:flex;justify-content:flex-start;">
-          <button class="btn btn-ghost" onclick="showView('booking')">← Back to details</button>
-        </div>
-      </div>
-
-      <aside>
-        <div id="payment-trip-slot"></div>
-        <div id="payment-price-slot"></div>
-      </aside>
-    </div>
-  </div>
-</div>
 
 <!-- ============================================================
      SUCCESS VIEW
@@ -7379,6 +7274,16 @@
   // ============================================================
   const SUPABASE_URL = 'https://wmplcauhaqtyenwvkrkq.supabase.co';
   const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6IndtcGxjYXVoYXF0eWVud3ZrcmtxIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzgyNTAyNzcsImV4cCI6MjA5MzgyNjI3N30.YufDmoUBKnl9NLrm5o1Bh1QNrmxRLD77m-WLckH53qs';
+  // Paystack InlineJS public key. Safe to be visible in browser HTML —
+  // the corresponding secret key lives in Supabase secrets and never
+  // leaves the server. Swap to pk_live_... at production cutover.
+  const PAYSTACK_PUBLIC_KEY = 'pk_test_6051a76690afeb2bffad5b3e7c033ff305bbd267';
+  // Handle for the currently-open Paystack transaction, so the fare
+  // timer can close it via cancelTransaction() if the offer expires.
+  let _paystackHandle = null;
+  // Merchant ref of the transaction currently being verified via polling.
+  let _paystackVerifyRef = null;
+  let _paystackVerifyHandle = null;
 
   const AFRICAN_CARRIERS = [
     'Kenya Airways', 'Air Tanzania', 'Precision Air', 'RwandAir',
@@ -7992,7 +7897,6 @@
   //
   // Reset on: fresh booking-view entry via proceedToBooking, refresh-restore,
   // and successful payment (redirect away from booking).
-  let _bookingServiceIdRetryCount = 0;
   // "Add later" collapse state — when the user dismisses an upsell CTA group
   // we hide the buttons and show a subtle re-expand link in their place.
   // Reset on each entry into the booking view (in proceedToBooking).
@@ -8295,7 +8199,7 @@
     // Only render to whichever bar is in the active view — hide the other
     const activeId = !document.getElementById('view-booking').classList.contains('hidden')
       ? 'booking-fare-timer'
-      : !document.getElementById('view-payment').classList.contains('hidden')
+      : false /* view-payment deleted */
         ? 'payment-fare-timer'
         : null;
     if (!activeId) {
@@ -8470,7 +8374,7 @@
       }, 0);
       return true;
     }
-    if (view === 'payment') {
+    if (false /* payment view removed */) {
       // Step 4 — Path A3-safe: refresh on #payment stays on payment view.
       // Contact + traveler names rehydrated from the booking shadow, card
       // iframe wiped to a fresh "Pay with card" button, accordion
@@ -8493,7 +8397,7 @@
       //     mints a fresh token from a reset widget.
       let shadow = null;
       try {
-        const raw = sessionStorage.getItem(PAYMENT_RETURN_SHADOW_KEY);
+        const raw = null; // PAYMENT_RETURN_SHADOW_KEY removed with #payment view
         if (raw) shadow = JSON.parse(raw);
       } catch (_) { /* corrupt JSON → fall through to bounce */ }
 
@@ -8534,8 +8438,9 @@
       // Live offer + fresh fare — rehydrate payment view in-place.
       const offer = shadow.offer_id;
       setTimeout(() => {
-        try { restorePaymentView(offer); }
-        catch (e) { console.warn('[restorePaymentView] deferred failed:', e); }
+        // #payment view removed — route users landing on /#payment to /#home
+        // (Paystack uses inline modal; no standalone payment URL exists).
+        try { showView('home'); } catch (_) {}
       }, 0);
       return true;
     }
@@ -8939,13 +8844,8 @@
   // background. On refresh entry via restorePaymentView, the user's first
   // tap on the Card row triggers _payFromRestore. These two flags let
   // selectPayTab distinguish the two paths.
-  //   _paymentViewIsRestored: true only after restorePaymentView, false
   //     after goToPayment. Signals to selectPayTab which loader to call.
-  //   _paymentRestoreLaunched: guards against re-firing on close+reopen.
   //     Reset on error so the user can retry.
-  let _paymentViewIsRestored = false;
-  let _paymentRestoreLaunched = false;
-
   // ─── Path 1 + Option B — auto-fire create-payment on #payment F5 ─────
   //
   // On refresh, restorePaymentView paints shimmer on the trip + price
@@ -8958,16 +8858,11 @@
   // stays collapsed), and the price shimmer is HELD until the server
   // breakdown arrives — no client-estimate flash ever visible.
   //
-  //   _paymentPriceShimmerLocked: renderPaymentSummary treats client-estimate
   //     calls (no breakdown arg) as a no-op while true. Set at restore start,
   //     cleared when renderPaymentSummary(breakdown) fires from the
   //     create-payment success path, OR when the safety timeout expires.
-  //   _restoreCreatePaymentInFlight: prevents rapid F5s from stacking
   //     multiple concurrent auto-fires (each mints its own Pesapal session
   //     + pending_bookings row).
-  let _paymentPriceShimmerLocked = false;
-  let _restoreCreatePaymentInFlight = false;
-
   async function restoreBooking(params) {
     const offer = (params.offer || '').trim();
     if (!/^off_[A-Za-z0-9]+$/.test(offer)) {
@@ -9098,14 +8993,11 @@
       data = await res.json().catch(() => ({}));
     } catch (e) {
       console.warn('[restoreBooking] fetch failed:', e);
-      resetTurnstile('payment');
       _restoreBookingBounceHome('Something went wrong loading your flight. Please search again.');
       return false;
     }
 
     // Reset the token unconditionally — single-use, backend rejects replays.
-    resetTurnstile('payment');
-
     // 403 auto-retry — mirrors startCardPayment's invisible retry pattern
     // (line ~15764). Cloudflare Turnstile tokens are one-shot and can go
     // stale between mint and use on slow networks (Kenya's Cloudflare
@@ -9134,11 +9026,9 @@
         data = await res.json().catch(() => ({}));
       } catch (e) {
         console.warn('[restoreBooking] retry fetch failed:', e);
-        resetTurnstile('payment');
         _restoreBookingBounceHome('Something went wrong loading your flight. Please search again.');
         return false;
       }
-      resetTurnstile('payment');
     }
 
     if (res.status === 410) {
@@ -9347,412 +9237,6 @@
     return true;
   }
 
-  // ─── restorePaymentView — Step 4, Path A3-safe ─────────────────────────
-  //
-  // Refresh on #payment lands here. Rehydrates:
-  //   - Contact + traveler names into the DOM (via BOOKING_PASSENGER_SHADOW_KEY,
-  //     the existing shadow — NOT extended, no seats/baggage carried)
-  //   - selectedOutbound / selectedInbound / tripRequiresPassport / passenger
-  //     count in memory (via a get-offer round-trip, same one restoreBooking
-  //     uses — we delegate to it under a flag)
-  //   - Payment view's trip panel + price panel + fare timer
-  //
-  // What we intentionally DO NOT do:
-  //   - Resume the pre-refresh Pesapal iframe. It's wiped and replaced with a
-  //     fresh "Pay with card" button. The abandoned merchant_ref/tracking_id
-  //     times out on Pesapal's side without ever firing an IPN (user never
-  //     completed card entry). A subsequent Pay-with-card tap fires a NEW
-  //     startCardPayment cycle that mints a new tracking pair.
-  //   - Add popstate hooks.
-  //   - Add URL params to #payment.
-  //   - Pre-consume Turnstile tokens the Pay-with-card tap will need. The
-  //     token used here (for get-offer) is fully consumed and reset before
-  //     this function returns; the user's later tap runs its own
-  //     ensureTurnstileToken from a fresh widget.
-  //   - Extend BOOKING_PASSENGER_SHADOW_KEY to include seats or baggage.
-  //     Session 16's regression hunt flagged this as risky — the booking
-  //     shadow is written on every mutation and would drift from the fresh
-  //     get-offer response. Instead, seats/baggage are persisted via the
-  //     separate BOOKING_EXTRAS_SHADOW_KEY, written ONCE per Continue-click
-  //     in goToPayment, and restored via restoreBookingExtras below.
-  async function restorePaymentView(offerId) {
-    // Guard against a stale flag from a prior aborted restore.
-    _restoreEndOnPayment = true;
-    try {
-      // ── STEP 1: enter payment view NOW, before any async work ─────────
-      //
-      // Two effects that are load-bearing for the fare timer:
-      //   1. Removes `.hidden` from #view-payment. tickFareTimer detects
-      //      the visible view by classList, so if we leave #view-payment
-      //      hidden here, Phase 1's fare-timer priming (which fires
-      //      synchronously inside restoreBooking) will see no visible
-      //      view and call stopFareTimer — the bar never paints.
-      //   2. Removes the head-guard <style> block. That block was hiding
-      //      other views via `!important` CSS; once JS is driving
-      //      visibility we don't need it.
-      //
-      // showView will also call startFareTimer('payment') internally.
-      // That reads getEffectiveExpiresAtMs from selectedOutbound — which
-      // is null right now — so it calls stopFareTimer and hides the bars
-      // via classList. That's fine — Phase 1 of restoreBooking re-primes
-      // fareTimerExpiresAtMs from the booking passenger shadow's
-      // fare_expires_at_ms (populated on every booking-view visit) and
-      // calls tickFareTimer, which now sees #view-payment visible and
-      // paints to #payment-fare-timer at t=0. Net: one wasted
-      // stop→re-prime cycle inside showView, no visible effect.
-      //
-      // fromPopState:true skips the URL param derivation + history push
-      // block inside showView — the URL is already #payment, no rewrite
-      // needed, and pushing again would create a duplicate history entry.
-      showView('payment', { fromPopState: true });
-
-      // Step 4 REDESIGN — paint the payment sidebar shimmers synchronously
-      // BEFORE awaiting restoreBooking's get-offer round-trip. Booking view
-      // has done this since Step 3; adding it to the payment restore closes
-      // the gap where the sidebar was blank for 6-8s while get-offer ran.
-      // The trip + price panels appear immediately with static shimmery
-      // content; renderPaymentSummary (below, after await) swaps in real
-      // data once the offer is hydrated.
-      try { _paintPaymentShellShimmers(); } catch (e) { console.warn('[restorePaymentView] shell shimmers failed:', e); }
-
-      // Delegate to restoreBooking for offer hydration. It does the get-offer
-      // round-trip, populates selectedOutbound/selectedInbound, reconciles
-      // passenger count, rebuilds travelerStates, fetches saved travelers,
-      // fetches baggage catalog, kicks off seat-map warm-up. All the same
-      // work that would run if the user had refreshed on #booking instead.
-      //
-      // The flag we just set makes restoreBooking Phase 1 SKIP its
-      // showView('booking') call, so the head-guard style hiding all views
-      // except #view-payment stays in force throughout. Booking DOM is
-      // painted into a hidden container, ready if the user hits
-      // Back-to-details later.
-      //
-      // Error branches inside restoreBooking (invalid offer, 410 from
-      // get-offer, non-2xx, no cabin pricing) all bounce the user to home
-      // via showView('home') + safeHistory, or to the fare-expired modal.
-      // Those are correct terminals for the payment-refresh flow too —
-      // the user's fare is dead and they need to search again.
-      let ok = false;
-      try {
-        ok = await restoreBooking({ offer: offerId });
-      } catch (e) {
-        console.warn('[restorePaymentView] restoreBooking threw:', e);
-        _restoreBookingBounceHome('Something went wrong loading your payment. Please search again.');
-        return;
-      }
-      if (!ok) {
-        // restoreBooking already handled its own terminal state (home
-        // bounce, fare-expired modal, etc.). Nothing more for us to do.
-        return;
-      }
-
-      // Success — offer is hydrated in memory. We're already on payment
-      // view from Step 1 above; do payment-specific DOM setup now.
-
-      // Step 4 REDESIGN — signal to selectPayTab that a first-open of the
-      // Card accordion should trigger _payFromRestore. Fresh flow via
-      // goToPayment sets this false so the same accordion open is a
-      // no-op (iframe already loading in the background).
-      _paymentViewIsRestored = true;
-      _paymentRestoreLaunched = false;
-
-      // Wipe the card iframe wrap to an empty state. In the redesign,
-      // the Card row click (selectPayTab) is what triggers the load —
-      // showing a "Pay with card" button here would be a redundant
-      // second click. The pane is collapsed anyway; user won't see it
-      // until they tap the row.
-      const wrap = document.getElementById('card-iframe-wrap');
-      if (wrap) wrap.innerHTML = '';
-
-      // Ensure the accordion is collapsed — universal now, no .active
-      // class either (accordion .open is the source of truth in the
-      // redesign). Redundant on fresh page load (default HTML has
-      // neither class) but idempotent + protective for popstate flows.
-      document.getElementById('pay-card-item')?.classList.remove('open');
-      document.getElementById('paytab-card')?.classList.remove('active');
-
-      // Hide any lingering poll/alert areas from the pre-refresh session.
-      // (Belt-and-braces — pollHandle is a module-level let, so page
-      // reload already reset it; this just makes the DOM state explicit.)
-      document.getElementById('poll-area')?.classList.add('hidden');
-      clearAlert('payment-alert');
-      // activeMerchantRef is a module-level let, so page reload already
-      // reset it to null — belt-and-braces to be explicit.
-      activeMerchantRef = null;
-
-      // Restore seats + baggage from the extras shadow. Guarded by offer_id
-      // match. Any stale service_ids will be pruned by indexBaggageOptionsByPax
-      // when the fire-and-forget baggage catalog fetch (started inside
-      // restoreBooking above) resolves. Existing STALE_SEAT/STALE_BAGGAGE
-      // 409 handler in startCardPayment covers any survivor via strike-1
-      // clear + tailored alert. Failure to restore is silent — the sidecard
-      // simply won't show seat/baggage line items and the user re-picks via
-      // Back-to-details.
-      try {
-        const restoredOfferId = (selectedInbound || selectedOutbound)?.cabinPricing?.offer_id || '';
-        if (restoredOfferId) restoreBookingExtras(restoredOfferId);
-      } catch (e) { console.warn('[restorePaymentView] restoreBookingExtras failed:', e); }
-
-      // Path 1 + Option B: hold the price shimmer until the server
-      // breakdown arrives. Set BEFORE renderPaymentSummary is called so
-      // its client-estimate paint becomes a no-op. Cleared inside
-      // renderPaymentSummary when a breakdown is passed (create-payment
-      // success), or by the safety timeout below if something goes wrong.
-      _paymentPriceShimmerLocked = true;
-
-      // Payment view has its OWN slots for trip + price (#payment-trip-slot,
-      // #payment-price-slot, #payment-price-inline). restoreBooking populated
-      // the BOOKING view's slots. Populate ours now — selectedOutbound is
-      // hydrated so this reads correctly. lastPaymentBreakdown is null (we
-      // don't have a create-payment response) so the price panel WOULD show
-      // the pre-payment estimate, except the shimmer lock above holds the
-      // shimmer in place. The trip panel still renders normally.
-      try { renderPaymentSummary(); } catch (e) { console.warn('[restorePaymentView] renderPaymentSummary failed:', e); }
-
-      // Auto-fire _payFromRestore in the background so the iframe loads
-      // silently and the price shimmer resolves to the real server
-      // breakdown without any client-estimate flash. Accordion stays
-      // collapsed — user reveals iframe by tapping Card (selectPayTab's
-      // _paymentRestoreLaunched guard prevents re-firing).
-      //
-      // In-flight guard: rapid F5 (< 30s apart) would otherwise stack
-      // concurrent create-payment calls, each generating orphan Pesapal
-      // sessions + pending_bookings rows.
-      if (!_restoreCreatePaymentInFlight) {
-        _restoreCreatePaymentInFlight = true;
-        // Mark launched so selectPayTab's tap-Card handler doesn't re-fire
-        // _payFromRestore when the user opens the accordion later. Iframe
-        // is loading via this auto-fire path already.
-        _paymentRestoreLaunched = true;
-        (async () => {
-          try {
-            await _payFromRestore();
-          } catch (e) {
-            console.warn('[restorePaymentView] auto-fire _payFromRestore failed:', e);
-          } finally {
-            _restoreCreatePaymentInFlight = false;
-          }
-        })();
-
-        // Safety timeout — if breakdown never arrives (network wedge,
-        // create-payment error we didn't hook, user navigates away and
-        // back), release the lock after 30s and reveal the client
-        // estimate so the user isn't stuck on infinite shimmer. On the
-        // happy path breakdown arrives in 8-16s and this is a no-op.
-        setTimeout(() => {
-          if (_paymentPriceShimmerLocked) {
-            console.warn('[restorePaymentView] shimmer safety timeout — revealing client estimate');
-            _paymentPriceShimmerLocked = false;
-            try { renderPaymentSummary(); } catch (_) {}
-          }
-        }, 30000);
-      }
-
-      // Fare timer note: we do NOT call startFareTimer('payment') here.
-      // Phase 3 of restoreBooking already called startFareTimer('booking'),
-      // which set fareTimerExpiresAtMs from the fresh get-offer response
-      // and started ticking. tickFareTimer auto-detects the visible view
-      // (payment, in our case) and paints to #payment-fare-timer regardless
-      // of the view name passed to startFareTimer. Bar is already ticking.
-    } finally {
-      _restoreEndOnPayment = false;
-    }
-  }
-
-  // ─── _payFromRestore — Pay-with-card button on restored payment view ───
-  //
-  // The button on the ORIGINAL payment view fires startCardPayment directly.
-  // We can't do that after refresh because:
-  //   - travelerStates[i].saved is false (not in shadow)
-  //   - born_on + passport are not in shadow (privacy)
-  //   - passengerData + contactData module vars are empty (page reload)
-  //
-  // Strategy: pull the missing data from the DB copy of any linked saved
-  // traveler, then delegate to goToPayment (which does collectPassengers
-  // + validation + module-var setup + startCardPayment). If no reconcile
-  // is possible (guest checkout, ad-hoc travelers), route back to booking
-  // view with a hint.
-  //
-  // Called only from the restored payment view's Pay-with-card button.
-  // The fresh-entry payment view uses the original static button that
-  // fires startCardPayment (page HTML at ~L6953).
-  async function _payFromRestore() {
-    // Debounce — disable the button while we're working.
-    const btn = document.getElementById('card-start-btn');
-    if (btn) { btn.classList.add('btn-loading'); btn.disabled = true; }
-
-    try {
-      // 1. Make sure saved travelers are loaded. restoreBooking's Phase 3
-      //    kicks this off asynchronously; by the time the user taps
-      //    Pay-with-card it USUALLY has finished, but await it to be sure.
-      //    fetchSavedTravelers is a no-op for guests (currentUser null) and
-      //    idempotent for signed-in users.
-      try {
-        if (typeof fetchSavedTravelers === 'function') await fetchSavedTravelers();
-      } catch (e) {
-        console.warn('[_payFromRestore] fetchSavedTravelers failed (continuing):', e);
-      }
-
-      // 1b. Just-in-time hydration from the SECURE shadow (born_on,
-      //     passport). This is the ONLY place we read
-      //     BOOKING_SECURE_SHADOW_KEY — restoreBookingPassengers
-      //     deliberately does NOT restore secure fields to memory so
-      //     they can't paint onto the #booking DOM (see
-      //     restoreBookingPassengers' NOTE block for the rationale).
-      //
-      //     Here on #payment F5 → tap Card, the user has already
-      //     consciously advanced past #booking and is choosing to pay,
-      //     so hydrating memory with previously-Saved sensitive values
-      //     is not an "invisible ship" — the user typed and Saved
-      //     them earlier. If they hit Back to details after this,
-      //     Mechanism 2's masking rules cover them: sensitive fields
-      //     render as masks until user clicks into them.
-      //
-      //     Only-fill-empty guard preserves anything the user typed
-      //     in this session (shouldn't happen post-F5 but cheap
-      //     insurance).
-      try {
-        const rawSecure = sessionStorage.getItem(BOOKING_SECURE_SHADOW_KEY);
-        if (rawSecure) {
-          const securePayload = JSON.parse(rawSecure);
-          if (securePayload && Array.isArray(securePayload.travelers)) {
-            securePayload.travelers.forEach((secure, i) => {
-              const ts = travelerStates[i];
-              if (!ts || !secure) return;
-              if (!ts.data.born_on && secure.born_on) ts.data.born_on = secure.born_on;
-              if (secure.passport && typeof secure.passport === 'object') {
-                if (!ts.data.passport) ts.data.passport = { country: '', number: '', expires: '' };
-                if (!ts.data.passport.country && secure.passport.country) ts.data.passport.country = secure.passport.country;
-                if (!ts.data.passport.number  && secure.passport.number)  ts.data.passport.number  = secure.passport.number;
-                if (!ts.data.passport.expires && secure.passport.expires) ts.data.passport.expires = secure.passport.expires;
-              }
-            });
-          }
-        }
-      } catch (e) {
-        console.warn('[_payFromRestore] secure shadow read failed (continuing):', e);
-      }
-
-      // 2. Mark any traveler with a valid _saved_traveler_id as saved so
-      //    reconcileSavedTravelerData will apply the DB record. Guard on
-      //    the record actually existing (user may have deleted the saved
-      //    traveler in Account since booking started).
-      travelerStates.forEach(s => {
-        const linkedId = s?.data?._saved_traveler_id;
-        if (!linkedId) return;
-        const stillExists = Array.isArray(_savedTravelers)
-          && _savedTravelers.some(t => t.id === linkedId);
-        if (stillExists) s.saved = true;
-      });
-
-      // 3. Reconcile — copies born_on / passport / other DB-only fields
-      //    from the saved_travelers row onto the live traveler card.
-      //    Idempotent; safe to call even if nothing to reconcile.
-      if (typeof reconcileSavedTravelerData === 'function') {
-        try { reconcileSavedTravelerData(); }
-        catch (e) { console.warn('[_payFromRestore] reconcile failed:', e); }
-      }
-
-      // 4. Mark saved for any traveler whose data is now complete for
-      //    the trip's requirements. Two sources merge here:
-      //      - Signed-in with saved traveler: born_on/passport from DB
-      //        via reconcile above
-      //      - Guest OR fresh-typed signed-in: fields from the secure
-      //        shadow via step 1b hydration
-      //    Either way, if memory now has everything the trip needs,
-      //    the traveler is saved for purposes of the "route to booking"
-      //    check below. Completeness rules mirror saveTraveler:
-      //    title/name/gender/born_on required always; passport
-      //    (country/number/expires) required when tripRequiresPassport.
-      //
-      //    MUST run BEFORE renderPassengerForms so that render reflects
-      //    the correct saved state. If we render first (as the pre-fix
-      //    code did), guest cards render EXPANDED with the raw sensitive
-      //    values from step 1b hydration painted into the DOM — which is
-      //    visible on Back-to-details. Rendering after marking saved
-      //    means those cards render as collapsed name-summaries with no
-      //    sensitive fields in the DOM. Pencil-click re-opens with masks
-      //    via editTraveler's existing Mechanism 2 flow.
-      travelerStates.forEach(s => {
-        if (s.saved) return;
-        const d = s?.data;
-        if (!d) return;
-        const hasBasics = d.title && d.given_name && d.family_name && d.gender;
-        if (!hasBasics) return;
-        if (!d.born_on) return;
-        if (tripRequiresPassport) {
-          if (!d.passport?.number || !d.passport?.country || !d.passport?.expires) return;
-        }
-        s.saved = true;
-      });
-
-      // 5. Repaint booking forms. View is hidden but the DOM will be
-      //    correct if user hits Back-to-details. Cards where step 4
-      //    marked saved=true render collapsed (name-only summary); pencil
-      //    on those triggers editTraveler which sets _openedFromSaved and
-      //    re-renders with masks per Mechanism 2. Cards still unsaved
-      //    (should be none in the happy path — Continue-to-payment gates
-      //    on all saved) render expanded and route via step 6 below.
-      try { renderPassengerForms(); } catch (_) {}
-      // Also re-render the baggage + seat lists. Both filter rows by
-      // travelerStates[i].saved; the earlier render triggered by the
-      // restoreBooking flow ran while saved was still false (guest, no
-      // _saved_traveler_id link), producing empty slots. Now that step 4
-      // has set saved=true for complete-data travelers, re-render so the
-      // "1 bag · KES X" and "Seat 12A · KES Y" rows appear. This makes
-      // Back-to-details show the persisted extras on the booking view,
-      // matching the sidecard total already shown on #payment.
-      try { if (typeof renderBaggageList === 'function') renderBaggageList(); } catch (_) {}
-      try { if (typeof renderSeatsList === 'function') renderSeatsList(); } catch (_) {}
-      // Booking summary reads the same selectedBaggages/selectedSeats;
-      // refresh it so the booking-view sidecard mirrors the payment-view
-      // sidecard on Back-to-details.
-      try { if (typeof renderBookingSummary === 'function') renderBookingSummary(); } catch (_) {}
-
-      // 5. Check if all travelers are now saved. If any aren't (guest
-      //    checkout with genuinely incomplete data, or user typed a
-      //    fresh traveler that didn't come from the saved-travelers
-      //    picker AND didn't finish before F5), we can't safely fire
-      //    goToPayment from the payment view — its validation errors
-      //    surface on the booking view which is hidden. Route to
-      //    booking with a hint.
-      //
-      //    With the secure shadow in place, guests with complete Saved
-      //    data flow through this check as saved (via step 4b above).
-      //    Only genuine edge cases hit the routing branch.
-      const anyUnsaved = travelerStates.some(s => !s.saved);
-      if (anyUnsaved) {
-        showView('booking');
-        // Small delay so the view swap paints before the alert scrolls.
-        setTimeout(() => {
-          if (typeof showAlert === 'function') {
-            showAlert('booking-alert', 'Please review each traveler\u2019s details and tap Save, then Continue to payment.');
-          }
-          const firstUnsaved = travelerStates.findIndex(s => !s.saved);
-          if (firstUnsaved >= 0) {
-            const card = document.querySelector(`[data-traveler-card="${firstUnsaved}"]`);
-            card?.scrollIntoView({ behavior: 'smooth', block: 'center' });
-          }
-        }, 80);
-        return;
-      }
-
-      // 6. All saved + reconciled — fire goToPayment. It handles
-      //    collectPassengers, email/phone validation, module-var setup,
-      //    then startCardPayment. On success the user lands on the
-      //    Pesapal iframe. On failure (e.g. an edge-case validation miss)
-      //    goToPayment surfaces an alert via booking-alert; view is
-      //    still payment, so we swap to booking to make it visible.
-      const _wasPayment = !document.getElementById('view-payment')?.classList.contains('hidden');
-      goToPayment();
-      // Note: goToPayment is not async, but startCardPayment (which it
-      // calls) IS. Nothing to await here; the button loading state is
-      // handled by startCardPayment's own button management.
-    } finally {
-      if (btn) { btn.classList.remove('btn-loading'); btn.disabled = false; }
-    }
-  }
-
 
   // Phase 1 helper: paint the booking fare-timer bar with its static label
   // + a shimmering placeholder in the countdown slot. Called when we DON'T
@@ -9828,57 +9312,6 @@
     // cards; renderPassengerForms in Phase 3 will render without the flag
     // once fetchSavedTravelers resolves.
     document.querySelectorAll('.saved-trav-picker').forEach(el => el.classList.add('tf-shimmer-picker'));
-  }
-
-  // Step 4 REDESIGN — payment view shimmer painter. Mirrors
-  // _paintBookingShellShimmers but targets the payment view's own trip +
-  // price slots. Called synchronously in restorePaymentView Step 1 so the
-  // sidebar has real (shimmery) content from t=0 instead of blank slots
-  // during the ~6-8s get-offer round-trip.
-  //
-  // Renders into:
-  //   #payment-trip-slot     — sidebar trip card
-  //   #payment-price-slot    — sidebar price card
-  //   #payment-price-inline  — mobile inline price above the card
-  //
-  // Uses the same .trip-panel / .price-panel / .tf-shimmer* classes as the
-  // booking view — those classes are view-agnostic and already scoped for
-  // both. renderPaymentSummary in restorePaymentView (after await) replaces
-  // the shimmer HTML with real data.
-  function _paintPaymentShellShimmers() {
-    const tripShimmer = `
-      <div class="trip-panel">
-        <div class="leg-card tf-shimmer-card">
-          <div class="tf-shimmer-line tf-shimmer" style="width:40%;height:14px;"></div>
-          <div class="tf-shimmer-line tf-shimmer" style="width:70%;height:20px;margin-top:8px;"></div>
-          <div class="tf-shimmer-line tf-shimmer" style="width:55%;height:12px;margin-top:6px;"></div>
-        </div>
-        <div class="leg-card tf-shimmer-card">
-          <div class="tf-shimmer-line tf-shimmer" style="width:40%;height:14px;"></div>
-          <div class="tf-shimmer-line tf-shimmer" style="width:70%;height:20px;margin-top:8px;"></div>
-          <div class="tf-shimmer-line tf-shimmer" style="width:55%;height:12px;margin-top:6px;"></div>
-        </div>
-      </div>
-    `;
-    const priceShimmer = `
-      <div class="price-panel">
-        <h4>Estimated price</h4>
-        <div class="ppp"><span class="tf-shimmer-line tf-shimmer" style="width:100px;height:12px;display:inline-block;"></span></div>
-        <div class="line"><span class="label">Flight</span><span class="value"><span class="tf-shimmer-line tf-shimmer" style="width:80px;height:14px;display:inline-block;"></span></span></div>
-        <div class="line"><span class="label">TumaFly service fee</span><span class="value"><span class="tf-shimmer-line tf-shimmer" style="width:80px;height:14px;display:inline-block;"></span></span></div>
-        <div class="line"><span class="label">Payment processing</span><span class="value"><span class="tf-shimmer-line tf-shimmer" style="width:80px;height:14px;display:inline-block;"></span></span></div>
-        <div class="divider"></div>
-        <div class="total"><span>Total estimate</span><span class="value"><span class="tf-shimmer-line tf-shimmer" style="width:100px;height:16px;display:inline-block;"></span></span></div>
-      </div>
-    `;
-    const tripSlot = document.getElementById('payment-trip-slot');
-    if (tripSlot) tripSlot.innerHTML = tripShimmer;
-    const priceSlot = document.getElementById('payment-price-slot');
-    if (priceSlot) priceSlot.innerHTML = priceShimmer;
-    // Mobile inline price — same shimmer, feeds the price-inline slot
-    // above the payment card on narrow viewports.
-    const priceInline = document.getElementById('payment-price-inline');
-    if (priceInline) priceInline.innerHTML = priceShimmer;
   }
 
   // Phase 3 helper: swap shimmer placeholders for real content, expand pax
@@ -9970,6 +9403,7 @@
   // pattern the fare timer already uses (showSearchExpiredModal at ~L7333)
   // so the UI is familiar. Kept as a thin wrapper so we can iterate on copy.
   function _showFareExpiredModal() {
+    _cancelPaystackModalOnFareExpiry();
     // If the fare-timer's modal is already showing (unlikely on refresh but
     // possible on a race), don't stack a second one.
     if (document.getElementById('search-expired-modal')) return;
@@ -10178,33 +9612,7 @@
   // and on resetAndGoHome. TTL of 20 min is an outer bound; the fare
   // check (fare_expires_at_ms > now) fires first for any fare that
   // already elapsed.
-  const PAYMENT_RETURN_SHADOW_KEY = 'tf_payment_return_v1';
-  const PAYMENT_RETURN_TTL_MS = 20 * 60 * 1000;
-
-  function stashPaymentReturn() {
-    try {
-      const sel = selectedInbound || selectedOutbound;
-      const offerId = sel?.cabinPricing?.offer_id || '';
-      if (!offerId) return;
-      // Reuse the same helper restoreBooking / stashBookingPassengers use to
-      // resolve the fare deadline — keeps the two shadows in agreement on
-      // "what does 'expires' mean at this instant."
-      const expMs = (typeof getEffectiveExpiresAtMs === 'function')
-        ? (getEffectiveExpiresAtMs() || 0)
-        : 0;
-      sessionStorage.setItem(PAYMENT_RETURN_SHADOW_KEY, JSON.stringify({
-        offer_id: offerId,
-        fare_expires_at_ms: expMs,
-        ts: Date.now(),
-      }));
-    } catch (_) { /* sessionStorage disabled — silent no-op */ }
-  }
-
-  function clearPaymentReturn() {
-    try { sessionStorage.removeItem(PAYMENT_RETURN_SHADOW_KEY); } catch (_) {}
-  }
-
-  // ─── Booking-extras shadow (seats + baggage) ────────────────────────
+      // ─── Booking-extras shadow (seats + baggage) ────────────────────────
   //
   // Written ONCE per Continue-click in goToPayment, right after
   // stashPaymentReturn. Restored ONLY on #payment F5 via restorePaymentView.
@@ -12039,7 +11447,7 @@
       renderBookingSummary();
     }
     if (typeof renderPaymentSummary === 'function' &&
-        !document.getElementById('view-payment')?.classList.contains('hidden')) {
+        false /* view-payment deleted */) {
       // We don't have the server breakdown cached at this point in all cases;
       // re-render with whatever the current state has. The estimate path uses
       // estimateBreakdown() which already respects currentCurrency via formatKes.
@@ -15576,7 +14984,7 @@
       // Server breakdown arrived — release the shimmer lock so any
       // subsequent estimate call (there shouldn't be one, but defensive)
       // renders normally.
-      _paymentPriceShimmerLocked = false;
+      // (shimmer lock removed with #payment view)
     }
     // Trip panel is always safe to render — it reads from selectedOutbound
     // which is fully hydrated post-restoreBooking. Only the price panel
@@ -15586,7 +14994,7 @@
     // skip painting the client estimate. Shimmer stays visible until the
     // server breakdown arrives via startCardPayment's L16294 call. Any
     // breakdown call ignores the lock (unlocked above).
-    if (!breakdown && _paymentPriceShimmerLocked) return;
+    // (shimmer lock removed with #payment view)
     renderPricePanel('payment-price-slot', breakdown, { isPayment: true });
     // Phase F: also populate the mobile-only inline price slot
     renderPricePanel('payment-price-inline', breakdown, { isPayment: true });
@@ -15895,6 +15303,7 @@
   // Announced via role="alert" + aria-live="assertive" so screen readers pick
   // up the notice immediately rather than waiting for the user to tab to it.
   function showSearchExpiredModal() {
+    _cancelPaystackModalOnFareExpiry();
     if (document.getElementById('search-expired-modal')) return;
 
     const modal = document.createElement('div');
@@ -16121,428 +15530,287 @@
     // use the saved_travelers picker + profile-based contact prefill instead.
     stashGuestPrefill();
 
-    renderPaymentSummary();
-    // Show a loading state immediately — the iframe loads itself, no gate.
-    // If startCardPayment fails (Turnstile, mode/key, etc.) the user gets a
-    // retry button via the error path inside startCardPayment.
-    document.getElementById('card-iframe-wrap').innerHTML = `
-      <div style="display:flex;align-items:center;justify-content:center;padding:24px;color:var(--text-2);">
-        <div class="spinner" style="margin-right:10px;"></div>
-        Loading secure payment…
-      </div>
-    `;
-    document.getElementById('poll-area').classList.add('hidden');
-    clearAlert('payment-alert');
-    // Step 4 REDESIGN — Bev's spec: land collapsed on BOTH fresh and refresh
-    // entry. Continue click no longer auto-opens the Card accordion; the
-    // user reveals the payment form by tapping the Card row. startCardPayment
-    // fires in the BACKGROUND so the iframe is loaded (invisible in the
-    // collapsed pane) by the time the user taps the row. Zero-delay reveal
-    // for the fresh path; the refresh path uses selectPayTab-triggered load
-    // (see _payFromRestore).
-    //
-    // Reset restore-mode flags — this is a fresh Continue, not a restore.
-    _paymentViewIsRestored = false;
-    _paymentRestoreLaunched = false;
-    // switches views itself, but ONLY after clearing drift-check (409) and
-    // expired-offer (410) branches. This keeps drift/expired modals showing
-    // on the booking view where the user left off, avoiding the confusing
-    // "wait, I was going to pay and now there's a modal on the payment
-    // view" experience. On the success path, startCardPayment calls
-    // showView('payment') just before rendering the Pesapal iframe.
-    //
-    // Disable Continue button + show inline spinner so user knows something
-    // is happening during the ~6-8s Turnstile + create-payment round-trip.
-    // Both the desktop button and mobile sticky-bar button need disabling
-    // so a user tapping around during the wait doesn't fire duplicate calls.
+    // ── Paystack modal handoff ─────────────────────────────────────────
+    // 1. Build request payload for initialize-payment EF. Includes the
+    //    Duffel offer id, validated passengers/contact, seat/baggage picks,
+    //    Turnstile token (search widget — payment widget no longer exists),
+    //    and expected_price_kes for the drift check.
     const _btns = [
       document.getElementById('continue-to-pay-btn'),
       document.getElementById('continue-to-pay-btn-mobile'),
     ].filter(Boolean);
     _btns.forEach(b => { b.classList.add('btn-loading'); b.disabled = true; });
-    // Auto-load Pesapal iframe — no "Pay with card" click required.
-    // startCardPayment will re-enable the buttons and switch views as needed.
-    startCardPayment().finally(() => {
-      // Always re-enable Continue buttons, even if we ended up switching
-      // views. If we did switch to payment, they're off-screen but still
-      // need their enabled state so a "back to booking" re-uses them.
-      _btns.forEach(b => { b.classList.remove('btn-loading'); b.disabled = false; });
-    });
-  }
 
-  function selectPayTab(tab) {
-    // M-Pesa branch never runs — that button is disabled at launch.
-    if (tab !== 'card') return;
-    const cardItem = document.getElementById('pay-card-item');
-    if (!cardItem) return;
-    const wasOpen = cardItem.classList.contains('open');
-    cardItem.classList.toggle('open');
-    const nowOpen = cardItem.classList.contains('open');
+    (async () => {
+      let initData = null;
+      try {
+        // Reuse search-widget Turnstile token (single widget for whole app now).
+        // The search widget is always mounted; token is fresh.
+        const tsToken = (typeof ensureTurnstileToken === 'function')
+          ? await ensureTurnstileToken('search')
+          : '';
 
-    // Step 4 REDESIGN: on the FIRST open in restore mode, trigger the
-    // reconcile+pay chain. Guarded by _paymentRestoreLaunched so a
-    // close+reopen doesn't re-fire (which would generate a second
-    // merchant_ref). Fresh entry doesn't need this — goToPayment already
-    // fired startCardPayment when the user clicked Continue and the
-    // iframe is loading in the background.
-    if (!wasOpen && nowOpen && _paymentViewIsRestored && !_paymentRestoreLaunched) {
-      _paymentRestoreLaunched = true;
-      // Immediate loading state so the accordion reveal isn't a jarring
-      // empty box while _payFromRestore does its work (fetch saved
-      // travelers, reconcile DB data, Turnstile, create-payment).
-      const wrap = document.getElementById('card-iframe-wrap');
-      if (wrap) {
-        wrap.innerHTML = `
-          <div style="display:flex;align-items:center;justify-content:center;padding:24px;color:var(--text-2);">
-            <div class="spinner" style="margin-right:10px;"></div>
-            Loading secure payment…
-          </div>
-        `;
-      }
-      try { _payFromRestore(); } catch (e) {
-        console.warn('[selectPayTab] _payFromRestore failed:', e);
-        _paymentRestoreLaunched = false;  // allow retry
-      }
-    }
-  }
+        const bearer = await getAuthBearer();
+        const selForPrice = selectedInbound || selectedOutbound;
+        const expectedKes = Number(selForPrice?.cabinPricing?.price_kes) || 0;
 
-  async function startCardPayment({ _skipDriftCheck = false, _turnstileAutoRetry = false } = {}) {
-    clearAlert('payment-alert');
-    const btn = document.getElementById('card-start-btn');
-    if (btn) { btn.classList.add('btn-loading'); btn.disabled = true; }
+        const res = await fetch(`${SUPABASE_URL}/functions/v1/initialize-payment`, {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${bearer}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            offer_id: (selectedInbound || selectedOutbound)?.cabinPricing?.offer_id,
+            passengers: passengerData,
+            contact: contactData,
+            seats: (typeof collectSeatSelections === 'function') ? collectSeatSelections() : [],
+            baggages: (typeof collectBaggageSelections === 'function') ? collectBaggageSelections() : [],
+            turnstile_token: tsToken,
+            expected_price_kes: expectedKes,
+          }),
+        });
+        initData = await res.json().catch(() => ({}));
 
-    try {
-      // Bot-protection: get a Turnstile token (fails open if widget not loaded
-      // or if backend has no TURNSTILE_SECRET configured).
-      const turnstileToken = await ensureTurnstileToken('payment');
-      // Round-trip: book the offer that pairs the chosen outbound with the chosen
-      // return (selectedInbound.offer). If the user picked the default/cheapest
-      // return, selectedInbound.offer === selectedOutbound.offer. If they picked
-      // a non-default return, selectedInbound.offer is the different offer that
-      // includes BOTH the chosen outbound AND the chosen return — that's what we
-      // need to book.
-      // One-way: only selectedOutbound exists.
-      const bookingSelection = selectedInbound || selectedOutbound;
-      const bookingOfferId = bookingSelection.cabinPricing.offer_id;
-      // Step 2b price-drift check: send what we THINK the base fare is (KES).
-      // EF re-fetches from Duffel + re-runs FX; if the fresh KES quote differs
-      // by more than 1% we get a 409 PRICE_DRIFT response, show the notification
-      // modal, then re-fire the same request with _skipDriftCheck=true to bypass
-      // the check (customer has been notified of the new price).
-      const expectedBaseKes = bookingSelection.cabinPricing.price_kes;
-      // If signed in, pass the user's JWT so the EF can resolve user_id and
-      // link the booking to their account. Falls back to anon key for guests.
-      const authBearer = await getAuthBearer();
-      const body = {
-        offer_id: bookingOfferId,
-        passengers: passengerData,
-        contact: contactData,
-        seats: collectSeatSelections(),
-        baggages: collectBaggageSelections(),
-        turnstile_token: turnstileToken,
-      };
-      if (!_skipDriftCheck) body.expected_price_kes = expectedBaseKes;
-
-      const res = await fetch(`${SUPABASE_URL}/functions/v1/create-payment`, {
-        method: 'POST',
-        headers: { 'Authorization': `Bearer ${authBearer}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify(body),
-      });
-      const data = await res.json();
-
-      // 410 Gone — offer no longer valid at Duffel. Same handling as the
-      // fare-timer-expiry path: search-expired modal + auto-refresh.
-      if (res.status === 410) {
-        resetTurnstile('payment');
-        showSearchExpiredModal();
-        return;
-      }
-
-      // 403 Turnstile verification failed — invisible retry once. Cloudflare
-      // tokens are one-shot and can go stale between mint and use (esp. on
-      // slow networks or during rapid retries). Rather than immediately
-      // showing the user an error, we reset the widget, wait for a fresh
-      // token, and retry silently. If the retry ALSO fails, we fall through
-      // to the visible Try-again UI so the user isn't stuck in an invisible
-      // loop.
-      //
-      // Guarded by _turnstileAutoRetry so a repeated 403 doesn't recurse.
-      // First 403 sets the flag on the retry call; retry's 403 skips this
-      // branch and lands in the generic error path below.
-      if (res.status === 403 && !_turnstileAutoRetry) {
-        console.warn('[startCardPayment] 403 verification failed — attempting invisible retry');
-        resetTurnstile('payment');
-        // ensureTurnstileToken awaits a fresh token from the reset widget.
-        // startCardPayment re-runs the full flow including a fresh
-        // ensureTurnstileToken call at its top, so we don't need to
-        // pre-await here — just delegate. Preserve _skipDriftCheck if the
-        // current call had it set (drift retry → 403 → invisible retry
-        // should still skip drift check).
-        return startCardPayment({ _skipDriftCheck, _turnstileAutoRetry: true });
-      }
-
-      // 409 PRICE_DRIFT — offer valid but base fare KES has shifted more
-      // than 1% since the user's last view. Show notification modal, then
-      // silently update in-memory price + re-fire WITHOUT the drift check.
-      // The user has already clicked Continue-to-payment, so we're taking
-      // them all the way through — the modal is a heads-up, not a gate.
-      if (res.status === 409 && data.code === 'PRICE_DRIFT') {
-        resetTurnstile('payment');
-        // Update the selection so all subsequent renders (price panel,
-        // payment summary) show the fresh number. Frontend rounds; EF's
-        // number is the source of truth.
-        bookingSelection.cabinPricing.price_kes = data.actual_kes;
-        renderBookingSummary();
-        // Show the modal. Return the retry promise from the callback so
-        // _showPriceDriftModal's internal await sees the ACTUAL completion
-        // time (Turnstile + create-payment + showView 'payment'). Without
-        // returning it, the callback resolves immediately and the modal
-        // dismisses at the 6s min-dwell mark even if the retry is still
-        // in flight — user then sees booking view for a few seconds before
-        // the payment view arrives. Confusing.
-        _showPriceDriftModal({
-          expected_kes: data.expected_kes,
-          actual_kes: data.actual_kes,
-          delta_kes: data.delta_kes,
-        }, () => startCardPayment({ _skipDriftCheck: true }));
-        return;
-      }
-
-      // 409 (non-drift) — a seat or baggage service_id is no longer valid at
-      // Duffel (EF lines ~467/540). Two possible causes:
-      //   - The user's selection was made against a stale offer cache and
-      //     Duffel has since evicted those specific service_ids. Rare but
-      //     recoverable — clear the affected selection and let them re-pick.
-      //   - The offer's service catalog is genuinely broken and even a
-      //     re-pick will hit the same wall. Not recoverable via booking flow.
-      //
-      // We can't tell these apart from a single response, so we give the
-      // user ONE clean retry: strike 1 = clear + toast + stay on booking,
-      // strike 2 = escalate to the same expired-modal flow as a 410. The
-      // counter is scoped to the booking view (reset on fresh entry).
-      if (res.status === 409) {
-        resetTurnstile('payment');
-        _bookingServiceIdRetryCount++;
-        if (_bookingServiceIdRetryCount >= 2) {
-          // Second strike — offer is genuinely broken. Redirect to fresh
-          // search via the standard expired flow. The counter will reset
-          // when the user picks a fresh flight (proceedToBooking runs).
-          console.warn('[startCardPayment] second 409 on same booking, escalating to expired modal');
-          showSearchExpiredModal();
+        if (res.status === 409 && initData?.code === 'PRICE_DRIFT') {
+          // Drift modal — mirrors the fresh-search flow.
+          if (typeof _showPriceDriftModal === 'function') {
+            _showPriceDriftModal(initData);
+          } else {
+            showAlert('booking-alert',
+              `Fare updated to KES ${initData.actual_kes?.toLocaleString?.() || initData.actual_kes}. Please click Continue again to accept.`);
+          }
           return;
         }
-        // First strike — clear ONLY the affected category and prompt the
-        // user to re-pick. EF returns a structured code (STALE_SEAT or
-        // STALE_BAGGAGE) so we don't guess or over-clear. Missing code
-        // (older EF, or an unstructured 4xx) falls back to clearing both,
-        // matching the prior over-clear behavior.
-        const errCode = data.code || '';
-        const clearsSeats = errCode === 'STALE_SEAT' || !errCode;
-        const clearsBaggage = errCode === 'STALE_BAGGAGE' || !errCode;
-        if (clearsSeats) selectedSeats = {};
-        if (clearsBaggage) selectedBaggages = {};
-        try { if (clearsSeats) renderSeatsList(); } catch (_) {}
-        try { if (clearsBaggage) renderBaggageList(); } catch (_) {}
-        renderBookingSummary();
-        // Return to booking view if we're already on payment (proceedToPayment
-        // switched views before firing this fetch). Otherwise stay put.
-        if (document.getElementById('view-payment') && !document.getElementById('view-payment').classList.contains('hidden')) {
-          showView('booking');
+        if (res.status === 409 && (initData?.code === 'STALE_SEAT' || initData?.code === 'STALE_BAGGAGE')) {
+          // Seat / baggage service_id rotated — clear the affected category and prompt.
+          if (initData.code === 'STALE_SEAT') { selectedSeats = {}; }
+          if (initData.code === 'STALE_BAGGAGE') { selectedBaggages = {}; }
+          try { if (typeof renderSeatsList === 'function') renderSeatsList(); } catch (_) {}
+          try { if (typeof renderBaggageList === 'function') renderBaggageList(); } catch (_) {}
+          try { renderBookingSummary(); } catch (_) {}
+          showAlert('booking-alert',
+            (initData.error || 'Some selections are no longer available.') +
+            (initData.code === 'STALE_SEAT'
+              ? ' Your seat selection has been cleared — please re-add it and try again.'
+              : ' Your bag selection has been cleared — please re-add them and try again.'));
+          return;
         }
-        // Tailor the alert message to what was actually cleared. When both
-        // were cleared (missing code path), keep the combined message.
-        let alertSuffix;
-        if (clearsSeats && clearsBaggage) {
-          alertSuffix = ' Your seat and bag choices have been cleared — please re-add them and try again.';
-        } else if (clearsSeats) {
-          alertSuffix = ' Your seat selection has been cleared — please re-add it and try again.';
-        } else {
-          alertSuffix = ' Your bag selection has been cleared — please re-add it and try again.';
+        if (res.status === 410) {
+          if (typeof _showFareExpiredModal === 'function') _showFareExpiredModal();
+          return;
         }
-        showAlert('booking-alert',
-          (data.error || 'Some selections are no longer available.') + alertSuffix);
-        // Reset iframe wrap so the next Continue-click doesn't see stale
-        // pesapal iframe HTML lying around.
-        const wrap = document.getElementById('card-iframe-wrap');
-        if (wrap) wrap.innerHTML = '';
-        return;
-      }
+        if (!res.ok || !initData?.success || !initData?.access_code) {
+          showAlert('booking-alert', initData?.error || 'We couldn\'t start your payment. Please try again.');
+          return;
+        }
 
-      if (!res.ok || data.error || !data.redirect_url) {
-        // Reset so the next attempt gets a fresh token
-        resetTurnstile('payment');
-        // Step 2b: switch to payment view so the "Try again" button appears
-        // in context. Otherwise the user is stuck on booking with a hidden
-        // error and no visible retry.
-        showView('payment');
-        showAlert('payment-alert', data.error || 'Could not start payment. Please try again.');
-        // No more "Pay with card" gate — surface a retry button inline since
-        // auto-load just failed and the loading spinner would otherwise hang.
-        document.getElementById('card-iframe-wrap').innerHTML = `
-          <div style="text-align:center;padding:18px;">
-            <button class="btn btn-primary btn-lg" onclick="resetPaymentPane()">Try again</button>
-          </div>
-        `;
-        return;
-      }
-      activeMerchantRef = data.merchant_ref;
-      if (data.breakdown) renderPaymentSummary(data.breakdown);
+        // 2. Persist merchant_ref so success/failure paths can look up state.
+        activeMerchantRef = initData.merchant_ref;
 
-      // Step 2b: switch to payment view now, RIGHT before rendering the
-      // iframe. Deferring this switch until after we've cleared 409/410
-      // means drift/expired modals appear over the booking view (the
-      // context the user just left), rather than over an unfamiliar
-      // payment loading state.
-      showView('payment');
+        // 3. Update the price panel from the EF breakdown so the user
+        //    sees the exact charge amount BEFORE the modal opens.
+        if (initData.breakdown && typeof renderBookingSummary === 'function') {
+          try { renderBookingSummary(); } catch (_) {}
+        }
 
-      // Embed Pesapal iframe in place of the start button
-      document.getElementById('card-iframe-wrap').innerHTML = `
-        <iframe src="${escapeHtml(data.redirect_url)}" title="Pesapal payment" allow="payment"></iframe>
-      `;
-
-      // Keep the fare timer ticking through iframe load. Previously this stopped
-      // the timer on iframe load (with the assumption that "backend handles it
-      // via paid_offer_expired"), but that path means the customer pays AND THEN
-      // gets an alert + manual refund. Keeping the timer means the search-expired
-      // modal can still fire while the user is mid-card-entry, blocking the doomed
-      // payment before it goes through. We retain the modal's "Refresh" CTA so
-      // users escape cleanly.
-
-      // Begin polling
-      startPolling();
-    } catch (e) {
-      // Step 2b: switch to payment view so the Try again button appears in
-      // context (booking view would leave the user with no visible retry).
-      showView('payment');
-      showAlert('payment-alert', 'Could not connect. Please check your network and try again.');
-      document.getElementById('card-iframe-wrap').innerHTML = `
-        <div style="text-align:center;padding:18px;">
-          <button class="btn btn-primary btn-lg" onclick="resetPaymentPane()">Try again</button>
-        </div>
-      `;
-    } finally {
-      if (btn) { btn.classList.remove('btn-loading'); btn.disabled = false; }
-    }
-  }
-
-  function startPolling() {
-    pollStartedAt = Date.now();
-    // Don't show any "waiting" UI here — the Pesapal iframe is fully in charge
-    // of telling the user what to do (enter card, click pay, etc.). Earlier
-    // users reported the "Waiting for payment confirmation…" spinner was
-    // confusing — they thought they'd already clicked pay and the spinner
-    // implied processing. We keep the polling running silently in the
-    // background. If the booking confirms, showView('success') fires.
-    // If polling times out, we surface a status message at that point.
-    document.getElementById('poll-area').classList.add('hidden');
-    document.getElementById('poll-area').innerHTML = '';
-    pollOnce();
-  }
-
-  async function pollOnce() {
-    if (!activeMerchantRef) return;
-    // Previously: a 5-minute "Still waiting…" amber alert. Removed —
-    // it caused user confusion and the Pesapal iframe already explains
-    // the in-progress state. Polling continues silently until the
-    // server returns confirmed / failed / needs_support. If the user
-    // closes the tab before confirmation, the webhook still resolves
-    // the booking server-side and the confirmation email fires.
-    // POLL_TIMEOUT_MS and pollStartedAt are kept as no-ops in case
-    // other code references them.
-
-    try {
-      const res = await fetch(`${SUPABASE_URL}/functions/v1/payment-status?ref=${encodeURIComponent(activeMerchantRef)}`, {
-        headers: { 'Authorization': `Bearer ${SUPABASE_ANON_KEY}` },
-      });
-      const data = await res.json();
-
-      if (data.state === 'confirmed' && data.booking) {
-        const ref = data.booking.booking_reference || activeMerchantRef;
-        document.getElementById('success-ref').textContent = ref;
-        // Stash for the inevitable Pesapal top-level redirect that follows.
-        // Pesapal redirects the browser to /?OrderMerchantReference=... a few
-        // seconds after payment confirms. That redirect blows away our JS
-        // state. Without this stash, the fresh post-redirect page wouldn't
-        // know we'd already confirmed — and would render a "Confirming…"
-        // spinner state that wipes the hero. With it, the boot block reads
-        // the stash and renders the PNR directly. No spinner, no flash.
+        // 4. Open the Paystack modal.
+        if (typeof PaystackPop === 'undefined') {
+          showAlert('booking-alert', 'Payment library is still loading. Please try again in a moment.');
+          return;
+        }
         try {
-          sessionStorage.setItem('tumafly_post_pay_pnr', ref);
-          sessionStorage.setItem('tumafly_post_pay_ref', activeMerchantRef || '');
+          const popup = new PaystackPop();
+          _paystackHandle = popup;
+          popup.resumeTransaction(initData.access_code, {
+            onLoad: (resp) => { if (typeof handlePaystackLoad === 'function') handlePaystackLoad(resp); },
+            onSuccess: (tx) => { if (typeof handlePaystackSuccess === 'function') handlePaystackSuccess(tx); },
+            onCancel: () => { if (typeof handlePaystackCancel === 'function') handlePaystackCancel(); },
+            onClose: () => { if (typeof handlePaystackClose === 'function') handlePaystackClose(); },
+            onError: (err) => { if (typeof handlePaystackError === 'function') handlePaystackError(err); },
+          });
+        } catch (e) {
+          console.error('[goToPayment] Paystack popup threw:', e);
+          showAlert('booking-alert', 'We couldn\'t open the payment window. Please try again.');
+          _paystackHandle = null;
+        }
+      } catch (err) {
+        console.error('[goToPayment] initialize-payment call failed:', err);
+        showAlert('booking-alert', 'We couldn\'t start your payment. Please check your connection and try again.');
+      } finally {
+        _btns.forEach(b => { b.classList.remove('btn-loading'); b.disabled = false; });
+      }
+    })();
+}
+
+  // ── Paystack modal callbacks + verify-payment polling ────────────────
+  //
+  // These implement the post-modal state machine:
+  //   onLoad    — modal has painted, hide any preflight spinners
+  //   onSuccess — user completed payment. Start polling verify-payment
+  //               until the webhook finishes (booked → success view)
+  //   onCancel  — user closed the modal or hit back inside it
+  //   onClose   — modal dismissed (fires alongside cancel in some cases)
+  //   onError   — Paystack SDK error (rare)
+  //
+  // The verify-payment poll is what bridges the gap between "modal closed
+  // with success" (browser knows immediately) and "webhook has run + Duffel
+  // order created" (may take 2-20 seconds). During the poll we show a
+  // "Confirming your payment..." overlay on #booking.
+  //
+  // Fare-timer expiry: if the fare timer hits zero WHILE the modal is open,
+  // we call _paystackHandle.cancelTransaction() to force-close it, then
+  // show the fare-expired modal on #booking. tickFareTimer's existing
+  // expiry branch handles the modal presentation (already wired for the
+  // Pesapal iframe path, unchanged for us).
+
+  function handlePaystackLoad() {
+    // Modal DOM is up. Nothing to do — the button spinner already turned
+    // off in goToPayment's finally block.
+  }
+
+  function handlePaystackCancel() {
+    _paystackHandle = null;
+    clearAlert('booking-alert');
+    // User closed the modal without paying. They stay on #booking with
+    // everything intact. No further action needed.
+  }
+
+  function handlePaystackClose() {
+    // onClose fires alongside onCancel in most flows. Only clear the handle
+    // if it hasn't already been consumed by onSuccess.
+    if (_paystackHandle) _paystackHandle = null;
+  }
+
+  function handlePaystackError(err) {
+    console.error('[Paystack] SDK error:', err);
+    _paystackHandle = null;
+    showAlert('booking-alert', 'Something went wrong with the payment window. Please try again.');
+  }
+
+  async function handlePaystackSuccess(tx) {
+    _paystackHandle = null;
+    const ref = (tx && tx.reference) || activeMerchantRef;
+    if (!ref) {
+      console.error('[Paystack] onSuccess but no reference');
+      showAlert('booking-alert', 'Payment received but we couldn\'t match it to your booking. Please contact support.');
+      return;
+    }
+    // Show a lightweight "Confirming your payment..." UI on top of #booking
+    // while we poll the verify EF. Modal is gone by now.
+    _showConfirmingOverlay();
+    _paystackVerifyRef = ref;
+    _startVerifyPoll(ref);
+  }
+
+  // ── Confirming overlay (post-modal, pre-success) ─────────────────────
+  function _showConfirmingOverlay() {
+    if (document.getElementById('tf-confirming-overlay')) return;
+    const overlay = document.createElement('div');
+    overlay.id = 'tf-confirming-overlay';
+    overlay.style.cssText = 'position:fixed;inset:0;z-index:9999;background:rgba(255,255,255,0.94);display:flex;flex-direction:column;align-items:center;justify-content:center;';
+    overlay.innerHTML = `
+      <div class="spinner" style="width:44px;height:44px;border-width:4px;margin-bottom:20px;"></div>
+      <div style="font-size:18px;font-weight:600;color:var(--text-1);margin-bottom:8px;">Confirming your payment…</div>
+      <div style="font-size:14px;color:var(--text-2);max-width:32ch;text-align:center;">This usually takes a few seconds. Please don\'t close this page.</div>
+    `;
+    document.body.appendChild(overlay);
+  }
+  function _hideConfirmingOverlay() {
+    const el = document.getElementById('tf-confirming-overlay');
+    if (el) el.remove();
+  }
+
+  // ── verify-payment polling ───────────────────────────────────────────
+  // Poll every 2s up to a 60s soft-timeout. On terminal state (confirmed
+  // / failed / needs_support / not_found), stop and route accordingly.
+  const _VERIFY_POLL_INTERVAL_MS = 2000;
+  const _VERIFY_POLL_TIMEOUT_MS = 60000;
+  let _verifyPollStartedAt = 0;
+
+  function _startVerifyPoll(ref) {
+    _verifyPollStartedAt = Date.now();
+    if (_paystackVerifyHandle) clearTimeout(_paystackVerifyHandle);
+    _pollVerifyOnce(ref);
+  }
+
+  async function _pollVerifyOnce(ref) {
+    if (ref !== _paystackVerifyRef) return; // stale poll for a superseded ref
+    try {
+      const bearer = await getAuthBearer();
+      const res = await fetch(`${SUPABASE_URL}/functions/v1/verify-payment`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${bearer}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ reference: ref }),
+      });
+      const data = await res.json().catch(() => ({}));
+      const state = data?.state || 'processing';
+
+      if (state === 'confirmed') {
+        _hideConfirmingOverlay();
+        _paystackVerifyRef = null;
+        // Stash PNR for the success view to display.
+        try {
+          if (data?.booking?.booking_reference) {
+            sessionStorage.setItem('tumafly_post_pay_pnr', data.booking.booking_reference);
+          }
+          if (ref) sessionStorage.setItem('tumafly_post_pay_ref', ref);
         } catch (_) {}
-        // Step 3: booking complete → wipe the passenger shadow. Refreshing
-        // on success shouldn't re-populate a stale booking form later.
+        // Clear booking-side stash — booking is done.
         try { sessionStorage.removeItem(BOOKING_PASSENGER_SHADOW_KEY); } catch (_) {}
-        // Also wipe the secure shadow (DOB, passport) — same lifecycle.
         try { sessionStorage.removeItem(BOOKING_SECURE_SHADOW_KEY); } catch (_) {}
-        // Also wipe the extras shadow (seats + baggage) — same lifecycle.
-        clearBookingExtras();
+        try { clearBookingExtras(); } catch (_) {}
         showView('success');
         return;
       }
-
-      if (data.state === 'failed') {
-        const p = document.getElementById('poll-area');
-        p.classList.remove('hidden');
-        p.innerHTML = `
-          <div class="alert alert-error">${escapeHtml(data.message || 'Payment did not complete.')}</div>
-          <div style="margin-top:10px;text-align:center;">
-            <button class="btn btn-primary" onclick="resetPaymentPane()">Try again</button>
-          </div>
-        `;
+      if (state === 'failed') {
+        _hideConfirmingOverlay();
+        _paystackVerifyRef = null;
+        showAlert('booking-alert', data?.message || 'Your payment didn\'t go through. Please try again.');
         return;
       }
-
-      if (data.state === 'needs_support') {
-        const p = document.getElementById('poll-area');
-        p.classList.remove('hidden');
-        p.innerHTML = `
-          <div class="alert alert-warn">${escapeHtml(data.message || 'Something needs our attention. We will reach out.')}</div>
-          <div style="font-size:13px;color:var(--text-2);margin-top:10px;">
-            Reference: <code style="font-family:var(--mono);">${escapeHtml(activeMerchantRef)}</code>
-          </div>
-        `;
+      if (state === 'needs_support') {
+        _hideConfirmingOverlay();
+        _paystackVerifyRef = null;
+        // Land on success view with a "we\'ll email you" message.
+        showView('success');
         return;
       }
-
-      // 'processing' state — payment received, ticket issuance happening
-      // server-side. This is meaningfully different from "still waiting for
-      // the user to enter card details," so we DO surface a small status
-      // indicator here. Should resolve within a few seconds.
-      if (data.state === 'processing') {
-        const p = document.getElementById('poll-area');
-        p.classList.remove('hidden');
-        p.innerHTML = `
-          <div class="poll-status">
-            <div class="spinner"></div>
-            Payment received. Issuing your ticket…
-          </div>
-        `;
+      if (state === 'not_found') {
+        _hideConfirmingOverlay();
+        _paystackVerifyRef = null;
+        showAlert('booking-alert', data?.message || 'We couldn\'t find your booking. Please contact support.');
+        return;
       }
-
-      pollHandle = setTimeout(pollOnce, POLL_INTERVAL_MS);
-    } catch (e) {
-      pollHandle = setTimeout(pollOnce, POLL_INTERVAL_MS);
+      // processing — keep polling until soft timeout
+      if (Date.now() - _verifyPollStartedAt > _VERIFY_POLL_TIMEOUT_MS) {
+        _hideConfirmingOverlay();
+        _paystackVerifyRef = null;
+        // Soft timeout — payment likely went through, webhook is slow.
+        // Move to success view; user will get eTicket by email.
+        showView('success');
+        return;
+      }
+      _paystackVerifyHandle = setTimeout(() => _pollVerifyOnce(ref), _VERIFY_POLL_INTERVAL_MS);
+    } catch (err) {
+      console.error('[verify-payment] poll error:', err);
+      // Transient network error — keep polling until timeout.
+      _paystackVerifyHandle = setTimeout(() => _pollVerifyOnce(ref), _VERIFY_POLL_INTERVAL_MS);
     }
   }
 
-  function resetPaymentPane() {
-    activeMerchantRef = null;
-    // Show loading state and retry the iframe load — same as fresh entry
-    document.getElementById('card-iframe-wrap').innerHTML = `
-      <div style="display:flex;align-items:center;justify-content:center;padding:24px;color:var(--text-2);">
-        <div class="spinner" style="margin-right:10px;"></div>
-        Reloading secure payment…
-      </div>
-    `;
-    document.getElementById('poll-area').classList.add('hidden');
-    clearAlert('payment-alert');
-    // Step 4 — Defensive re-open in case the accordion collapsed at some
-    // point (unlikely on retry — user was interacting with the pane —
-    // but idempotent add costs nothing).
-    document.getElementById('pay-card-item')?.classList.add('open');
-    document.getElementById('paytab-card')?.classList.add('active');
-    startCardPayment();
+  // ── Fare-timer watchdog for open Paystack modal ──────────────────────
+  // Called by tickFareTimer when the fare hits zero. If a Paystack modal
+  // is currently open, force-close it so the user doesn't submit card
+  // details for a dead offer.
+  function _cancelPaystackModalOnFareExpiry() {
+    if (_paystackHandle && typeof _paystackHandle.cancelTransaction === 'function') {
+      try { _paystackHandle.cancelTransaction(); } catch (_) {}
+      _paystackHandle = null;
+    }
   }
 
   // ============================================================
@@ -17293,19 +16561,14 @@
   const TURNSTILE_SITEKEY = '0x4AAAAAADpPM2PIaZcEwdQX';
 
   let turnstileSearchToken = '';
-  let turnstilePaymentToken = '';
   let turnstileSearchWidgetId = null;
-  let turnstilePaymentWidgetId = null;
-
   // Promise-based waiters for the next token to arrive via Turnstile's
   // callback. Used by ensureTurnstileToken when a search/payment fires
   // before the widget's auto-challenge has completed (refresh-restore
   // hits this; normal user flows usually have a token cached already).
   const _turnstileSearchTokenWaiters = [];
-  const _turnstilePaymentTokenWaiters = [];
-
   function _flushTurnstileWaiters(which, token) {
-    const waiters = which === 'search' ? _turnstileSearchTokenWaiters : _turnstilePaymentTokenWaiters;
+    const waiters = _turnstileSearchTokenWaiters; // payment widget removed (Paystack modal is trusted user gesture)
     while (waiters.length) {
       const resolve = waiters.shift();
       try { resolve(token); } catch (_) {}
@@ -17358,7 +16621,7 @@
   // Returns the token, or empty string if we time out — the backend will
   // then 403 the request so the user sees a clear error.
   async function ensureTurnstileToken(which) {
-    const get = () => which === 'search' ? turnstileSearchToken : turnstilePaymentToken;
+    const get = () => turnstileSearchToken; // payment widget removed
     if (get()) return get();
 
     // Wait for the Turnstile script to load and the widget to register.
@@ -17371,14 +16634,14 @@
     const setupDeadline = Date.now() + 8000;
     while (Date.now() < setupDeadline) {
       if (typeof turnstile !== 'undefined') {
-        const widgetId = which === 'search' ? turnstileSearchWidgetId : turnstilePaymentWidgetId;
+        const widgetId = turnstileSearchWidgetId; // payment widget removed
         if (widgetId != null) break;
       }
       await new Promise(r => setTimeout(r, 100));
     }
 
     if (typeof turnstile === 'undefined') return '';
-    const widgetId = which === 'search' ? turnstileSearchWidgetId : turnstilePaymentWidgetId;
+    const widgetId = turnstileSearchWidgetId; // payment widget removed
     if (widgetId == null) return '';
 
     // The widget auto-runs its challenge on render (managed mode). Calling
@@ -17389,7 +16652,7 @@
     // challenge endpoints (we saw ERR_NAME_NOT_RESOLVED on brunhild.* and
     // 401s on /cdn-cgi/challenge-platform/ — those make first-token slow).
     if (get()) return get();
-    const waiters = which === 'search' ? _turnstileSearchTokenWaiters : _turnstilePaymentTokenWaiters;
+    const waiters = _turnstileSearchTokenWaiters; // payment widget removed (Paystack modal is trusted user gesture)
     return new Promise((resolve) => {
       let settled = false;
       const settle = (v) => { if (settled) return; settled = true; resolve(v); };
@@ -17403,204 +16666,16 @@
   }
 
   function resetTurnstile(which) {
+    // Search-only reset. Payment path uses Paystack modal (no widget).
+    if (which !== 'search') return;
     if (typeof turnstile === 'undefined') return;
-    const widgetId = which === 'search' ? turnstileSearchWidgetId : turnstilePaymentWidgetId;
+    const widgetId = turnstileSearchWidgetId;
     if (widgetId == null) return;
     try { turnstile.reset(widgetId); } catch {}
-    if (which === 'search') turnstileSearchToken = '';
-    else turnstilePaymentToken = '';
+    turnstileSearchToken = '';
   }
 
-  // ── Pesapal callback handler — post-redirect flow ──────────────────────
-  //
-  // After successful payment Pesapal does a top-level browser redirect to
-  // our callback_url with ?OrderMerchantReference=TF-... appended. At the
-  // moment of redirect the booking row is NOT guaranteed to be committed
-  // yet — Pesapal's IPN to pesapal-webhook (which creates the Duffel order
-  // + updates bookings) often hasn't completed. A single fetch races that
-  // work and frequently comes back with no PNR, leaving the user stuck on
-  // a merchant_ref forever.
-  //
-  // Architecture: poll payment-status every 2s until a terminal state
-  // (confirmed / failed / needs_support) or a 60s soft-timeout. During
-  // polling the user sees a "Confirming your payment…" spinner. Terminal
-  // states render their own UI (PNR / failure / "we'll email you").
-
-  const POST_REDIRECT_POLL_INTERVAL_MS = 2000;
-  const POST_REDIRECT_POLL_TIMEOUT_MS  = 60 * 1000;
-
-  let _postRedirectPollHandle  = null;
-  let _postRedirectPollStarted = null;
-
-  // Swap the contents of #view-success's hero block to reflect the current
-  // post-redirect state. Each branch is fully self-contained markup.
-  function renderPostRedirectSuccess(state, payload) {
-    const hero = document.querySelector('#view-success .success-hero');
-    if (!hero) return;
-
-    if (state === 'loading') {
-      hero.innerHTML = `
-        <div style="display:flex;justify-content:center;margin-bottom:20px;">
-          <div class="spinner" style="width:36px;height:36px;border-width:3px;"></div>
-        </div>
-        <div class="success-title">Confirming your payment…</div>
-        <p style="color:var(--text-2);max-width:42ch;margin:8px auto 0;">This usually takes a few seconds.</p>
-      `;
-      return;
-    }
-
-    if (state === 'confirmed') {
-      const pnr = payload?.booking?.booking_reference || '';
-      hero.innerHTML = `
-        <div class="success-check">✓</div>
-        <div class="success-title">You're booked.</div>
-        <p style="color:var(--text-2);max-width:42ch;margin:8px auto 0;">A confirmation is on its way to your email. Your booking reference:</p>
-        <div class="success-ref" id="success-ref">${escapeHtml(pnr)}</div>
-      `;
-      return;
-    }
-
-    if (state === 'still-processing') {
-      // Soft-fallback after 60s without a terminal state: payment likely
-      // succeeded, ticketing is taking longer than expected. Calm "we'll
-      // email you" state with merchant ref for support.
-      const mref = payload?.merchantRef || '';
-      hero.innerHTML = `
-        <div class="success-check" style="background:var(--warning-soft,#FEF6E7);color:var(--warning,#B45309);">
-          <svg width="26" height="26" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-            <path d="M12 7v5l3 2" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
-            <circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="2"/>
-          </svg>
-        </div>
-        <div class="success-title">Finalizing your ticket…</div>
-        <p style="color:var(--text-2);max-width:46ch;margin:8px auto 0;">Your payment went through. The airline is issuing your ticket now. We'll email your confirmation within a few minutes.</p>
-        <div class="success-ref" id="success-ref" style="margin-top:14px;">${escapeHtml(mref)}</div>
-        <p style="font-size:13px;color:var(--text-3);max-width:42ch;margin:8px auto 0;">Save this reference in case you need it for support.</p>
-      `;
-      return;
-    }
-
-    if (state === 'failed') {
-      hero.innerHTML = `
-        <div class="success-check" style="background:var(--danger-soft,#FDE8E8);color:var(--danger,#c0392b);">
-          <svg width="26" height="26" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-            <path d="M15 9l-6 6M9 9l6 6" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"/>
-            <circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="2"/>
-          </svg>
-        </div>
-        <div class="success-title">Payment didn't complete</div>
-        <p style="color:var(--text-2);max-width:42ch;margin:8px auto 0;">${escapeHtml(payload?.message || 'Your payment was not processed. No charge was made.')}</p>
-        <div style="margin-top:18px;">
-          <button class="btn btn-primary" onclick="resetAndGoHome()">Start over</button>
-        </div>
-      `;
-      return;
-    }
-  }
-
-  async function pollPostRedirect(merchantRef) {
-    if (Date.now() - _postRedirectPollStarted > POST_REDIRECT_POLL_TIMEOUT_MS) {
-      // 60s without terminal state → soft-fallback rather than spin forever.
-      // Server-side webhook + email confirmation continue independently.
-      renderPostRedirectSuccess('still-processing', { merchantRef });
-      return;
-    }
-
-    try {
-      const res = await fetch(
-        `${SUPABASE_URL}/functions/v1/payment-status?ref=${encodeURIComponent(merchantRef)}`,
-        { headers: { 'Authorization': `Bearer ${SUPABASE_ANON_KEY}` } }
-      );
-      const data = await res.json();
-      console.log('[Pesapal callback poll] state=', data?.state, 'pnr=', data?.booking?.booking_reference);
-
-      if (data?.state === 'confirmed' && data?.booking?.booking_reference) {
-        renderPostRedirectSuccess('confirmed', data);
-        return;
-      }
-      if (data?.state === 'failed') {
-        renderPostRedirectSuccess('failed', data);
-        return;
-      }
-      if (data?.state === 'needs_support') {
-        renderPostRedirectSuccess('still-processing', { merchantRef });
-        return;
-      }
-      // 'pending' / 'processing' / undefined / network blip → keep polling
-    } catch (e) {
-      console.warn('[Pesapal callback poll] fetch failed:', e);
-      // Network blip — keep polling (don't terminate on transient errors)
-    }
-
-    _postRedirectPollHandle = setTimeout(
-      () => pollPostRedirect(merchantRef),
-      POST_REDIRECT_POLL_INTERVAL_MS
-    );
-  }
-
-  // Boot-time hook. Runs on `load` (after SPA init) so it doesn't race the
-  // default view setup. The synchronous boot block already flipped the
-  // visible view to success with a "Confirming…" placeholder text — this
-  // handler renders the proper spinner state and starts the poll.
-  window.addEventListener('load', () => {
-    setTimeout(() => {
-      try {
-        const params = new URLSearchParams(location.search);
-        const ref = params.get('OrderMerchantReference') || params.get('ref');
-        if (!ref) return;
-        console.log('[Pesapal] Detected callback, merchant_ref=', ref);
-
-        // Clean URL so refresh doesn't re-trigger this handler
-        history.replaceState(null, '', location.pathname);
-
-        activeMerchantRef = ref;
-        location.hash = 'success';
-        // Step 3: booking complete → wipe the passenger shadow.
-        try { sessionStorage.removeItem(BOOKING_PASSENGER_SHADOW_KEY); } catch (_) {}
-        // Also wipe the secure shadow (DOB, passport) — same lifecycle.
-        try { sessionStorage.removeItem(BOOKING_SECURE_SHADOW_KEY); } catch (_) {}
-        // Step 4 (Path A1): also wipe the payment-return shadow. Booking
-        // succeeded, so a stray #payment URL (bookmark, back button)
-        // should NOT recover into this now-dead offer.
-        try { clearPaymentReturn(); } catch (_) {}
-        // Also wipe the extras shadow (seats + baggage) — same lifecycle.
-        try { clearBookingExtras(); } catch (_) {}
-        if (typeof showView === 'function') showView('success');
-
-        // If the boot block already populated the success-ref from a stash
-        // (pollOnce had confirmed before Pesapal redirected), skip the
-        // loading state + poll entirely — the page is already showing the
-        // PNR. Clear the consumed flag and stash so we don't re-use it
-        // for a future booking in the same tab.
-        let _alreadyConfirmed = false;
-        try {
-          _alreadyConfirmed = sessionStorage.getItem('tumafly_post_pay_consumed') === '1';
-        } catch (_) {}
-        if (_alreadyConfirmed) {
-          try {
-            sessionStorage.removeItem('tumafly_post_pay_pnr');
-            sessionStorage.removeItem('tumafly_post_pay_ref');
-            sessionStorage.removeItem('tumafly_post_pay_consumed');
-          } catch (_) {}
-          // Promote the PNR-bearing hero to the proper "confirmed" markup
-          // (the boot block only changed text content of #success-ref, but
-          // the static markup uses the right structure already — nothing
-          // more to do here visually).
-          return;
-        }
-
-        // No stash → fall through to the loading state + poll for the
-        // (rarer) case where Pesapal redirected before pollOnce confirmed.
-        renderPostRedirectSuccess('loading');
-        _postRedirectPollStarted = Date.now();
-        pollPostRedirect(ref);
-      } catch (e) {
-        console.error('[Pesapal] callback handler failed:', e);
-      }
-    }, 50); // tiny defer so any synchronous init completes first
-  });
-
-  // ============================================================
+    // ============================================================
   // PHASE 4.6 — USER ACCOUNTS + AUTH
   // ============================================================
 
@@ -19622,7 +18697,5 @@
      DOM flow (not display:none, not positioned off-screen). The widgets render no
      visible UI so these divs stay 0×0; no layout impact. -->
 <div id="turnstile-host-search"></div>
-<div id="turnstile-host-payment"></div>
-
 </body>
 </html>
