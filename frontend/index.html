@@ -118,6 +118,42 @@
       }
     })();
   </script>
+  <script>
+    // ============================================================
+    // NEW-TAB BOOKING GUARD
+    // ============================================================
+    // When a booking is committed from #results (OW outbound or RT
+    // inbound), we open #booking in a new tab via window.open so the
+    // results tab stays alive with all filters/scroll/allOffers intact.
+    // The commit code (commitOfferInNewTab) sets
+    // sessionStorage['tumafly_new_tab_booking'] = '1' right before opening
+    // the child; browsers copy the opener's sessionStorage into new tabs
+    // opened without noopener, so the child inherits the flag on boot.
+    //
+    // In the child we hide the "← Back to results" buttons on #booking —
+    // there's no results view alive in this tab to go back to. On iOS the
+    // native back gesture already closes the child tab and returns to the
+    // opener; desktop/Android likewise treat back-from-first-entry as
+    // "close tab." No history hack needed.
+    //
+    // The flag stays set for the child tab's lifetime (survives F5 in the
+    // child — correct: the child is committed to booking). It never
+    // leaves the tab: sessionStorage is per-tab after the initial copy,
+    // and the opener (results tab) clears its own copy immediately after
+    // window.open returns (see commitOfferInNewTab).
+    (function() {
+      try {
+        if (sessionStorage.getItem('tumafly_new_tab_booking') !== '1') return;
+        var s = document.createElement('style');
+        s.setAttribute('data-tf-new-tab-guard', '1');
+        s.textContent =
+          '#view-booking .booking-inline-cta > .btn-secondary,' +
+          '#view-booking .booking-cta-bar > .btn-secondary{display:none !important;}' +
+          '#view-booking .booking-inline-cta{justify-content:flex-end !important;}';
+        document.head.appendChild(s);
+      } catch (_) { /* silent — never block page render */ }
+    })();
+  </script>
   <style>
     :root {
       --brand: #3D95F5;
@@ -13133,6 +13169,81 @@
     showFlightDetailsModal(sel.offer, sliceIndex);
   }
 
+  // ============================================================
+  // NEW-TAB BOOKING COMMIT
+  // ============================================================
+  // Called from selectFlightCabin on OW outbound and RT inbound picks.
+  // Opens #booking in a new tab so the results tab stays exactly where
+  // it was — filters, scroll, allOffers, lastSearchParams all untouched.
+  // Browsers copy the opener's sessionStorage into a same-origin child
+  // opened via window.open (without noopener), so the booking-passenger
+  // shadow (with fare_expires_at_ms) travels into the child. The child
+  // boots via the existing F5-restore path: HEAD script sees
+  // #booking?offer=off_XXX, restoreFromUrl → restoreBooking re-fetches
+  // via get-offer, shell paint uses the shadow's fare_expires_at_ms to
+  // start the fare timer at t=0.
+  //
+  // Returns true if the child tab opened, false if the browser blocked
+  // the popup. On false, caller falls through to same-tab
+  // proceedToBooking() so behavior is never worse than pre-change.
+  //
+  // MUST be called synchronously inside the click handler — any awaits
+  // between the click and window.open() cause iOS Safari to treat the
+  // call as programmatic and block it.
+  function commitOfferInNewTab(selection, otherSlice) {
+    // Compute the earlier of (up to) two expires_at values so the child's
+    // fare timer matches the effective offer window on first paint.
+    // Mirrors getEffectiveExpiresAtMs.
+    var exps = [];
+    if (selection && selection.offer && selection.offer.expires_at) {
+      exps.push(new Date(selection.offer.expires_at).getTime());
+    }
+    if (otherSlice && otherSlice.offer && otherSlice.offer.expires_at) {
+      exps.push(new Date(otherSlice.offer.expires_at).getTime());
+    }
+    var expMs = exps.length ? Math.min.apply(null, exps) : 0;
+
+    // Minimal shadow — empty passenger + contact fields (user hasn't been
+    // to booking yet), but a valid fare_expires_at_ms so the child's fare
+    // timer starts immediately. Shape mirrors stashBookingPassengers.
+    try {
+      sessionStorage.setItem(BOOKING_PASSENGER_SHADOW_KEY, JSON.stringify({
+        travelers: [],
+        contact: { email: '', phone_number: '', phone_dial_iso: '' },
+        fare_expires_at_ms: expMs || 0,
+      }));
+      sessionStorage.setItem(BOOKING_SECURE_SHADOW_KEY, JSON.stringify({
+        travelers: [],
+      }));
+      // Signal to the child's HEAD-script guard that this tab is a
+      // committed booking (hides "← Back to results" buttons).
+      sessionStorage.setItem('tumafly_new_tab_booking', '1');
+    } catch (_) { /* sessionStorage disabled — child will still boot via
+                       URL params, just without instant fare-timer paint */ }
+
+    var offerId = selection && selection.cabinPricing && selection.cabinPricing.offer_id;
+    if (!offerId) {
+      // Nothing to commit — clear the flag we just set and let caller
+      // fall through to same-tab flow (which will likely also fail, but
+      // that's an existing-code concern, not ours).
+      try { sessionStorage.removeItem('tumafly_new_tab_booking'); } catch (_) {}
+      return false;
+    }
+
+    // Use pathname (not '/') so a subpath deployment would still work.
+    var url = window.location.pathname + '#booking?offer=' + encodeURIComponent(offerId);
+    var child = null;
+    try { child = window.open(url, '_blank'); } catch (_) { child = null; }
+
+    // Whether or not the child opened, the OPENER tab must not carry the
+    // new-tab flag — it stays on #results and never enters #booking via
+    // this codepath. If we fell back to same-tab, hiding the
+    // Back-to-results button would be actively wrong.
+    try { sessionStorage.removeItem('tumafly_new_tab_booking'); } catch (_) {}
+
+    return !!child;
+  }
+
   function selectFlightCabin(flightKey, kind, cabin) {
     const offer = allOffers.find(o => o.flight_key === flightKey);
     if (!offer) return;
@@ -13163,13 +13274,21 @@
       return;
     }
     if (kind === 'inbound') {
+      // Try new-tab commit first. If the popup lands, results tab stays
+      // exactly where it is (inbound picker with selectedOutbound intact,
+      // filters + scroll preserved) and the child does the booking. If
+      // blocked, fall through to same-tab proceedToBooking so behavior
+      // is never worse than pre-change.
+      if (commitOfferInNewTab(selection, selectedOutbound)) return;
       selectedInbound = selection;
       // For round-trip booking we use the outbound's cabin offer_id (Duffel pairs them)
       selectedOffer = selectedOutbound;
       proceedToBooking();
       return;
     }
-    // One-way
+    // One-way — same new-tab-first pattern. On success, results tab keeps
+    // its list + filters + scroll intact; no offer is "committed" here.
+    if (commitOfferInNewTab(selection, null)) return;
     selectedOutbound = selection;
     selectedOffer = selection;
     selectedInbound = null;
