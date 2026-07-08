@@ -7982,18 +7982,19 @@
     if (_guard) _guard.remove();
     try { delete window.__tfRestoreTarget; } catch (_) {}
 
-    ['home','results','booking','payment','success','profile','my-trips','find-booking','itinerary'].forEach(n => {
+    ['home','results','booking','success','profile','my-trips','find-booking','itinerary'].forEach(n => {
       document.getElementById('view-' + n).classList.toggle('hidden', n !== name);
     });
     document.body.setAttribute('data-view', name);
     window.scrollTo({ top: 0, behavior: 'instant' });
     updateMobileSummaryPill(name); // Phase A — keep nav pill in sync
-    if (pollHandle && name !== 'payment') {
+    if (pollHandle) {
       clearTimeout(pollHandle);
       pollHandle = null;
     }
-    // Fare timer: start when entering booking/payment, stop everywhere else.
-    if (name === 'booking' || name === 'payment') {
+    // Fare timer: start when entering booking, stop everywhere else.
+    // (No more #payment view — Paystack modal opens over #booking.)
+    if (name === 'booking') {
       startFareTimer(name);
     } else {
       stopFareTimer();
@@ -8796,7 +8797,7 @@
   //      Otherwise the head-script flash guard would keep the view hidden
   //      until we call showView, and the user would stare at a blank page
   //      for the duration of the Turnstile challenge + Duffel fetch.
-  //   3. Await Turnstile token via ensureTurnstileToken('payment') — the
+  //   3. Await Turnstile token via ensureTurnstileToken('search') — the
   //      booking view already renders the payment widget for later use.
   //   4. Call get-offer EF. Response shape is one-bucket-of-search-flights
   //      (same fields), so we drop it into selectedOutbound directly.
@@ -8975,7 +8976,7 @@
     // land in the generic error path.
     let token = '';
     try {
-      token = await ensureTurnstileToken('payment');
+      token = await ensureTurnstileToken('search');
     } catch (e) {
       console.warn('[restoreBooking] turnstile await failed:', e);
     }
@@ -9010,7 +9011,7 @@
       console.warn('[restoreBooking] 403 verification failed — attempting invisible retry with fresh token');
       let retryToken = '';
       try {
-        retryToken = await ensureTurnstileToken('payment');
+        retryToken = await ensureTurnstileToken('search');
       } catch (e) {
         console.warn('[restoreBooking] retry turnstile await failed:', e);
       }
@@ -15515,14 +15516,8 @@
     passengerData = r.passengers;
     contactData = { email, phone_number: phone };
 
-    // Step 4 (Path A1): stash the offer_id so a #payment refresh can bounce
-    // the user back to booking view with everything preserved. Single call
-    // site, single write per Continue-click. Cleared on Pesapal callback
-    // success + on resetAndGoHome.
-    try { stashPaymentReturn(); } catch (_) {}
     // Extras shadow — one-time snapshot of seats + baggage tied to this
-    // payment attempt's offer_id. Restored ONLY on #payment F5 by
-    // restorePaymentView. See stashBookingExtras docstring for rationale.
+    // payment attempt's offer_id. Restored on #booking F5 by restoreBooking.
     try { stashBookingExtras(); } catch (_) {}
 
     // D5: Stash guest's contact + first traveler in localStorage so the next
@@ -16316,7 +16311,7 @@
     const metaEl  = document.getElementById('mobile-summary-meta');
     if (!strip || !routeEl || !metaEl) return;
 
-    const showStrip = ['results', 'booking', 'payment'].includes(viewName);
+    const showStrip = ['results', 'booking'].includes(viewName);
     if (!showStrip) { strip.classList.add('hidden'); return; }
     // Batch 2 · #11a — Filter icon in the strip only makes sense on #results.
     // Booking and payment views don't have filters to open.
@@ -16592,19 +16587,8 @@
         },
         'expired-callback': () => { turnstileSearchToken = ''; },
       });
-      turnstilePaymentWidgetId = turnstile.render('#turnstile-host-payment', {
-        sitekey: TURNSTILE_SITEKEY,
-        action: 'payment',
-        callback: (token) => {
-          turnstilePaymentToken = token;
-          _flushTurnstileWaiters('payment', token);
-        },
-        'error-callback': () => {
-          turnstilePaymentToken = '';
-          _flushTurnstileWaiters('payment', '');
-        },
-        'expired-callback': () => { turnstilePaymentToken = ''; },
-      });
+      // Payment widget removed — Paystack modal is the trusted user gesture
+      // for payment initiation. No Turnstile needed on payment path.
     } catch (e) {
       console.warn('Turnstile render failed:', e);
     }
@@ -17038,7 +17022,7 @@
       return;
     }
 
-    if ((currentView === 'booking' || currentView === 'payment') && selectedOutbound) {
+    if ((currentView === 'booking') && selectedOutbound) {
       // Stay on view. JS state (selected offers, passenger forms, contact info) is
       // unaffected — sign-out with GSI doesn't reload the page. User continues as guest.
       // Fare-timer handles offer expiry independently.
