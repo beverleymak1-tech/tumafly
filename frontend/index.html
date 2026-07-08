@@ -9586,21 +9586,26 @@
         catch (e) { console.warn('[_payFromRestore] reconcile failed:', e); }
       }
 
-      // 4. Repaint booking forms with the reconciled data. View is hidden
-      //    but the DOM will be correct if user hits Back-to-details.
-      try { renderPassengerForms(); } catch (_) {}
-
-      // 4b. Mark saved for any traveler whose data is now complete for
-      //     the trip's requirements. Two sources merge here:
-      //       - Signed-in with saved traveler: born_on/passport from DB
-      //         via reconcile above
-      //       - Guest OR fresh-typed signed-in: fields from the secure
-      //         shadow via step 1b hydration
-      //     Either way, if memory now has everything the trip needs,
-      //     the traveler is saved for purposes of the "route to booking"
-      //     check below. Completeness rules mirror saveTraveler:
-      //     title/name/gender/born_on required always; passport
-      //     (country/number/expires) required when tripRequiresPassport.
+      // 4. Mark saved for any traveler whose data is now complete for
+      //    the trip's requirements. Two sources merge here:
+      //      - Signed-in with saved traveler: born_on/passport from DB
+      //        via reconcile above
+      //      - Guest OR fresh-typed signed-in: fields from the secure
+      //        shadow via step 1b hydration
+      //    Either way, if memory now has everything the trip needs,
+      //    the traveler is saved for purposes of the "route to booking"
+      //    check below. Completeness rules mirror saveTraveler:
+      //    title/name/gender/born_on required always; passport
+      //    (country/number/expires) required when tripRequiresPassport.
+      //
+      //    MUST run BEFORE renderPassengerForms so that render reflects
+      //    the correct saved state. If we render first (as the pre-fix
+      //    code did), guest cards render EXPANDED with the raw sensitive
+      //    values from step 1b hydration painted into the DOM — which is
+      //    visible on Back-to-details. Rendering after marking saved
+      //    means those cards render as collapsed name-summaries with no
+      //    sensitive fields in the DOM. Pencil-click re-opens with masks
+      //    via editTraveler's existing Mechanism 2 flow.
       travelerStates.forEach(s => {
         if (s.saved) return;
         const d = s?.data;
@@ -9613,6 +9618,15 @@
         }
         s.saved = true;
       });
+
+      // 5. Repaint booking forms. View is hidden but the DOM will be
+      //    correct if user hits Back-to-details. Cards where step 4
+      //    marked saved=true render collapsed (name-only summary); pencil
+      //    on those triggers editTraveler which sets _openedFromSaved and
+      //    re-renders with masks per Mechanism 2. Cards still unsaved
+      //    (should be none in the happy path — Continue-to-payment gates
+      //    on all saved) render expanded and route via step 6 below.
+      try { renderPassengerForms(); } catch (_) {}
 
       // 5. Check if all travelers are now saved. If any aren't (guest
       //    checkout with genuinely incomplete data, or user typed a
