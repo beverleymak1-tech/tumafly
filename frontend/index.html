@@ -9627,6 +9627,20 @@
       //    (should be none in the happy path — Continue-to-payment gates
       //    on all saved) render expanded and route via step 6 below.
       try { renderPassengerForms(); } catch (_) {}
+      // Also re-render the baggage + seat lists. Both filter rows by
+      // travelerStates[i].saved; the earlier render triggered by the
+      // restoreBooking flow ran while saved was still false (guest, no
+      // _saved_traveler_id link), producing empty slots. Now that step 4
+      // has set saved=true for complete-data travelers, re-render so the
+      // "1 bag · KES X" and "Seat 12A · KES Y" rows appear. This makes
+      // Back-to-details show the persisted extras on the booking view,
+      // matching the sidecard total already shown on #payment.
+      try { if (typeof renderBaggageList === 'function') renderBaggageList(); } catch (_) {}
+      try { if (typeof renderSeatsList === 'function') renderSeatsList(); } catch (_) {}
+      // Booking summary reads the same selectedBaggages/selectedSeats;
+      // refresh it so the booking-view sidecard mirrors the payment-view
+      // sidecard on Back-to-details.
+      try { if (typeof renderBookingSummary === 'function') renderBookingSummary(); } catch (_) {}
 
       // 5. Check if all travelers are now saved. If any aren't (guest
       //    checkout with genuinely incomplete data, or user typed a
