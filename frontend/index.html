@@ -8553,6 +8553,7 @@
       try { sessionStorage.removeItem(BOOKING_PASSENGER_SHADOW_KEY); } catch (_) {}
       try { sessionStorage.removeItem(BOOKING_SECURE_SHADOW_KEY); } catch (_) {}
       clearPaymentReturn();
+      clearBookingExtras();
       showView('home');
       try { safeHistory('replace', { view: 'home' }, window.location.pathname); } catch (_) {}
       return true;
@@ -9289,6 +9290,12 @@
         await loadBaggageForBookingOffer();
         renderBaggageList();
         renderBookingSummary();
+        // Payment sidecard reads the same selectedBaggages/selectedSeats
+        // state; refresh it too so a #payment F5 restore reflects any
+        // catalog-driven pruning applied by indexBaggageOptionsByPax.
+        // No-op if payment view isn't active — the DOM slots are hidden
+        // but their contents will be correct if user later navigates back.
+        try { if (typeof renderPaymentSummary === 'function') renderPaymentSummary(); } catch (_) {}
       } catch (e) { console.warn('[restoreBooking] baggage fetch failed:', e); }
     })();
 
@@ -9341,8 +9348,11 @@
   //     this function returns; the user's later tap runs its own
   //     ensureTurnstileToken from a fresh widget.
   //   - Extend BOOKING_PASSENGER_SHADOW_KEY to include seats or baggage.
-  //     Those ancillary picks are lost on payment refresh — the user re-adds
-  //     them via Back-to-details if they want them. Session-16-safe.
+  //     Session 16's regression hunt flagged this as risky — the booking
+  //     shadow is written on every mutation and would drift from the fresh
+  //     get-offer response. Instead, seats/baggage are persisted via the
+  //     separate BOOKING_EXTRAS_SHADOW_KEY, written ONCE per Continue-click
+  //     in goToPayment, and restored via restoreBookingExtras below.
   async function restorePaymentView(offerId) {
     // Guard against a stale flag from a prior aborted restore.
     _restoreEndOnPayment = true;
@@ -9447,6 +9457,19 @@
       // activeMerchantRef is a module-level let, so page reload already
       // reset it to null — belt-and-braces to be explicit.
       activeMerchantRef = null;
+
+      // Restore seats + baggage from the extras shadow. Guarded by offer_id
+      // match. Any stale service_ids will be pruned by indexBaggageOptionsByPax
+      // when the fire-and-forget baggage catalog fetch (started inside
+      // restoreBooking above) resolves. Existing STALE_SEAT/STALE_BAGGAGE
+      // 409 handler in startCardPayment covers any survivor via strike-1
+      // clear + tailored alert. Failure to restore is silent — the sidecard
+      // simply won't show seat/baggage line items and the user re-picks via
+      // Back-to-details.
+      try {
+        const restoredOfferId = (selectedInbound || selectedOutbound)?.cabinPricing?.offer_id || '';
+        if (restoredOfferId) restoreBookingExtras(restoredOfferId);
+      } catch (e) { console.warn('[restorePaymentView] restoreBookingExtras failed:', e); }
 
       // Payment view has its OWN slots for trip + price (#payment-trip-slot,
       // #payment-price-slot, #payment-price-inline). restoreBooking populated
@@ -9889,7 +9912,11 @@
   //     tied to the saved_travelers row, which may have changed. Safer
   //     to have the user re-pick, which re-fetches the freshest data.
   //   - save_to_account: never persist across sessions, always default false.
-  //   - Baggage/seat selections: keyed by offer_id, refetched fresh anyway.
+  //   - Baggage/seat selections: kept OUT of this key deliberately (Session
+  //     16 guardrail — this shadow is written on every mutation and would
+  //     drift from the fresh get-offer catalog). They live in a separate
+  //     BOOKING_EXTRAS_SHADOW_KEY written ONCE per Continue-click and
+  //     restored only on #payment F5.
   //
   // Shape stored:
   //   { travelers: [{title, given_name, family_name, gender, nationality}, ...],
@@ -10044,11 +10071,13 @@
   //   3. Missing/corrupt → clean bounce to home
   //
   // Narrow-purpose by design: offer_id + fare_expires_at_ms + timestamp.
-  // Contact + travelers ride on the existing BOOKING_PASSENGER_SHADOW_KEY.
-  // Seats/baggage are NOT persisted — session 16's regression hunt
-  // identified extending the booking shadow to include those as a candidate
-  // root cause. On payment-view refresh the user loses any seat/baggage
-  // picks; navigating back to booking to re-pick is one tap.
+  // Contact + travelers ride on BOOKING_PASSENGER_SHADOW_KEY and
+  // BOOKING_SECURE_SHADOW_KEY. Seats + baggage ride on
+  // BOOKING_EXTRAS_SHADOW_KEY, written alongside this one in goToPayment
+  // and restored by restorePaymentView. That separation preserves the
+  // Session 16 guardrail (never extend BOOKING_PASSENGER_SHADOW_KEY with
+  // seat/baggage service_ids) while letting the sidecard + create-payment
+  // reflect the user's ancillary picks after F5.
   //
   // Written ONCE per Continue click, cleared on Pesapal callback success
   // and on resetAndGoHome. TTL of 20 min is an outer bound; the fare
@@ -10078,6 +10107,76 @@
 
   function clearPaymentReturn() {
     try { sessionStorage.removeItem(PAYMENT_RETURN_SHADOW_KEY); } catch (_) {}
+  }
+
+  // ─── Booking-extras shadow (seats + baggage) ────────────────────────
+  //
+  // Written ONCE per Continue-click in goToPayment, right after
+  // stashPaymentReturn. Restored ONLY on #payment F5 via restorePaymentView.
+  // NEVER read by restoreBooking / #booking F5 — the risky pattern
+  // Session 16's regression hunt flagged (extending the booking shadow to
+  // include seat/baggage service_ids, written on every mutation) is
+  // deliberately NOT what this does. This is a payment-attempt snapshot,
+  // not a live-mirror of #booking state.
+  //
+  // Shape stored:
+  //   { offer_id, selectedBaggages: {...}, selectedSeats: {...}, ts }
+  //
+  // offer_id acts as a defensive guard on restore — if the shadow doesn't
+  // match the offer restoreBooking resolved to, we skip the hydration
+  // (should be impossible under Design A but cheap insurance against a
+  // future refactor introducing a mismatch).
+  //
+  // Safety net for stale service_ids: restoreBooking's fire-and-forget
+  // baggage catalog fetch calls indexBaggageOptionsByPax(), which prunes
+  // selectedBaggages of any service_ids not present in the fresh catalog.
+  // For seats we rely on the existing STALE_SEAT/STALE_BAGGAGE 409 handler
+  // in startCardPayment as the last line of defense — strike 1 clears the
+  // affected category + tailored alert; strike 2 escalates to search-expired.
+  //
+  // Same clear cadence as the other shadows.
+  const BOOKING_EXTRAS_SHADOW_KEY = 'tf_booking_extras_v1';
+
+  function stashBookingExtras() {
+    try {
+      const sel = selectedInbound || selectedOutbound;
+      const offerId = sel?.cabinPricing?.offer_id || '';
+      if (!offerId) return;
+      sessionStorage.setItem(BOOKING_EXTRAS_SHADOW_KEY, JSON.stringify({
+        offer_id: offerId,
+        selectedBaggages: selectedBaggages || {},
+        selectedSeats: selectedSeats || {},
+        ts: Date.now(),
+      }));
+    } catch (_) { /* sessionStorage disabled — silent no-op */ }
+  }
+
+  function clearBookingExtras() {
+    try { sessionStorage.removeItem(BOOKING_EXTRAS_SHADOW_KEY); } catch (_) {}
+  }
+
+  // Read + rehydrate seat/baggage picks into module-level state.
+  // Returns true if anything was restored, false otherwise. Called only
+  // from restorePaymentView; safe to call without the shadow existing.
+  function restoreBookingExtras(offerId) {
+    try {
+      const raw = sessionStorage.getItem(BOOKING_EXTRAS_SHADOW_KEY);
+      if (!raw) return false;
+      const payload = JSON.parse(raw);
+      if (!payload || typeof payload !== 'object') return false;
+      // offer_id guard: refuse to hydrate onto a different offer
+      if (!payload.offer_id || payload.offer_id !== offerId) return false;
+      let restored = false;
+      if (payload.selectedBaggages && typeof payload.selectedBaggages === 'object') {
+        selectedBaggages = payload.selectedBaggages;
+        restored = true;
+      }
+      if (payload.selectedSeats && typeof payload.selectedSeats === 'object') {
+        selectedSeats = payload.selectedSeats;
+        restored = true;
+      }
+      return restored;
+    } catch (_) { return false; }
   }
 
   // ============================================================
@@ -15903,6 +16002,10 @@
     // site, single write per Continue-click. Cleared on Pesapal callback
     // success + on resetAndGoHome.
     try { stashPaymentReturn(); } catch (_) {}
+    // Extras shadow — one-time snapshot of seats + baggage tied to this
+    // payment attempt's offer_id. Restored ONLY on #payment F5 by
+    // restorePaymentView. See stashBookingExtras docstring for rationale.
+    try { stashBookingExtras(); } catch (_) {}
 
     // D5: Stash guest's contact + first traveler in localStorage so the next
     // booking on the same device pre-fills. Signed-in users skip this — they
@@ -16263,6 +16366,8 @@
         try { sessionStorage.removeItem(BOOKING_PASSENGER_SHADOW_KEY); } catch (_) {}
         // Also wipe the secure shadow (DOB, passport) — same lifecycle.
         try { sessionStorage.removeItem(BOOKING_SECURE_SHADOW_KEY); } catch (_) {}
+        // Also wipe the extras shadow (seats + baggage) — same lifecycle.
+        clearBookingExtras();
         showView('success');
         return;
       }
@@ -17349,6 +17454,8 @@
         // succeeded, so a stray #payment URL (bookmark, back button)
         // should NOT recover into this now-dead offer.
         try { clearPaymentReturn(); } catch (_) {}
+        // Also wipe the extras shadow (seats + baggage) — same lifecycle.
+        try { clearBookingExtras(); } catch (_) {}
         if (typeof showView === 'function') showView('success');
 
         // If the boot block already populated the success-ref from a stash
