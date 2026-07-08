@@ -5580,6 +5580,27 @@
       }
       .search-grid .from-to-col { grid-column: 1 / -1; }
 
+      /* Mobile-only: hoist the Travelers picker above the Search button.
+         In the DOM, Travelers lives in a second .search-grid row that
+         renders below Search on mobile stacking. Rather than reorder DOM
+         (which would move desktop layout too), we dissolve both .search-grid
+         boxes with display:contents so their children become direct flex
+         children of .search, then re-order individually. Desktop layout
+         (still grid) is untouched. */
+      .search { display: flex; flex-direction: column; }
+      .search .search-grid { display: contents; }
+      .search > .search-tabs                { order: 1; }
+      .search > #search-alert               { order: 2; }
+      .search .from-to-col                  { order: 3; }
+      .search .field:has(#tp-home-trigger)  { order: 4; margin-top: 2px; }
+      .search .field:has(#date)             { order: 5; }
+      .search #return-field                 { order: 6; }
+      .search #search-btn                   { order: 7; margin-top: 4px; }
+      .search .btn-ghost                    { order: 8; }
+      /* The 1fr spacer div between Travelers and Demo route makes sense
+         on desktop but is dead vertical space on mobile — hide it. */
+      .search .search-grid > div:empty      { display: none; }
+
       /* Page container */
       .page { padding: 12px 12px 80px; }
 
@@ -6822,7 +6843,7 @@
           <div id="passenger-forms"></div>
         </div>
 
-        <div class="card">
+        <div class="card" id="contact-card">
           <h3>Contact details</h3>
           <p class="sub">We send confirmation to this email. We may text the phone number if there's an issue with your booking.</p>
           <div class="form-grid">
@@ -10408,6 +10429,12 @@
       if (_dt) _dt.value = data.date             || '';
       if (_rt) _rt.value = data.returnDate       || '';
 
+      // Sync return-date's min attribute to depart+1 now that the stash
+      // restore populated the depart value. Without this, the return picker
+      // stays greyed only from today onward until the user interacts with
+      // the depart field.
+      try { _tfSyncReturnMin(_dt, _rt); } catch (_) {}
+
       // Restore the autocomplete-tracked IATA state so searchFlights() can
       // submit without the user needing to re-pick from the dropdown.
       if (data.originIata) {
@@ -10926,6 +10953,19 @@
     _tfDateObserver.observe(document.body, { childList: true, subtree: true });
   }
 
+  // Sync the return-date `min` attribute to depart+1 whenever depart already
+  // has a value. Called on init (fresh load, restoreHomeForm) so the return
+  // picker greys out pre-depart dates immediately — without this, `min`
+  // stays at "today" until the depart change listener fires.
+  function _tfSyncReturnMin(dateEl, retEl) {
+    if (!dateEl || !retEl || !dateEl.value) return;
+    const next = new Date(dateEl.value);
+    if (isNaN(next.getTime())) return;
+    next.setDate(next.getDate() + 1);
+    retEl.min = next.toISOString().split('T')[0];
+    if (retEl.value && retEl.value <= dateEl.value) retEl.value = '';
+  }
+
   (function initDates() {
     const tomorrow = new Date();
     tomorrow.setDate(tomorrow.getDate() + 1);
@@ -10952,6 +10992,9 @@
       const ret = retEl.value;
       if (ret && ret <= this.value) retEl.value = '';
     });
+    // Initial sync — if depart already has a value (stash restore, browser
+    // form autofill), set return's min immediately.
+    _tfSyncReturnMin(dateEl, retEl);
 
     ['r-date', 'r-return-date', 'es-date', 'es-return-date'].forEach(id => {
       const el = document.getElementById(id);
@@ -10977,6 +11020,7 @@
         const ret = rRetEl.value;
         if (ret && ret <= this.value) rRetEl.value = '';
       });
+      _tfSyncReturnMin(rDateEl, rRetEl);
     }
     const esDateEl = document.getElementById('es-date');
     const esRetEl  = document.getElementById('es-return-date');
@@ -10989,6 +11033,7 @@
         const ret = esRetEl.value;
         if (ret && ret <= this.value) esRetEl.value = '';
       });
+      _tfSyncReturnMin(esDateEl, esRetEl);
     }
   })();
 
@@ -14654,9 +14699,37 @@
           return;
         }
       }
-      // All travelers saved — advance to Baggage. document.getElementById
-      // then .closest('.card') is the same pattern skipBags uses (line
-      // ~13786) so scroll targets are consistent across the booking flow.
+      // All travelers saved. Before jumping to Baggage, check whether the
+      // Contact card needs the user's attention: guests always land on it
+      // with empty fields; signed-in users get email/phone auto-prefilled
+      // from their profile and can skip straight to Baggage. Heuristic is
+      // "either field empty" rather than "guest" — a signed-in user who
+      // cleared their prefill should still be routed to fix it.
+      const _contactEmail = document.getElementById('contact-email');
+      const _contactPhone = document.getElementById('contact-phone');
+      const _contactMissing =
+        (_contactEmail && !_contactEmail.value.trim()) ||
+        (_contactPhone && !_contactPhone.value.trim());
+      if (_contactMissing) {
+        const contactCard = document.getElementById('contact-card');
+        if (contactCard) {
+          contactCard.scrollIntoView({ behavior: 'smooth', block: 'start' });
+          // Focus the first empty field so the keyboard opens on mobile
+          // without a second tap.
+          setTimeout(() => {
+            if (_contactEmail && !_contactEmail.value.trim()) {
+              _contactEmail.focus({ preventScroll: true });
+            } else if (_contactPhone && !_contactPhone.value.trim()) {
+              _contactPhone.focus({ preventScroll: true });
+            }
+          }, 400); // wait for the smooth-scroll to settle
+          return;
+        }
+      }
+      // Contact is filled (signed-in with prefill, or guest who typed it
+      // earlier) — advance to Baggage. document.getElementById then
+      // .closest('.card') is the same pattern skipBags uses so scroll
+      // targets are consistent across the booking flow.
       const baggageCard = document.getElementById('baggage-list')?.closest('.card');
       if (baggageCard) {
         baggageCard.scrollIntoView({ behavior: 'smooth', block: 'start' });
@@ -16384,7 +16457,7 @@
         return;
       }
 
-      if (!res.ok || data.error || !data.redirect_url) {
+      if (!res.ok || data.error || !data.access_code) {
         // Reset so the next attempt gets a fresh token
         resetTurnstile('payment');
         // Step 2b: switch to payment view so the "Try again" button appears
@@ -16392,8 +16465,9 @@
         // error and no visible retry.
         showView('payment');
         showAlert('payment-alert', data.error || 'Could not start payment. Please try again.');
-        // No more "Pay with card" gate — surface a retry button inline since
-        // auto-load just failed and the loading spinner would otherwise hang.
+        // Surface a retry button inline since the initial CTA render below
+        // won't fire (we returned above), and the loading spinner would
+        // otherwise hang.
         document.getElementById('card-iframe-wrap').innerHTML = `
           <div style="text-align:center;padding:18px;">
             <button class="btn btn-primary btn-lg" onclick="resetPaymentPane()">Try again</button>
