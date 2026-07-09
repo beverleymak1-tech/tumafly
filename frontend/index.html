@@ -1067,6 +1067,130 @@
       margin-top: 14px; line-height: 1.5;
     }
 
+    /* ── Cancel booking (Session 23) ─────────────────────────────
+       Status banner at the top of #itinerary for refund/cancelled
+       lifecycle states. Sits above the flight title. Colour is
+       determined by state. */
+    .itin-status-banner {
+      display: flex; align-items: flex-start; gap: 12px;
+      padding: 14px 16px; border-radius: var(--radius);
+      margin-bottom: 20px; font-size: 14px; line-height: 1.5;
+    }
+    .itin-status-banner.warn {
+      background: var(--warning-soft, #FEF6E7);
+      color: var(--warning, #92400E);
+      border: 1px solid var(--warning, #F59E0B);
+    }
+    .itin-status-banner.info {
+      background: var(--brand-soft);
+      color: var(--brand-dark, var(--brand));
+      border: 1px solid var(--brand);
+    }
+    .itin-status-banner.muted {
+      background: var(--surface-2, #F3F4F6);
+      color: var(--text-2);
+      border: 1px solid var(--border);
+    }
+    .itin-status-banner-icon { flex-shrink: 0; margin-top: 1px; }
+    .itin-status-banner-title { font-weight: 700; margin-bottom: 2px; }
+
+    /* Cancel button block — full-width, below itin-layout */
+    .itin-actions {
+      margin-top: 24px;
+      display: flex; flex-direction: column; align-items: center; gap: 8px;
+    }
+    .itin-cancel-btn {
+      background: none; border: 1px solid var(--border-2);
+      color: var(--text-2); font-family: inherit; font-size: 14px;
+      font-weight: 600; padding: 12px 24px; border-radius: var(--radius);
+      cursor: pointer; min-height: 44px;
+      transition: border-color 0.15s, color 0.15s;
+    }
+    .itin-cancel-btn:hover {
+      border-color: var(--danger, #DC2626);
+      color: var(--danger, #DC2626);
+    }
+    .itin-cancel-hint { font-size: 12px; color: var(--text-3); }
+    .itin-cancel-hint a { color: var(--text-2); text-decoration: underline; }
+
+    /* ── Cancel pre-WhatsApp modal ────────────────────────────── */
+    .cancel-overlay {
+      position: fixed; inset: 0; z-index: 320;
+      background: rgba(15,25,35,0.5);
+      display: flex; align-items: center; justify-content: center;
+      padding: 16px;
+    }
+    .cancel-overlay.hidden { display: none !important; }
+    .cancel-card {
+      background: var(--surface); border-radius: var(--radius-lg);
+      box-shadow: var(--shadow-lg);
+      width: 100%; max-width: 480px; max-height: calc(100vh - 32px);
+      overflow-y: auto;
+      padding: 28px;
+    }
+    .cancel-title {
+      font-size: 20px; font-weight: 700; color: var(--ink);
+      margin: 0 0 6px;
+    }
+    .cancel-sub {
+      font-size: 14px; color: var(--text-2); margin: 0 0 20px;
+      line-height: 1.5;
+    }
+    .cancel-breakdown {
+      background: var(--surface-2, #F9FAFB);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 14px 16px;
+      margin-bottom: 18px;
+    }
+    .cancel-breakdown-row {
+      display: flex; justify-content: space-between; align-items: baseline;
+      font-size: 13px; padding: 4px 0;
+    }
+    .cancel-breakdown-row .label { color: var(--text-2); }
+    .cancel-breakdown-row .value { color: var(--ink); font-weight: 500; }
+    .cancel-breakdown-row.good .value { color: var(--success, #16A34A); }
+    .cancel-breakdown-note {
+      font-size: 12px; color: var(--text-3);
+      margin-top: 10px; line-height: 1.5;
+    }
+    .cancel-reason-label {
+      font-size: 13px; font-weight: 600; color: var(--ink);
+      display: block; margin-bottom: 8px;
+    }
+    .cancel-reason-select {
+      width: 100%; padding: 12px 14px;
+      border: 1.5px solid var(--border-2);
+      border-radius: var(--radius-sm);
+      font-family: inherit; font-size: 15px; color: var(--ink);
+      background: var(--surface);
+      margin-bottom: 20px;
+    }
+    .cancel-reason-select:focus {
+      outline: none; border-color: var(--brand);
+    }
+    .cancel-actions {
+      display: flex; flex-direction: column; gap: 10px;
+    }
+    .cancel-actions .btn-wa {
+      background: #25D366; color: white;
+      display: flex; align-items: center; justify-content: center; gap: 10px;
+      padding: 14px 20px; border-radius: var(--radius);
+      font-family: inherit; font-size: 15px; font-weight: 700;
+      border: none; cursor: pointer; min-height: 48px;
+      text-decoration: none;
+    }
+    .cancel-actions .btn-wa:hover { background: #1DA851; }
+    .cancel-actions .btn-secondary-ghost {
+      background: none; border: none;
+      color: var(--text-2); font-family: inherit; font-size: 14px;
+      cursor: pointer; padding: 8px; min-height: 40px;
+    }
+    .cancel-actions .btn-secondary-ghost:hover { color: var(--ink); }
+    @media (max-width: 700px) {
+      .cancel-card { padding: 22px 20px; }
+    }
+
     /* Fare amenities — sits inside the flight card after the timeline */
     .itin-fare-divider {
       border: 0; border-top: 1px solid var(--border);
@@ -5616,22 +5740,29 @@
       }
       .search-grid .from-to-col { grid-column: 1 / -1; }
 
-      /* Mobile-only: hoist the Travelers picker above the Search button.
-         In the DOM, Travelers lives in a second .search-grid row that
-         renders below Search on mobile stacking. Rather than reorder DOM
-         (which would move desktop layout too), we dissolve both .search-grid
-         boxes with display:contents so their children become direct flex
-         children of .search, then re-order individually. Desktop layout
-         (still grid) is untouched. */
+      /* Mobile-only: reorder to Google-Flights rhythm — dates before
+         travelers, travelers directly above Search. In the DOM, Travelers
+         lives in a second .search-grid row. Rather than reorder DOM (which
+         would move desktop layout too), we dissolve both .search-grid boxes
+         with display:contents so their children become direct flex children
+         of .search, then re-order individually. Desktop layout (still grid)
+         is untouched.
+
+         Session 23 change: Travelers moved from slot 4 to slot 6 (post-Return,
+         pre-Search). Search gets a margin-top matched to the visual rhythm
+         created by the field-label spacing above adjacent fields — so the
+         empty air between Travelers-input-bottom and Search-button-top
+         visually equals the air between Depart-input-bottom and Return-label-top.
+         Approx: label height (~14px) + .field label→input gap (6px) ≈ 20px. */
       .search { display: flex; flex-direction: column; }
       .search .search-grid { display: contents; }
       .search > .search-tabs                { order: 1; }
       .search > #search-alert               { order: 2; }
       .search .from-to-col                  { order: 3; }
-      .search .field:has(#tp-home-trigger)  { order: 4; margin-top: 2px; }
-      .search .field:has(#date)             { order: 5; }
-      .search #return-field                 { order: 6; }
-      .search #search-btn                   { order: 7; margin-top: 4px; }
+      .search .field:has(#date)             { order: 4; }
+      .search #return-field                 { order: 5; }
+      .search .field:has(#tp-home-trigger)  { order: 6; }
+      .search #search-btn                   { order: 7; margin-top: 20px; }
       .search .btn-ghost                    { order: 8; }
       /* The 1fr spacer div between Travelers and Demo route makes sense
          on desktop but is dead vertical space on mobile — hide it. */
@@ -7325,6 +7456,34 @@
 </div>
 
 <!-- ============================================================
+     CANCEL BOOKING PRE-WHATSAPP MODAL
+     ============================================================ -->
+<div class="cancel-overlay hidden" id="cancel-overlay" onclick="handleCancelOverlayClick(event)">
+  <div class="cancel-card" onclick="event.stopPropagation()">
+    <h2 class="cancel-title">Cancel this booking</h2>
+    <p class="cancel-sub">Our team will process your cancellation and issue any refund via WhatsApp. We respond within 24 hours; refunds settle in 3–5 business days after confirmation.</p>
+
+    <div class="cancel-breakdown" id="cancel-breakdown">
+      <!-- Populated by openCancelModal() -->
+    </div>
+
+    <label class="cancel-reason-label" for="cancel-reason">Reason for cancellation</label>
+    <select id="cancel-reason" class="cancel-reason-select">
+      <!-- Populated by openCancelModal() -->
+    </select>
+
+    <div class="cancel-actions">
+      <a id="cancel-wa-link" class="btn-wa" href="#" target="_blank" rel="noopener noreferrer" onclick="closeCancelModal()">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+          <path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 005.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 00-3.48-8.413z"/>
+        </svg>
+        Continue on WhatsApp
+      </a>
+      <button class="btn-secondary-ghost" type="button" onclick="closeCancelModal()">Not now, go back</button>
+    </div>
+  </div>
+</div>
+<!-- ============================================================
      AUTH MODAL
      ============================================================ -->
 <div class="auth-overlay hidden" id="auth-overlay" onclick="handleAuthOverlayClick(event)">
@@ -7969,6 +8128,67 @@
     }
     const root = document.getElementById('search-loading-root');
     if (root) root.remove();
+  }
+
+  // ── Support contact + cancellation helpers ───────────────────────
+  // Single source of truth for support channels. If we ever swap
+  // WhatsApp for a helpdesk, only this constant changes.
+  //
+  // TUMAFLY_WHATSAPP_E164 is the international format (for display).
+  // TUMAFLY_WHATSAPP_WAME is the wa.me format (no +, no spaces).
+  const TUMAFLY_WHATSAPP_E164 = '+254 798 836 069';
+  const TUMAFLY_WHATSAPP_WAME = '254798836069';
+  const TUMAFLY_SUPPORT_EMAIL = 'hello@tumafly.com';
+
+  // Build a wa.me deep-link with a URL-encoded prefilled message.
+  function whatsappLink(prefilledText) {
+    const t = encodeURIComponent(String(prefilledText || ''));
+    return `https://wa.me/${TUMAFLY_WHATSAPP_WAME}${t ? '?text=' + t : ''}`;
+  }
+
+  // Cancellation reason options — surfaced in the pre-WhatsApp screen
+  // and passed through as a tagged line in the prefilled message so the
+  // agent has context on first read.
+  const CANCEL_REASONS = [
+    { id: 'plans_changed',  label: 'Plans changed' },
+    { id: 'found_better',   label: 'Found a better price' },
+    { id: 'schedule',       label: 'Schedule doesn\'t work' },
+    { id: 'medical',        label: 'Medical / emergency' },
+    { id: 'booked_error',   label: 'Booked in error / wrong details' },
+    { id: 'other',          label: 'Other (I\'ll explain on WhatsApp)' },
+  ];
+
+  // Given a trip object and a selected reason, build the prefilled
+  // WhatsApp text. Kept intentionally structured so support can scan
+  // the key details in one glance without asking clarifying questions.
+  function buildCancelMessage(trip, reasonLabel) {
+    const pnr    = trip?.pnr || trip?.merchantReference || '';
+    const tfRef  = trip?.pesapalOrderId || '';
+    const slices = trip?.offer?.slices || [];
+    const out    = slices[0];
+    const ret    = slices[1];
+    const route  = out ? `${out.origin?.iata_code || '—'} → ${out.destination?.iata_code || '—'}` : '—';
+    const depDate = out?.departing_at
+      ? new Date(out.departing_at).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })
+      : '';
+    const retDate = ret?.departing_at
+      ? new Date(ret.departing_at).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })
+      : '';
+    const paxName = trip?.passengerName || trip?.contact?.email || '';
+
+    const lines = [
+      `Hi TumaFly, I'd like to cancel this booking.`,
+      ``,
+      `Confirmation #: ${pnr}`,
+    ];
+    if (tfRef)      lines.push(`TumaFly ref: ${tfRef}`);
+                    lines.push(`Route: ${route}`);
+                    lines.push(`Depart: ${depDate}${retDate ? `  ·  Return: ${retDate}` : ''}`);
+    if (paxName)    lines.push(`Passenger: ${paxName}`);
+    if (reasonLabel) lines.push(`Reason: ${reasonLabel}`);
+    lines.push(``);
+    lines.push(`Please advise on refund amount and next steps. Thanks!`);
+    return lines.join('\n');
   }
 
   let tripType = 'round';
@@ -16871,12 +17091,28 @@
       }
 
       if (data.state === 'needs_support') {
+        // Session 23: payment captured but ticket not issued
+        // (paid_offer_expired or paid_booking_failed). Batch 2 will
+        // auto-refund via Paystack Refund API; until then, support
+        // handles refund manually within 24h. Copy is honest about the
+        // current manual state — will be updated in Batch 2 to reflect
+        // the automated refund path.
         const p = document.getElementById('poll-area');
         p.classList.remove('hidden');
         p.innerHTML = `
-          <div class="alert alert-warn">${escapeHtml(data.message || 'Something needs our attention. We will reach out.')}</div>
+          <div class="alert alert-warn">
+            <b>We couldn't complete your booking.</b><br>
+            Your payment went through but the airline couldn't issue the ticket. Our team has been alerted and will process your refund within 24 hours — you'll get a WhatsApp or email confirmation once it's issued.
+          </div>
           <div style="font-size:13px;color:var(--text-2);margin-top:10px;">
             Reference: <code style="font-family:var(--mono);">${escapeHtml(activeMerchantRef)}</code>
+          </div>
+          <div style="margin-top:14px;text-align:center;">
+            <a class="btn btn-primary" target="_blank" rel="noopener noreferrer"
+               href="${whatsappLink('Hi TumaFly, my booking (ref ' + activeMerchantRef + ') needs support — payment went through but I don\\'t have my ticket. Please help.')}"
+               style="display:inline-flex;align-items:center;gap:8px;text-decoration:none;">
+              Message us on WhatsApp
+            </a>
           </div>
         `;
         return;
@@ -17835,7 +18071,15 @@
       // Soft-fallback after 60s without a terminal state: payment likely
       // succeeded, ticketing is taking longer than expected. Calm "we'll
       // email you" state with merchant ref for support.
+      //
+      // Session 23: added a WhatsApp CTA so the customer isn't stuck
+      // waiting for an email if this stretches beyond a few minutes.
+      // (Batch 2 will differentiate this from the true 'needs_support'
+      // terminal state, which will trigger auto-refund via Paystack.)
       const mref = payload?.merchantRef || '';
+      const waHref = whatsappLink(
+        'Hi TumaFly, my booking (ref ' + mref + ') is finalising and I\'d like to check the status. Please help.'
+      );
       hero.innerHTML = `
         <div class="success-check" style="background:var(--warning-soft,#FEF6E7);color:var(--warning,#B45309);">
           <svg width="26" height="26" viewBox="0 0 24 24" fill="none" aria-hidden="true">
@@ -17847,6 +18091,13 @@
         <p style="color:var(--text-2);max-width:46ch;margin:8px auto 0;">Your payment went through. The airline is issuing your ticket now. We'll email your confirmation within a few minutes.</p>
         <div class="success-ref" id="success-ref" style="margin-top:14px;">${escapeHtml(mref)}</div>
         <p style="font-size:13px;color:var(--text-3);max-width:42ch;margin:8px auto 0;">Save this reference in case you need it for support.</p>
+        <div style="margin-top:18px;">
+          <a class="btn btn-ghost" target="_blank" rel="noopener noreferrer"
+             href="${waHref}"
+             style="display:inline-flex;align-items:center;gap:8px;text-decoration:none;">
+            Message us on WhatsApp
+          </a>
+        </div>
       `;
       return;
     }
@@ -19416,8 +19667,19 @@
   //   - cancelled: status === 'cancelled' (regardless of date)
   function filterTripsForTab(trips, tab) {
     const now = Date.now();
+    // Session 23: the "Cancelled" tab now covers the full refund
+    // lifecycle — a booking that failed after payment and got refunded
+    // is functionally cancelled from the user's POV. paid_booking_failed
+    // and paid_offer_expired are the pre-refund states of the same lifecycle.
+    const CANCELLED_STATES = new Set([
+      'cancelled',
+      'refund_pending',
+      'refunded',
+      'paid_booking_failed',
+      'paid_offer_expired',
+    ]);
     return trips.filter(t => {
-      const isCancelled = (t.status || '').toLowerCase() === 'cancelled';
+      const isCancelled = CANCELLED_STATES.has((t.status || '').toLowerCase());
       const slices = t.offer?.slices || [];
       const lastDateStr = slices[slices.length - 1]?.departing_at;
       const isPast = lastDateStr ? new Date(lastDateStr).getTime() < now : false;
@@ -19824,7 +20086,57 @@
         </div>`;
     };
 
+    // ── Cancel-lifecycle status banner + button visibility ───────
+    // Show a status banner (and hide the Cancel button) for bookings
+    // already in a cancellation lifecycle state.
+    const _statusLower = String(trip.status || '').toLowerCase();
+    const _isCancelled       = _statusLower === 'cancelled';
+    const _isRefundPending   = _statusLower === 'refund_pending';
+    const _isRefunded        = _statusLower === 'refunded';
+    const _isBookingFailed   = _statusLower === 'paid_booking_failed' || _statusLower === 'paid_offer_expired';
+    const _hideCancelButton  = _isCancelled || _isRefundPending || _isRefunded || _isBookingFailed;
+
+    // Also hide for trips that have already flown (past)
+    const _lastSliceDate = slices[slices.length - 1]?.departing_at;
+    const _hasFlown = _lastSliceDate ? new Date(_lastSliceDate).getTime() < Date.now() : false;
+
+    let _statusBanner = '';
+    if (_isCancelled) {
+      _statusBanner = `
+        <div class="itin-status-banner muted" role="status">
+          <div>
+            <div class="itin-status-banner-title">This booking is cancelled.</div>
+            <div>Your refund (if any) has been processed. If you have questions, message us on WhatsApp.</div>
+          </div>
+        </div>`;
+    } else if (_isRefundPending) {
+      _statusBanner = `
+        <div class="itin-status-banner info" role="status">
+          <div>
+            <div class="itin-status-banner-title">Refund in progress</div>
+            <div>Your refund is being processed and should appear in your account within 3–5 business days.</div>
+          </div>
+        </div>`;
+    } else if (_isRefunded) {
+      _statusBanner = `
+        <div class="itin-status-banner muted" role="status">
+          <div>
+            <div class="itin-status-banner-title">Refunded</div>
+            <div>Your refund has been issued to your original payment method.</div>
+          </div>
+        </div>`;
+    } else if (_isBookingFailed) {
+      _statusBanner = `
+        <div class="itin-status-banner warn" role="status">
+          <div>
+            <div class="itin-status-banner-title">Booking couldn't be completed</div>
+            <div>Your payment went through but the airline couldn't issue the ticket. Our team has been alerted and will reach out about your refund. If you don't hear from us within 24 hours, message us on WhatsApp.</div>
+          </div>
+        </div>`;
+    }
+
     container.innerHTML = `
+      ${_statusBanner}
       <h1 class="itin-title">Flight to ${titleDest}</h1>
       <div class="itin-header-row">
         ${email   ? `<div>Email sent to: <b>${email}</b></div>` : ''}
@@ -19893,7 +20205,137 @@
           </div>
         </aside>
       </div>
+      ${!_hideCancelButton && !_hasFlown ? `
+        <div class="itin-actions">
+          <button class="itin-cancel-btn" type="button" onclick="openCancelModal('${escapeHtml(pnrRef)}')">Cancel this booking</button>
+          <div class="itin-cancel-hint">Cancellation policy applies. <a href="#terms" onclick="showView('terms'); return false;">See terms</a>.</div>
+        </div>
+      ` : ''}
     `;
+  }
+
+  // ── Cancel booking pre-WhatsApp modal (Session 23) ───────────────
+  // Shows a static expectation-setting screen before handing off to
+  // WhatsApp. Populates a refund estimate breakdown from what we know
+  // client-side (booking totals + Duffel fare-rule flag). Reads the
+  // active trip from _allTrips using the PNR passed in.
+  //
+  // NOTE: This is Option A (manual cancel via WhatsApp support). Option B
+  // (live Duffel quote → confirm → auto-refund) is deferred post-launch.
+  // See playbook §25 for the CS workflow docs.
+  function openCancelModal(pnr) {
+    const trip = (_allTrips || []).find(t => t.pnr === pnr || t.merchantReference === pnr);
+    if (!trip) {
+      console.warn('[cancel] trip not found for pnr', pnr);
+      return;
+    }
+
+    const overlay   = document.getElementById('cancel-overlay');
+    const breakdown = document.getElementById('cancel-breakdown');
+    const select    = document.getElementById('cancel-reason');
+    const waLink    = document.getElementById('cancel-wa-link');
+    if (!overlay || !breakdown || !select || !waLink) return;
+
+    // ── Refund-estimate breakdown ──
+    // We can't run the Duffel cancellation quote client-side (that's
+    // Option B). What we can do: read the airline fare rule already
+    // fetched at booking time (trip.changesAllowed and/or a stored
+    // refund_before_departure flag), and show a plain-English refund
+    // expectation. Support will confirm the exact refund via WhatsApp.
+    const fmtKes = (n) => n != null ? `KES ${Number(n).toLocaleString()}` : '—';
+
+    // Detect 24h void window: booking createdAt within last 24 hours
+    const created = trip.createdAt ? new Date(trip.createdAt).getTime() : 0;
+    const within24h = created && (Date.now() - created) < 24 * 60 * 60 * 1000;
+    // Duffel fare-rule: refundable before departure. We don't have a
+    // dedicated field yet; use changesAllowed as a proxy — changes-allowed
+    // fares are almost always also refundable. If your bookings row grows
+    // a refundableBeforeDeparture field, swap this line.
+    const refundableFare = trip.changesAllowed === true;
+
+    const ticketKes  = trip.baseAmountKes;
+    const serviceKes = trip.serviceFeeKes;
+    const processKes = trip.processingFeeKes;
+
+    let breakdownHtml = '';
+    if (within24h && refundableFare && ticketKes != null) {
+      // Best case: 24h void window on refundable fare. Airline refunds
+      // ticket cost; we deduct only the Paystack refund fee (~1.95% + KES 30).
+      const paystackFee = Math.round(ticketKes * 0.0195) + 30;
+      const estRefund = Math.max(0, ticketKes - paystackFee);
+      breakdownHtml = `
+        <div style="font-weight:700; color: var(--success, #16A34A); margin-bottom:8px;">
+          Good news — this booking qualifies for our 24-hour void window.
+        </div>
+        <div class="cancel-breakdown-row">
+          <span class="label">Ticket cost</span>
+          <span class="value">${fmtKes(ticketKes)}</span>
+        </div>
+        <div class="cancel-breakdown-row">
+          <span class="label">Payment processing fee (non-refundable)</span>
+          <span class="value">− ${fmtKes(paystackFee)}</span>
+        </div>
+        ${serviceKes != null ? `
+          <div class="cancel-breakdown-row">
+            <span class="label">TumaFly service fee (non-refundable)</span>
+            <span class="value">− ${fmtKes(serviceKes)}</span>
+          </div>` : ''}
+        <div class="cancel-breakdown-row good" style="border-top:1px solid var(--border); margin-top:8px; padding-top:10px;">
+          <span class="label"><b>Estimated refund</b></span>
+          <span class="value"><b>${fmtKes(estRefund)}</b></span>
+        </div>
+        <div class="cancel-breakdown-note">Support will confirm the exact refund on WhatsApp. Refund settles in 3–5 business days after confirmation.</div>
+      `;
+    } else if (refundableFare) {
+      breakdownHtml = `
+        <div style="font-weight:700; color: var(--ink); margin-bottom:8px;">
+          Your fare allows refunds under the airline's rules.
+        </div>
+        <div class="cancel-breakdown-note">
+          Support will pull the airline's refund quote and confirm your final refund amount on WhatsApp. The TumaFly service fee${serviceKes != null ? ` (${fmtKes(serviceKes)})` : ''} and payment processing fee are non-refundable. Refund settles in 3–5 business days after confirmation.
+        </div>
+      `;
+    } else {
+      breakdownHtml = `
+        <div style="font-weight:700; color: var(--text-2); margin-bottom:8px;">
+          Your fare has restrictions.
+        </div>
+        <div class="cancel-breakdown-note">
+          This fare is non-refundable or has cancellation penalties under the airline's rules. Support will pull the airline's exact quote and confirm what (if anything) is refundable. You can still keep this booking — no cancellation is applied until you confirm with our team.
+        </div>
+      `;
+    }
+    breakdown.innerHTML = breakdownHtml;
+
+    // ── Reason dropdown ──
+    select.innerHTML = `<option value="" selected disabled>Choose a reason…</option>` +
+      CANCEL_REASONS.map(r => `<option value="${r.id}">${escapeHtml(r.label)}</option>`).join('');
+
+    // ── WhatsApp link ──
+    // Rebuild link on every reason change so the prefilled message stays
+    // in sync with the selected reason.
+    const rebuildLink = () => {
+      const reasonId = select.value;
+      const reasonLabel = CANCEL_REASONS.find(r => r.id === reasonId)?.label || '';
+      waLink.href = whatsappLink(buildCancelMessage(trip, reasonLabel));
+    };
+    select.onchange = rebuildLink;
+    rebuildLink();  // initial state — no reason chosen yet
+
+    overlay.classList.remove('hidden');
+    document.body.style.overflow = 'hidden';
+  }
+
+  function closeCancelModal() {
+    const overlay = document.getElementById('cancel-overlay');
+    if (overlay) overlay.classList.add('hidden');
+    document.body.style.overflow = '';
+  }
+
+  function handleCancelOverlayClick(ev) {
+    // Backdrop click closes; card clicks don't propagate (stopPropagation
+    // on the inner .cancel-card).
+    if (ev.target === ev.currentTarget) closeCancelModal();
   }
 
   // ── Find booking (guest + account) ───────────────────────────
