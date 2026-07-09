@@ -10605,6 +10605,14 @@
   function _homeAutoAdvance_openReturn() {
     const ret = document.getElementById('return-date');
     if (!ret) return;
+    // Race guard: sync return's `min` to depart+1 BEFORE opening the picker
+    // so the calendar greys out pre-depart dates on first paint. Without
+    // this, the auto-advance `change` listener and initDates' own `change`
+    // listener race — whichever was attached first fires first, and this
+    // one is attached first (auto-advance IIFE runs before initDates IIFE
+    // at boot). So the picker opens with stale min ("today"), and the
+    // user has to close+reopen to see pre-depart dates masked out.
+    _tfSyncReturnMin(document.getElementById('date'), ret);
     _homeAutoAdv.justAdvancedTo = 'return-date';
     ret.focus();
     try { ret.showPicker?.(); } catch (e) { /* silent */ }
