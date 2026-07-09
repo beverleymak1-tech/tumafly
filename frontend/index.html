@@ -9267,6 +9267,35 @@
     }
     const selection = { offer: data.offer, cabin, cabinPricing };
 
+    // Session 22: derive rateInfo from the hydrated offer.
+    //
+    // runSearch (~L11971) is the normal populator for rateInfo.kesToUsd —
+    // it reads lowest_price_kes/lowest_price_usd off allOffers[0] and stores
+    // the ratio. But a NEW-TAB commit boots a fresh document at #booking?
+    // offer=... and calls restoreBooking, which never runs runSearch. Result:
+    // rateInfo starts as its initial-declared shape { date:null, isLive:true }
+    // with no kesToUsd. formatKes then short-circuits (line ~11243:
+    // `if (currentCurrency === 'USD' && rateInfo?.kesToUsd)`) and every price
+    // line silently stays KES no matter how many times the user taps the USD
+    // toggle. Same applies to restorePaymentView, which delegates here.
+    //
+    // Fields ordered by preference. Top-level lowest_price_kes/lowest_price_usd
+    // mirror the search-results shape. If get-offer doesn't emit those, fall
+    // back to top-level price / price_usd. Final fallback is the cabinPricing
+    // pair, which is guaranteed present (checked above) — every offer's cabin
+    // has both KES and USD amounts. The USD-per-KES ratio is stable across
+    // cabins on the same offer (all cabins were converted with the same FX
+    // rate at search time), so any cabin's ratio is correct.
+    try {
+      const kes = data.offer.lowest_price_kes || data.offer.price || cabinPricing.price_kes;
+      const usd = data.offer.lowest_price_usd || data.offer.price_usd || cabinPricing.price_usd;
+      rateInfo = {
+        date: data.offer.rate_date || null,
+        isLive: data.offer.rate_is_live !== false,
+        kesToUsd: (kes && usd) ? (usd / kes) : null,
+      };
+    } catch (e) { console.warn('[restoreBooking] rateInfo derivation failed:', e); }
+
     // Wire selectedOutbound + selectedInbound. For round-trip, both point
     // at the SAME selection object — Duffel pairs slices under one offer_id.
     // Convention used at L10209 / L10701 / L12507: both refs resolve to the
@@ -12128,7 +12157,12 @@
     const el = document.getElementById('rate-info');
     if (!el) return;
     if (!rateInfo.date) {
-      el.innerHTML = `<span style="color:var(--warning);">Using fallback rates</span>`;
+      // Session 22: the "Using fallback rates" warning was flashing under
+      // the currency toggle on #results refresh before the real rate landed.
+      // Bev's call: hide it entirely. Once rateInfo.date is populated (via
+      // runSearch or restoreBooking), the branch below fills in the
+      // "Rates as of ..." note as normal.
+      el.textContent = '';
     } else {
       el.textContent = `Rates as of ${rateInfo.date}${rateInfo.isLive ? '' : ' (cached)'}`;
     }
@@ -12697,7 +12731,10 @@
       if (_inboundDriftState && !_inboundDriftState.dismissed) {
         const delta = _inboundDriftState.delta_kes;
         const direction = delta > 0 ? 'increased' : 'decreased';
-        const absDeltaFmt = formatPrice(Math.abs(delta));
+        // Session 22: delta is KES-denominated. formatKes converts to USD when
+        // the toggle is USD (via rateInfo.kesToUsd); formatPrice would only
+        // swap the prefix, leaving KES-valued number under USD.
+        const absDeltaFmt = formatKes(Math.abs(delta));
         driftBanner = `
           <div id="inbound-drift-banner" role="status" aria-live="polite"
                style="display:flex;align-items:center;justify-content:space-between;gap:12px;padding:12px 16px;margin:0 0 12px;background:var(--brand-soft,#e8f3ff);border:1px solid var(--brand-border,#B7DAFA);border-radius:10px;font-size:14px;color:var(--ink,#0F1923);">
@@ -12767,17 +12804,23 @@
     const stopsLabel = stops === 0 ? 'Nonstop' : `${stops} stop${stops > 1 ? 's' : ''}`;
     const dateLabel = new Date(slice.departure).toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' });
     // Cabin line always shows the current outbound price alongside the cabin
-    // label. Format: "Economy · KES 39,909". When a refresh detected drift
-    // (previous URL op= value differed > 1% from fresh Duffel-quoted price),
-    // the previous value is added as a strikethrough BEFORE the current one:
-    // "Economy · ~~KES 39,909~~ KES 41,306". The current price is bold in
-    // both cases so it visually anchors as "this is what you're paying."
+    // label. Format: "Economy · KES 39,909" (or "USD 302.15" if toggle is USD).
+    // When a refresh detected drift (previous URL op= value differed > 1% from
+    // fresh Duffel-quoted price), the previous value is added as a strikethrough
+    // BEFORE the current one: "Economy · ~~KES 39,909~~ KES 41,306". The current
+    // price is bold in both cases so it visually anchors as "this is what
+    // you're paying."
+    //
+    // Session 22: currentKes and previous_kes are BOTH KES-denominated. Route
+    // through formatKes so the KES/USD toggle actually converts the value;
+    // formatPrice would only swap the prefix, leaving a KES number wearing a
+    // USD label.
     const currentKes = sel?.cabinPricing?.price_kes;
-    const currentFmt = currentKes ? formatPrice(currentKes) : '';
+    const currentFmt = currentKes ? formatKes(currentKes) : '';
     let priceLine = '';
     if (currentFmt) {
       if (_inboundDriftState && _inboundDriftState.previous_kes && _inboundDriftState.fresh_kes) {
-        const prevFmt = formatPrice(_inboundDriftState.previous_kes);
+        const prevFmt = formatKes(_inboundDriftState.previous_kes);
         priceLine = ` · <span style="text-decoration:line-through;color:var(--text-3,#8A96A3);margin-right:4px;">${escapeHtml(prevFmt)}</span><span style="font-weight:600;">${escapeHtml(currentFmt)}</span>`;
       } else {
         priceLine = ` · <span style="font-weight:600;">${escapeHtml(currentFmt)}</span>`;
