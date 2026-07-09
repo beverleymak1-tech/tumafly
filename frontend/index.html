@@ -12212,6 +12212,17 @@
         !document.getElementById('view-booking')?.classList.contains('hidden')) {
       renderBaggageList();
     }
+    // Session 22: mirror of the baggage branch above for seats. Without this,
+    // selecting a seat while KES-toggled leaves the seat row on #booking stuck
+    // with a KES-labelled price even after the user flips to USD — the modal
+    // renders correctly (renderSeatModal branch above handles the open-modal
+    // case), but the closed-modal seat panel's status row never gets a re-render
+    // trigger. renderSeatsList uses formatKes internally, so a single call
+    // resolves both the "cost" cell and any other currency-dependent field.
+    if (typeof renderSeatsList === 'function' &&
+        !document.getElementById('view-booking')?.classList.contains('hidden')) {
+      renderSeatsList();
+    }
     // If fare bottom-sheet is open, re-render so flexibility fees update with currency
     if (_lastFareSheet && document.getElementById('fare-bottom-sheet')) {
       openFareSheet(_lastFareSheet.flightKey, _lastFareSheet.kind);
