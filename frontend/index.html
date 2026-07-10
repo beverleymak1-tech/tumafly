@@ -13762,26 +13762,39 @@
       if (!raw) return;
       const data = JSON.parse(raw);
 
-      // Contact — only fill if the field is empty (don't clobber user input)
+      // Contact — only fill if the field is empty (don't clobber user input).
+      // In-memory contactData takes precedence over the localStorage stash:
+      // on #payment F5 the DOM is destroyed and rebuilt empty, but contactData
+      // still holds the email/phone the user typed pre-F5 (captured at
+      // goToPayment). Without this preference, the stash (which may be from a
+      // prior session with a different email) overwrites what the user
+      // actually just typed. Only fall back to the stash when contactData is
+      // empty — the normal "returning guest" prefill case.
       const emailEl = document.getElementById('contact-email');
       const phoneEl = document.getElementById('contact-phone');
-      if (emailEl && !emailEl.value && data.contact?.email) {
-        emailEl.value = data.contact.email;
+      const liveEmail = contactData?.email || '';
+      const livePhone = contactData?.phone_number || '';
+      if (emailEl && !emailEl.value) {
+        const source = liveEmail || data.contact?.email;
+        if (source) emailEl.value = source;
       }
-      if (phoneEl && !phoneEl.value && data.contact?.phone_number) {
-        const e164 = data.contact.phone_number.startsWith('+')
-          ? data.contact.phone_number
-          : '+' + data.contact.phone_number.replace(/\D/g, '');
-        // Longest-prefix dial-code match (same approach as prefillContactFromProfile)
-        const matched = [...PHONE_COUNTRIES]
-          .sort((a, b) => b[2].length - a[2].length)
-          .find(c => e164.startsWith(c[2]));
-        if (matched) {
-          countryPickerState['contact'] = { iso: matched[0], name: matched[1], dial: matched[2] };
-          applyCountrySelection('contact', countryPickerState['contact']);
-          phoneEl.value = e164.slice(matched[2].length);
-        } else {
-          phoneEl.value = e164.replace(/\D/g, '');
+      if (phoneEl && !phoneEl.value) {
+        const source = livePhone || data.contact?.phone_number;
+        if (source) {
+          const e164 = source.startsWith('+')
+            ? source
+            : '+' + source.replace(/\D/g, '');
+          // Longest-prefix dial-code match (same approach as prefillContactFromProfile)
+          const matched = [...PHONE_COUNTRIES]
+            .sort((a, b) => b[2].length - a[2].length)
+            .find(c => e164.startsWith(c[2]));
+          if (matched) {
+            countryPickerState['contact'] = { iso: matched[0], name: matched[1], dial: matched[2] };
+            applyCountrySelection('contact', countryPickerState['contact']);
+            phoneEl.value = e164.slice(matched[2].length);
+          } else {
+            phoneEl.value = e164.replace(/\D/g, '');
+          }
         }
       }
 
@@ -16660,11 +16673,28 @@
     // on the Continue button below.
     document.getElementById('poll-area').classList.add('hidden');
     clearAlert('payment-alert');
-    // Session 19 ONE-TAP: clear any stale access_code and open-on-ready
-    // flag so the modal doesn't auto-launch the moment the background
-    // fetch resolves. The user must reach #payment and tap Card row.
+    // Reuse the cached access code when it's still valid — same offer,
+    // same passenger set, fare timer not expired. Applies when the user
+    // clicked Back-to-details from #payment then clicked Continue again:
+    // we already have a live Paystack session and a Turnstile token was
+    // already consumed to get it. Firing a fresh startCardPayment here
+    // would (a) replay the now-consumed Turnstile token and get rejected
+    // by Cloudflare ("Verification failed"), and (b) burn a duplicate
+    // initialize-payment call for no reason. Skip straight to #payment
+    // and let selectPayTab open the modal with the cached access code.
+    const _offerNow = (selectedInbound || selectedOutbound)?.cabinPricing?.offer_id;
+    const _fareValid = getEffectiveExpiresAtMs() > Date.now();
+    if (_paystackAccessCode && _offerNow && _fareValid && !fareTimerExpired) {
+      showView('payment');
+      return;
+    }
+    // No valid cached session — full round-trip needed. Clear stale
+    // access_code and open-on-ready flag so the modal doesn't auto-launch
+    // the moment the background fetch resolves. The user must reach
+    // #payment and tap Card row.
     _paystackAccessCode = null;
     _paystackOpenOnReady = false;
+
     // Legacy restore-mode flags — no longer read by selectPayTab, but
     // kept reset here for any downstream code that may still consult them.
     _paymentViewIsRestored = false;
