@@ -1144,11 +1144,14 @@
       margin-bottom: 18px;
     }
     .cancel-breakdown-row {
-      display: flex; justify-content: space-between; align-items: baseline;
-      font-size: 13px; padding: 4px 0;
+      display: flex; justify-content: space-between; align-items: flex-start;
+      font-size: 13px; padding: 4px 0; gap: 12px;
     }
-    .cancel-breakdown-row .label { color: var(--text-2); }
-    .cancel-breakdown-row .value { color: var(--ink); font-weight: 500; }
+    .cancel-breakdown-row .label { color: var(--text-2); flex: 1 1 auto; min-width: 0; }
+    .cancel-breakdown-row .value {
+      color: var(--ink); font-weight: 500;
+      flex-shrink: 0; white-space: nowrap;
+    }
     .cancel-breakdown-row.good .value { color: var(--success, #16A34A); }
     .cancel-breakdown-note {
       font-size: 12px; color: var(--text-3);
@@ -11368,16 +11371,16 @@
       window._homeAutoAdvance_resume();
     }
   }
-  // Adds/removes the .needs-input class on the return-date inputs depending on
-  // whether we're in round-trip mode AND the field is empty. Used to draw the
-  // eye to the missing field instead of letting the user submit without it.
+
+  // Session 23 polish: previously toggled an amber .needs-input outline on
+  // empty return-date fields when in round-trip mode. Bev's UX call to drop
+  // it — inline validation on submit is enough, the pre-emptive nudge felt
+  // heavy. Function is kept as a no-op so existing callers don't break; if
+  // we later want a subtler affordance we edit here.
   function applyReturnDatePrompt() {
-    const inputs = ['return-date', 'r-return-date'];
-    inputs.forEach(id => {
+    ['return-date', 'r-return-date'].forEach(id => {
       const el = document.getElementById(id);
-      if (!el) return;
-      const empty = !el.value;
-      el.classList.toggle('needs-input', tripType === 'round' && empty);
+      if (el) el.classList.remove('needs-input');
     });
   }
 
@@ -20203,14 +20206,14 @@
               For changes or cancellations, contact TumaFly support.
             </p>
           </div>
+          ${!_hideCancelButton && !_hasFlown ? `
+            <div class="itin-actions">
+              <button class="itin-cancel-btn" type="button" onclick="openCancelModal('${escapeHtml(pnrRef)}')">Cancel this booking</button>
+              <div class="itin-cancel-hint">Cancellation policy applies. <a href="#terms" onclick="showView('terms'); return false;">See terms</a>.</div>
+            </div>
+          ` : ''}
         </aside>
       </div>
-      ${!_hideCancelButton && !_hasFlown ? `
-        <div class="itin-actions">
-          <button class="itin-cancel-btn" type="button" onclick="openCancelModal('${escapeHtml(pnrRef)}')">Cancel this booking</button>
-          <div class="itin-cancel-hint">Cancellation policy applies. <a href="#terms" onclick="showView('terms'); return false;">See terms</a>.</div>
-        </div>
-      ` : ''}
     `;
   }
 
