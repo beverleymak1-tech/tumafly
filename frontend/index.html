@@ -13793,16 +13793,24 @@
         const cur = ts0.data;
         const formIsEmpty = !cur.given_name && !cur.family_name && !cur.born_on;
         if (formIsEmpty) {
+          // Explicit whitelist — never a spread. A `...data.first_passenger`
+          // spread would resurrect born_on/passport from stale pre-patch
+          // localStorage entries written before the write-side was trimmed.
+          // This restore side must be defensive on its own so old entries
+          // in the wild can never leak sensitive fields into the form.
+          const fp = data.first_passenger;
           ts0.data = {
-            ...cur,                       // keep defaults like title='mr', empty FF array
-            ...data.first_passenger,      // overlay stashed values
-            save_to_account: false,       // never carry forward
+            ...cur,
+            title:       fp.title       || cur.title || 'mr',
+            given_name:  fp.given_name  || '',
+            middle_name: fp.middle_name || '',
+            family_name: fp.family_name || '',
+            gender:      fp.gender      || '',
+            nationality: fp.nationality || '',
+            save_to_account: false,
             _saved_traveler_id: null,
-            // born_on/passport are never in the stash (see stashGuestPrefill) —
-           // leave them at their existing (empty) defaults from `cur`.
-           frequent_flyer: [],
+            frequent_flyer: [],
           };
-          // Re-render so the user sees the pre-filled fields immediately
           renderPassengerForms();
         }
       }
