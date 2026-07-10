@@ -13933,7 +13933,19 @@
       };
       const runEmailValidation = () => showEmailHint(validateEmail(contactEmailEl.value.trim()));
       contactEmailEl.addEventListener('blur', () => { emailBlurred = true; runEmailValidation(); try { stashBookingPassengers(); } catch (_) {} });
-      contactEmailEl.addEventListener('input', () => { if (emailBlurred) runEmailValidation(); });
+      // Debounced stash on every keystroke so a mid-typing F5 (before blur
+      // fires) still preserves the fresh value. Without this, sessionStorage
+      // holds whatever was last blur-captured — which may be a stale value
+      // from a prior session, causing F5 restore to appear to "revert" the
+      // email to something the user thought they'd overwritten.
+      let _emailStashTimer = null;
+      contactEmailEl.addEventListener('input', () => {
+        if (emailBlurred) runEmailValidation();
+        if (_emailStashTimer) clearTimeout(_emailStashTimer);
+        _emailStashTimer = setTimeout(() => {
+          try { stashBookingPassengers(); } catch (_) {}
+        }, 250);
+      });
     }
     // Wire real-time digit-count validation on the contact phone field.
     // Attach only once per page load (guarded by data attribute).
@@ -13949,7 +13961,15 @@
         showPhoneHint('contact-phone-hint', 'contact-phone-group', err);
       };
       contactPhoneEl.addEventListener('blur', () => { phoneBlurred = true; runContactPhoneValidation(); try { stashBookingPassengers(); } catch (_) {} });
-      contactPhoneEl.addEventListener('input', () => { if (phoneBlurred) runContactPhoneValidation(); });
+      // Same debounced-stash pattern as contact email — see comment above.
+      let _phoneStashTimer = null;
+      contactPhoneEl.addEventListener('input', () => {
+        if (phoneBlurred) runContactPhoneValidation();
+        if (_phoneStashTimer) clearTimeout(_phoneStashTimer);
+        _phoneStashTimer = setTimeout(() => {
+          try { stashBookingPassengers(); } catch (_) {}
+        }, 250);
+      });
     }
     // Kick off baggage options fetch in the background — when it arrives, the
     // Baggage card swaps from the static fallback to the active picker.
