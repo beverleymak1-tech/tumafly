@@ -9622,6 +9622,11 @@
     // Overlay shadow onto ANY newly-added cards too (in case shadow had
     // multiple travelers stashed from a prior visit).
     try { restoreBookingPassengers(); } catch (_) {}
+    // Wire contact-field listeners here too — proceedToBooking wires them
+    // on offer-click entry, but F5 restore doesn't go through that path,
+    // so without this call the email/phone inputs would be unwatched and
+    // their fresh values would never make it into the sessionStorage shadow.
+    try { wireContactFieldListeners(); } catch (_) {}
 
     // Kick off async fetches that proceedToBooking would normally handle.
     // These fire in parallel; each updates its own UI slot when it lands.
@@ -10376,6 +10381,61 @@
   // Shape stored:
   //   { travelers: [{born_on, passport: {country, number, expires}}, ...] }
   const BOOKING_SECURE_SHADOW_KEY = 'tf_booking_secure_v1';
+
+// Extracted wiring so both proceedToBooking (offer-click entry) and
+  // restoreBooking (F5 restore) attach the contact-field listeners.
+  // Guarded by a dataset flag so repeat calls are safe no-ops.
+  function wireContactFieldListeners() {
+    const contactEmailEl = document.getElementById('contact-email');
+    if (contactEmailEl && !contactEmailEl.dataset.emailValidHooked) {
+      contactEmailEl.dataset.emailValidHooked = '1';
+      let emailBlurred = false;
+      const showEmailHint = (msg) => {
+        const hint = document.getElementById('contact-email-hint');
+        if (!hint) return;
+        if (msg) {
+          hint.textContent = msg; hint.style.display = 'block';
+          contactEmailEl.classList.add('pax-input-err');
+        } else {
+          hint.textContent = ''; hint.style.display = 'none';
+          contactEmailEl.classList.remove('pax-input-err');
+        }
+      };
+      const runEmailValidation = () => showEmailHint(validateEmail(contactEmailEl.value.trim()));
+      contactEmailEl.addEventListener('blur', () => { emailBlurred = true; runEmailValidation(); try { stashBookingPassengers(); } catch (_) {} });
+      // Debounced stash on every keystroke so a mid-typing F5 (before blur
+      // fires) still preserves the fresh value in sessionStorage.
+      let _emailStashTimer = null;
+      contactEmailEl.addEventListener('input', () => {
+        if (emailBlurred) runEmailValidation();
+        if (_emailStashTimer) clearTimeout(_emailStashTimer);
+        _emailStashTimer = setTimeout(() => {
+          try { stashBookingPassengers(); } catch (_) {}
+        }, 250);
+      });
+    }
+    const contactPhoneEl = document.getElementById('contact-phone');
+    if (contactPhoneEl && !contactPhoneEl.dataset.phoneValidHooked) {
+      contactPhoneEl.dataset.phoneValidHooked = '1';
+      let phoneBlurred = false;
+      const runContactPhoneValidation = () => {
+        tryAutoStripDialCode(contactPhoneEl, 'contact');
+        const iso = countryPickerState.contact?.iso || 'KE';
+        const local = contactPhoneEl.value.replace(/\D/g, '').replace(/^0+/, '');
+        const err = validatePhoneLocal(iso, local);
+        showPhoneHint('contact-phone-hint', 'contact-phone-group', err);
+      };
+      contactPhoneEl.addEventListener('blur', () => { phoneBlurred = true; runContactPhoneValidation(); try { stashBookingPassengers(); } catch (_) {} });
+      let _phoneStashTimer = null;
+      contactPhoneEl.addEventListener('input', () => {
+        if (phoneBlurred) runContactPhoneValidation();
+        if (_phoneStashTimer) clearTimeout(_phoneStashTimer);
+        _phoneStashTimer = setTimeout(() => {
+          try { stashBookingPassengers(); } catch (_) {}
+        }, 250);
+      });
+    }
+  }
 
   function stashBookingPassengers() {
     try {
@@ -13915,38 +13975,14 @@
         renderPassengerForms();
       }
     }).catch(e => console.warn('[saved_travelers] fetch failed:', e));
-    // Wire real-time validation on the contact email field (blur first, then live).
-    const contactEmailEl = document.getElementById('contact-email');
-    if (contactEmailEl && !contactEmailEl.dataset.emailValidHooked) {
-      contactEmailEl.dataset.emailValidHooked = '1';
-      let emailBlurred = false;
-      const showEmailHint = (msg) => {
-        const hint = document.getElementById('contact-email-hint');
-        if (!hint) return;
-        if (msg) {
-          hint.textContent = msg; hint.style.display = 'block';
-          contactEmailEl.classList.add('pax-input-err');
-        } else {
-          hint.textContent = ''; hint.style.display = 'none';
-          contactEmailEl.classList.remove('pax-input-err');
-        }
-      };
-      const runEmailValidation = () => showEmailHint(validateEmail(contactEmailEl.value.trim()));
-      contactEmailEl.addEventListener('blur', () => { emailBlurred = true; runEmailValidation(); try { stashBookingPassengers(); } catch (_) {} });
-      // Debounced stash on every keystroke so a mid-typing F5 (before blur
-      // fires) still preserves the fresh value. Without this, sessionStorage
-      // holds whatever was last blur-captured — which may be a stale value
-      // from a prior session, causing F5 restore to appear to "revert" the
-      // email to something the user thought they'd overwritten.
-      let _emailStashTimer = null;
-      contactEmailEl.addEventListener('input', () => {
-        if (emailBlurred) runEmailValidation();
-        if (_emailStashTimer) clearTimeout(_emailStashTimer);
-        _emailStashTimer = setTimeout(() => {
-          try { stashBookingPassengers(); } catch (_) {}
-        }, 250);
-      });
-    }
+    // Wire real-time validation + debounced stash on the contact fields.
+    // Extracted into a helper (wireContactFieldListeners) so both
+    // proceedToBooking (fresh entry via offer click) and restoreBooking
+    // (F5 restore) attach the listeners — previously only proceedToBooking
+    // wired them, so F5-restored views left email/phone unwatched entirely
+    // and their fresh values were never captured to the sessionStorage
+    // shadow. See wireContactFieldListeners definition below for the guard.
+    wireContactFieldListeners();
     // Wire real-time digit-count validation on the contact phone field.
     // Attach only once per page load (guarded by data attribute).
     const contactPhoneEl = document.getElementById('contact-phone');
