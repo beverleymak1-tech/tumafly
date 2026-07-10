@@ -13735,12 +13735,16 @@
           phone_number: contactData.phone_number || '',
           phone_iso:    phoneCC,
         },
-        // Stash the full first-traveler form data. We exclude save_to_account
-        // and _saved_traveler_id since they're booking-session-specific.
+         // Stash only low-sensitivity first-traveler fields. born_on and
+         // passport are deliberately excluded — they're the fields the
+         // Kenya Data Protection Act / GDPR actually care about, and they
+         // have no business sitting in cleartext localStorage indefinitely.
+         // (Session P0: previously stashed here in full, causing traveler B's
+         // form to silently pre-fill with traveler A's DOB + passport.)
         first_passenger: travelerStates[0]?.data
           ? (() => {
-              const { save_to_account, _saved_traveler_id, ...rest } = travelerStates[0].data;
-              return rest;
+               const { title, given_name, middle_name, family_name, gender, nationality } = travelerStates[0].data;
+               return { title, given_name, middle_name, family_name, gender, nationality };
             })()
           : null,
         stashed_at: new Date().toISOString(),
@@ -13794,9 +13798,9 @@
             ...data.first_passenger,      // overlay stashed values
             save_to_account: false,       // never carry forward
             _saved_traveler_id: null,
-            // Restore the passport object shape (JSON.parse turns it into a plain object — that's fine)
-            passport: data.first_passenger.passport || { country: '', number: '', expires: '' },
-            frequent_flyer: Array.isArray(data.first_passenger.frequent_flyer) ? data.first_passenger.frequent_flyer : [],
+            // born_on/passport are never in the stash (see stashGuestPrefill) —
+           // leave them at their existing (empty) defaults from `cur`.
+           frequent_flyer: [],
           };
           // Re-render so the user sees the pre-filled fields immediately
           renderPassengerForms();
@@ -18603,8 +18607,35 @@
     }
 
     if ((currentView === 'booking' || currentView === 'payment') && selectedOutbound) {
-      // Stay on view. JS state (selected offers, passenger forms, contact info) is
-      // unaffected — sign-out with GSI doesn't reload the page. User continues as guest.
+      // Stay on view — selected offers, in-progress form input, and contact
+      // info survive sign-out so the user can continue as a guest without
+      // losing progress. BUT: the account's saved-traveler cache and any
+      // traveler slot populated FROM that cache must be purged here. Without
+      // this, the saved-travelers dropdown (gated on `currentUser &&
+      // _savedTravelers.length`, see ~L15609) never re-renders after
+      // sign-out because this branch deliberately skips a re-render — so
+      // the stale DOM keeps showing every saved traveler on the account
+      // (spouse, kids, etc.) as pickable, and their PII stays live in
+      // memory. On a shared/public device this is a real exposure.
+      _savedTravelers = [];
+      travelerStates.forEach((s) => {
+        if (s?.data?._saved_traveler_id) {
+          s.saved = false;
+          s.data = {
+            ...s.data,
+            _saved_traveler_id: null,
+            _original_picked: null,
+            born_on: '',
+            passport: { country: '', number: '', expires: '' },
+            frequent_flyer: [],
+            known_traveler_id: '',
+            redress_number: '',
+            special_assistance: '',
+          };
+          s.openSections.add('passport');
+        }
+      });
+      renderPassengerForms();
       // Fare-timer handles offer expiry independently.
       showSignedOutToast('Signed out. You can continue booking as a guest.');
       return;
