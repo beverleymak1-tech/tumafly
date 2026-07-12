@@ -10,8 +10,8 @@ const CORS_HEADERS = {
 // ── Support contact ──────────────────────────────────────────────────────
 // EDIT THESE before going live. Falsy values are silently omitted from the
 // email so it never displays placeholders to customers.
-const SUPPORT_WHATSAPP = "+254 700 000 000"; // TODO: real WhatsApp number
-const SUPPORT_EMAIL    = "support@tumafly.com";
+const SUPPORT_WHATSAPP = "+254 798 836 069";                // codified TumaFly ops number (Session 24)
+const SUPPORT_EMAIL    = "support@tumafly.com";              // issues/help; hello@ reserved for inquiries
 const SUPPORT_HOURS    = "Mon–Sun, 8am–8pm EAT";
 
 // ── Formatting helpers ───────────────────────────────────────────────────
@@ -439,11 +439,16 @@ function renderHtml(payload: any): string {
       </td></tr>
 
       <!-- CHANGES & CANCELLATIONS -->
-      <tr><td style="background:#ffffff;padding:18px 24px;border-bottom:1px solid ${HAIR};">
-        <div style="font-size:11px;color:${TEXT_LITE};font-weight:600;text-transform:uppercase;letter-spacing:0.05em;margin-bottom:6px;">Changes &amp; Cancellations</div>
-        <div style="font-size:13px;color:${TEXT_MED};line-height:1.5;">${escapeHtml(conditionsCopy(order))}</div>
-        <div style="font-size:12px;color:${TEXT_LITE};margin-top:6px;">Contact TumaFly support to request a change or cancellation.</div>
-      </td></tr>
+            <tr><td style="background:#ffffff;padding:18px 24px;border-bottom:1px solid ${HAIR};">
+              <div style="font-size:11px;color:${TEXT_LITE};font-weight:600;text-transform:uppercase;letter-spacing:0.05em;margin-bottom:8px;">Changes &amp; Cancellations</div>
+              <div style="font-size:13px;color:${TEXT_MED};line-height:1.5;margin-bottom:10px;">${escapeHtml(conditionsCopy(order))}</div>
+              <div style="font-size:12px;color:${TEXT_MED};line-height:1.6;margin-bottom:8px;">
+                To change or cancel: sign in to TumaFly and open your trip, use "Find booking" with your reference and last name, or message us on WhatsApp. Our team responds within 24 hours. Refunds settle in 3–5 business days after confirmation.
+              </div>
+              <div style="font-size:12px;color:${TEXT_LITE};line-height:1.6;">
+                Refundable fares cancelled within 24 hours of booking receive the full ticket cost back less the payment processing fee. The TumaFly service fee is non-refundable.
+              </div>
+            </td></tr>
 
       <!-- SUPPORT -->
       <tr><td style="background:${BG_TINT};padding:18px 24px;border-bottom:1px solid ${HAIR};">
