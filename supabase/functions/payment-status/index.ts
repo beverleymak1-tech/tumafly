@@ -11,11 +11,18 @@ const CORS_HEADERS = {
 
 // Maps internal status to frontend-friendly status + message.
 // Frontend should drive UI off `state`, not `raw_status`.
+//
+// Batch 2 update (Session 25):
+//   - paid_offer_expired / paid_booking_failed copy now reflects automated
+//     Paystack refund (see paystack-webhook.refundBooking()).
+//   - refund_pending and refunded added as new states.
 function mapStatus(raw: string): { state: string; message: string; final: boolean } {
   switch (raw) {
     case "pending":
       return { state: "awaiting_payment", message: "Waiting for payment confirmation...", final: false };
     case "paid":
+      return { state: "processing", message: "Payment received, issuing your ticket...", final: false };
+    case "booking":
       return { state: "processing", message: "Payment received, issuing your ticket...", final: false };
     case "booked":
       return { state: "confirmed", message: "Booking confirmed!", final: true };
@@ -26,9 +33,29 @@ function mapStatus(raw: string): { state: string; message: string; final: boolea
     case "amount_mismatch":
       return { state: "needs_support", message: "Payment received but with an issue. Our team will contact you shortly.", final: true };
     case "paid_offer_expired":
-      return { state: "needs_support", message: "Payment received but the flight is no longer available. Our team will contact you to arrange a refund or alternative.", final: true };
+      return {
+        state: "refund_pending",
+        message: "The flight is no longer available. Your payment is being refunded automatically and should appear in 3–5 business days.",
+        final: false, // will transition to refund_pending → refunded
+      };
     case "paid_booking_failed":
-      return { state: "needs_support", message: "Payment received but ticket issuance failed. Our team will contact you immediately.", final: true };
+      return {
+        state: "refund_pending",
+        message: "We couldn't complete your booking. Your payment is being refunded automatically and should appear in 3–5 business days.",
+        final: false,
+      };
+    case "refund_pending":
+      return {
+        state: "refund_pending",
+        message: "Your refund is on its way. It should appear in your account within 3–5 business days.",
+        final: false,
+      };
+    case "refunded":
+      return {
+        state: "refunded",
+        message: "Your payment has been refunded.",
+        final: true,
+      };
     case "failed_to_create":
       return { state: "failed", message: "We could not start the payment. Please try again.", final: true };
     default:

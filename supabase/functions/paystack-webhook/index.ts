@@ -27,6 +27,12 @@
 //
 // Paystack webhook URL to register in dashboard:
 //   https://{PROJECT_REF}.supabase.co/functions/v1/paystack-webhook
+//
+// Events consumed (register ALL of these in Paystack dashboard, test AND live):
+//   - charge.success            — capture completed
+//   - refund.pending            — refund accepted for processing
+//   - refund.processed          — refund settled (final state)
+//   - refund.failed             — refund rejected (final state)
 // ============================================================================
 
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
@@ -177,6 +183,207 @@ function extractLast4FromAuth(authorization: any): string | null {
   return null;
 }
 
+// ── Refund automation (Batch 2, Session 25) ──────────────────────────────
+// Fires a Paystack refund when Duffel fails after we've captured payment
+// (paid_offer_expired or paid_booking_failed). Idempotent: the
+// refunds.paystack_tx_id unique index prevents double-refund attempts if
+// the webhook re-fires or a retry job runs.
+//
+// Success path:
+//   1. Insert refunds row (unique on tx_id — if already exists, we bail)
+//   2. Call POST /refund with { transaction, currency: 'KES', merchant_note }
+//   3. On 200: update refunds row with paystack_refund_id + status
+//   4. Update pending_bookings.status → 'refund_pending'
+//
+// Failure path:
+//   - Paystack refund API rejects → alert founder for manual intervention.
+//     refunds row remains with paystack_refund_id=null so support can retry.
+async function refundBooking(
+  supabase: any,
+  reason: "paid_offer_expired" | "paid_booking_failed",
+  pending: any,
+  paystackTxId: string,
+  reference: string,
+): Promise<void> {
+  try {
+    // Step 1: idempotent insert. Unique index on paystack_tx_id makes
+    // the DB the source of truth. Any race resolves here.
+    const { error: insertErr } = await supabase.from("refunds").insert({
+      pending_booking_id: pending.id,
+      merchant_ref: reference,
+      paystack_tx_id: paystackTxId,
+      amount_kes: pending.total_kes,
+      reason,
+      status: "pending",
+      customer_email: pending.contact?.email || null,
+    });
+
+    if (insertErr) {
+      // Duplicate key = we've already tried this. Fine — bail cleanly.
+      if (insertErr.code === "23505" || /duplicate/i.test(insertErr.message || "")) {
+        console.log(`[refundBooking] Already exists for tx ${paystackTxId} (idempotent bail)`);
+        return;
+      }
+      // Any other error is a real problem.
+      console.error("[refundBooking] refunds insert failed:", insertErr);
+      await alertFounder("REFUND_DB_INSERT_FAILED", {
+        reason,
+        merchant_ref: reference,
+        paystack_tx_id: paystackTxId,
+        amount_kes: pending.total_kes,
+        customer_email: pending.contact?.email,
+        db_error: insertErr.message,
+      });
+      return;
+    }
+
+    // Step 2: fire Paystack refund
+    const refundRes = await fetch(`${PAYSTACK_BASE_URL}/refund`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${PAYSTACK_API_KEY}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        transaction: paystackTxId,
+        currency: "KES",
+        // amount omitted → full refund of the captured amount
+        merchant_note: `TumaFly system failure: ${reason} — ref ${reference}`,
+      }),
+    });
+    const refundData = await refundRes.json();
+
+    if (!refundRes.ok || !refundData?.status) {
+      // Paystack said no. Row stays with paystack_refund_id=null and
+      // status=pending. Support handles manually. Alert founder.
+      console.error("[refundBooking] Paystack /refund non-2xx:", refundRes.status, refundData);
+      await supabase
+        .from("refunds")
+        .update({ paystack_error: refundData })
+        .eq("paystack_tx_id", paystackTxId);
+      await alertFounder("REFUND_API_FAILED", {
+        reason,
+        merchant_ref: reference,
+        paystack_tx_id: paystackTxId,
+        amount_kes: pending.total_kes,
+        customer_email: pending.contact?.email,
+        http_status: refundRes.status,
+        paystack_error: refundData,
+      });
+      return;
+    }
+
+    // Step 3: update refunds row with Paystack's refund id + returned status
+    const refundId = String(refundData?.data?.id || "");
+    const returnedStatus = String(refundData?.data?.status || "pending");
+    await supabase
+      .from("refunds")
+      .update({
+        paystack_refund_id: refundId,
+        status: returnedStatus,
+      })
+      .eq("paystack_tx_id", paystackTxId);
+
+    // Step 4: pending_booking → refund_pending
+    await supabase
+      .from("pending_bookings")
+      .update({ status: "refund_pending" })
+      .eq("id", pending.id);
+
+    console.log(`[refundBooking] Refund initiated: refund_id=${refundId} tx=${paystackTxId} ref=${reference}`);
+  } catch (err) {
+    console.error("[refundBooking] Unhandled:", err);
+    await alertFounder("REFUND_UNHANDLED_ERROR", {
+      reason,
+      merchant_ref: reference,
+      paystack_tx_id: paystackTxId,
+      error: (err as Error).message,
+    });
+  }
+}
+
+// ── Refund event handler (Batch 2, Session 25) ───────────────────────────
+// Handles refund.pending / refund.processed / refund.failed events from
+// Paystack. Lookup goes through refunds.paystack_refund_id (set once we've
+// issued the refund) with fallback to paystack_tx_id.
+async function handleRefundEvent(eventType: string, event: any, supabase: any): Promise<Response> {
+  const data = event.data || {};
+  const refundId = String(data.id || "");
+  // Paystack sends `transaction` as either an object (with .id) or as an id directly.
+  const txId = typeof data.transaction === "object" && data.transaction
+    ? String(data.transaction.id || data.transaction.reference || "")
+    : String(data.transaction || "");
+  const status = eventType.split(".")[1] || String(data.status || "unknown"); // 'processed' | 'failed' | 'pending'
+
+  if (!refundId && !txId) {
+    console.error("[handleRefundEvent] No id or transaction in payload");
+    await alertFounder("REFUND_EVENT_MISSING_IDS", { event_type: eventType, payload: data });
+    return new Response("ok", { status: 200, headers: CORS_HEADERS });
+  }
+
+  // Find the refunds row. Prefer paystack_refund_id, fall back to paystack_tx_id.
+  let row: any = null;
+  if (refundId) {
+    const { data: r } = await supabase
+      .from("refunds")
+      .select("*")
+      .eq("paystack_refund_id", refundId)
+      .maybeSingle();
+    row = r;
+  }
+  if (!row && txId) {
+    const { data: r } = await supabase
+      .from("refunds")
+      .select("*")
+      .eq("paystack_tx_id", txId)
+      .maybeSingle();
+    row = r;
+  }
+
+  if (!row) {
+    // Refund initiated outside our system (Paystack dashboard) — no matching row.
+    // Alert so support can reconcile manually. Don't block the event.
+    console.warn(`[handleRefundEvent] No matching refund row: refund_id=${refundId} tx_id=${txId}`);
+    await alertFounder("REFUND_EVENT_NO_ROW", {
+      event_type: eventType,
+      paystack_refund_id: refundId,
+      paystack_tx_id: txId,
+    });
+    return new Response("ok", { status: 200, headers: CORS_HEADERS });
+  }
+
+  // Update refunds row
+  await supabase
+    .from("refunds")
+    .update({
+      status,
+      paystack_refund_id: refundId || row.paystack_refund_id,
+    })
+    .eq("id", row.id);
+
+  // Cascade to pending_bookings
+  if (status === "processed") {
+    await supabase
+      .from("pending_bookings")
+      .update({ status: "refunded" })
+      .eq("id", row.pending_booking_id);
+    console.log(`[handleRefundEvent] refund.processed — pending_booking ${row.pending_booking_id} → refunded`);
+  } else if (status === "failed") {
+    // Leave pending_booking as refund_pending so support has a triage signal.
+    await alertFounder("REFUND_FAILED", {
+      merchant_ref: row.merchant_ref,
+      paystack_tx_id: row.paystack_tx_id,
+      paystack_refund_id: refundId || row.paystack_refund_id,
+      amount_kes: row.amount_kes,
+      customer_email: row.customer_email,
+      reason: row.reason,
+    });
+  }
+  // status === 'pending' — no cascade needed; already refund_pending.
+
+  return new Response("ok", { status: 200, headers: CORS_HEADERS });
+}
+
 serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response("ok", { headers: CORS_HEADERS });
@@ -227,10 +434,17 @@ serve(async (req) => {
   }
 
   // ── Event routing ──────────────────────────────────────────────────────
-  // Paystack sends many event types. We only act on charge.success. Others
-  // (charge.dispute.*, transfer.*, subscription.*, etc.) get 200 OK so Paystack
-  // stops retrying, but we take no action.
+  // Paystack sends many event types. We act on:
+  //   - charge.success                   → book with Duffel + save booking
+  //   - refund.pending/processed/failed  → update refunds table + cascade
+  // Others (charge.dispute.*, transfer.*, subscription.*, etc.) get 200 OK.
   const eventType = event?.event || "";
+
+  // Refund events go to the dedicated handler.
+  if (eventType === "refund.pending" || eventType === "refund.processed" || eventType === "refund.failed") {
+    return await handleRefundEvent(eventType, event, supabase);
+  }
+
   if (eventType !== "charge.success") {
     console.log(`[paystack-webhook] Ignoring event type: ${eventType}`);
     return new Response("ok", { status: 200, headers: CORS_HEADERS });
@@ -377,6 +591,7 @@ serve(async (req) => {
     const offerData = await offerRes.json();
 
     if (!offerRes.ok) {
+      // Payment captured but Duffel offer is gone. Alert + auto-refund.
       await supabase
         .from("pending_bookings")
         .update({ status: "paid_offer_expired" })
@@ -392,6 +607,9 @@ serve(async (req) => {
         passengers: pending.passengers,
         duffel_error: offerData,
       });
+
+      // Auto-refund — updates status to refund_pending on success.
+      await refundBooking(supabase, "paid_offer_expired", pending, paystackTxId, reference);
 
       return new Response("ok", { status: 200, headers: CORS_HEADERS });
     }
@@ -472,6 +690,7 @@ serve(async (req) => {
     const orderRespData = await orderRes.json();
 
     if (!orderRes.ok) {
+      // Payment captured, Duffel order create rejected. Alert + auto-refund.
       await supabase
         .from("pending_bookings")
         .update({ status: "paid_booking_failed" })
@@ -489,6 +708,9 @@ serve(async (req) => {
         baggage_selections: storedBaggages,
         duffel_error: orderRespData,
       });
+
+      // Auto-refund — updates status to refund_pending on success.
+      await refundBooking(supabase, "paid_booking_failed", pending, paystackTxId, reference);
 
       return new Response("ok", { status: 200, headers: CORS_HEADERS });
     }

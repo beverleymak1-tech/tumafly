@@ -9,10 +9,11 @@
 //      - Show success view immediately (if webhook already finalized)
 //      - Show "Confirming your payment..." + poll (if webhook is in-flight)
 //      - Show failure state (if payment or Duffel step failed)
-//      - Show "we'll email you" state (for the paid-but-no-ticket edge case)
+//      - Show refund-in-flight state (for the paid-but-no-ticket edge case,
+//        now that Batch 2 fires an automated Paystack refund)
 //
 // The frontend polls this endpoint every ~2s until a terminal state:
-//   - confirmed / failed / needs_support / not_found
+//   - confirmed / failed / refund_pending / refunded / needs_support / not_found
 // or a soft timeout (typically 60s). During "processing" it shows the spinner.
 //
 // Called from the frontend with the anon key + config.toml verify_jwt=false.
@@ -87,12 +88,21 @@ async function checkModeKeyMismatch(source: string): Promise<Response | null> {
 }
 
 // Response envelope. Terminal states end the frontend's poll loop.
-//   confirmed     — booking is done, PNR ready
-//   processing    — payment confirmed, webhook is finalizing (poll again)
-//   failed        — payment or verification failed (customer needs to retry)
-//   needs_support — paid but ticket not issued (rare; requires human)
-//   not_found     — no pending_bookings row (should never happen post-init)
-type VerifyState = "confirmed" | "processing" | "failed" | "needs_support" | "not_found";
+//   confirmed      — booking is done, PNR ready
+//   processing     — payment confirmed, webhook is finalizing (poll again)
+//   failed         — payment or verification failed (customer needs to retry)
+//   refund_pending — Duffel failed post-capture; automated refund issued
+//   refunded       — Paystack has finalized the refund
+//   needs_support  — refund automation itself failed (rare; requires human)
+//   not_found      — no pending_bookings row (should never happen post-init)
+type VerifyState =
+  | "confirmed"
+  | "processing"
+  | "failed"
+  | "refund_pending"
+  | "refunded"
+  | "needs_support"
+  | "not_found";
 
 function respond(state: VerifyState, extras: Record<string, unknown> = {}, httpStatus = 200) {
   return new Response(
@@ -176,12 +186,27 @@ serve(async (req) => {
       });
     }
 
+    // Refund automation states (Batch 2, Session 25). Duffel failed after
+    // capture; Paystack refund is either in flight or complete.
+    if (pending.status === "refund_pending") {
+      return respond("refund_pending", {
+        message: "We couldn't complete your booking. Your payment is being refunded automatically and should appear in 3–5 business days.",
+      });
+    }
+    if (pending.status === "refunded") {
+      return respond("refunded", {
+        message: "Your payment has been refunded. It should appear in your account within 3–5 business days.",
+      });
+    }
+
     if (pending.status === "paid_offer_expired" || pending.status === "paid_booking_failed") {
-      // Paid but ticket not issued. Human intervention required — founder
-      // is already alerted (from paystack-webhook's PAID_NO_OFFER /
-      // PAID_NO_TICKET path). Message the customer accordingly.
-      return respond("needs_support", {
-        message: "We've received your payment but couldn't complete the booking. Our team has been notified and will email you shortly.",
+      // Post-Batch-2, this window should be very brief — refundBooking()
+      // transitions to refund_pending in the same request. If the frontend
+      // catches this state, it means the refund call is in flight or the
+      // status update hasn't landed yet. Present as refund_pending so the
+      // customer doesn't see conflicting messages if they refresh.
+      return respond("refund_pending", {
+        message: "We couldn't complete your booking. Your payment is being refunded automatically and should appear in 3–5 business days.",
       });
     }
 
