@@ -20509,7 +20509,7 @@
         id:                 b.id,
         merchantReference:  b.booking_reference,
         pnr:                b.booking_reference,
-        status:             'booked',
+        status:             b.status || 'booked',
         createdAt:          b.created_at,
         totalKes:           b.total_paid_kes ?? null,
         totalAmount:        b.total_amount,
