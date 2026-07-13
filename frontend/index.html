@@ -19899,11 +19899,18 @@
             ? `${t.totalCurrency} ${Number(t.totalAmount).toLocaleString()}`
             : '');
       const statusKey = (t.status || 'booked').toLowerCase();
-      const badge = statusKey === 'cancelled'
-        ? '<span class="trip-status-badge cancelled">Cancelled</span>'
-        : statusKey === 'booked'
-          ? '<span class="trip-status-badge booked">Confirmed</span>'
-          : '<span class="trip-status-badge pending">Pending</span>';
+      let badge;
+      if (statusKey === 'cancelled') {
+        badge = '<span class="trip-status-badge cancelled">Cancelled</span>';
+      } else if (statusKey === 'refunded') {
+        badge = '<span class="trip-status-badge cancelled">Refunded</span>';
+      } else if (statusKey === 'refund_pending' || statusKey === 'paid_booking_failed' || statusKey === 'paid_offer_expired') {
+        badge = '<span class="trip-status-badge cancelled">Refund pending</span>';
+      } else if (statusKey === 'booked' || statusKey === 'confirmed') {
+        badge = '<span class="trip-status-badge booked">Confirmed</span>';
+      } else {
+        badge = '<span class="trip-status-badge pending">Pending</span>';
+      }
 
       const pnr = t.pnr || t.merchantReference || '';
 
