@@ -162,7 +162,7 @@ Deno.serve(async (req) => {
         // booking_reference (PNR) is the click handle — payment-status accepts it
         merchantReference:  b.booking_reference,
         pnr:                b.booking_reference,
-        status:             "booked",
+        status:             b.status || "booked",
         createdAt:          b.created_at,
         totalKes:           matchedPending?.total_kes ?? null,
         // Fallback display if KES enrichment missed
