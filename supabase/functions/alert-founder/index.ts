@@ -13,12 +13,25 @@ const CORS_HEADERS = {
 };
 
 type AlertType =
-  | "PAID_NO_OFFER"        // customer paid, Duffel offer expired before we could book
-  | "PAID_NO_TICKET"       // customer paid, Duffel rejected the booking
-  | "BOOKED_NO_DB_RECORD"  // ticket issued but our DB write failed
-  | "AMOUNT_MISMATCH"      // Pesapal reported a different amount than expected
-  | "PAYMENT_FAILED"       // payment didn't complete (informational only)
-  | "UNHANDLED_ERROR";     // webhook crashed
+  | "PAID_NO_OFFER"                        // customer paid, Duffel offer expired before we could book
+  | "PAID_NO_TICKET"                       // customer paid, Duffel rejected the booking
+  | "BOOKED_NO_DB_RECORD"                  // ticket issued but our DB write failed
+  | "AMOUNT_MISMATCH"                      // processor reported a different amount than expected
+  | "PAYMENT_FAILED"                       // payment didn't complete (informational only)
+  | "UNHANDLED_ERROR"                      // webhook crashed
+  // Batch 2 refund automation (Session 25)
+  | "REFUND_DB_INSERT_FAILED"              // refundBooking() couldn't insert refunds row (non-duplicate)
+  | "REFUND_API_FAILED"                    // Paystack /refund non-2xx
+  | "REFUND_UNHANDLED_ERROR"               // try/catch in refundBooking()
+  | "REFUND_EVENT_MISSING_IDS"             // refund webhook with no id or transaction
+  | "REFUND_EVENT_NO_ROW"                  // refund webhook for row we didn't create (manual/dashboard-initiated)
+  | "REFUND_FAILED"                        // Paystack refund.failed event fired
+  // Paystack webhook plumbing alerts (Session 20/25 wiring)
+  | "PAYSTACK_MALFORMED_WEBHOOK"           // JSON parse failed on webhook payload
+  | "PAYSTACK_SIGNATURE_FAILURE"           // HMAC-SHA512 mismatch on webhook
+  | "PAYSTACK_MISSING_REFERENCE"           // charge.success with no reference
+  | "PAYSTACK_OR_DUFFEL_MODE_KEY_MISMATCH" // mode/key mismatch in paystack-webhook
+  | "PAYSTACK_MODE_KEY_MISMATCH";          // mode/key mismatch in verify-payment
 
 const ALERT_CONFIG: Record<AlertType, { severity: string; subject: string; action: string }> = {
   PAID_NO_OFFER: {
@@ -47,11 +60,68 @@ const ALERT_CONFIG: Record<AlertType, { severity: string; subject: string; actio
     action: "No action needed unless customer reaches out.",
   },
   UNHANDLED_ERROR: {
-    severity: "🚨 CRITICAL",
-    subject: "Unhandled error in webhook",
-    action: "Check logs. May indicate an outage.",
-  },
-};
+      severity: "🚨 CRITICAL",
+      subject: "Unhandled error in webhook",
+      action: "Check logs. May indicate an outage.",
+    },
+    // ── Batch 2 refund automation (Session 25) ──────────────────────────────
+    REFUND_DB_INSERT_FAILED: {
+      severity: "🚨 CRITICAL",
+      subject: "Automated refund could not be recorded in DB",
+      action: "refundBooking() failed to write to refunds table BEFORE calling Paystack. Customer's payment is captured, no refund has been issued. Refund manually via Paystack dashboard, then INSERT the refunds row, then UPDATE pending_bookings.status='refunded'.",
+    },
+    REFUND_API_FAILED: {
+      severity: "🚨 CRITICAL",
+      subject: "Paystack refund API rejected our request",
+      action: "refunds row exists but Paystack /refund returned non-2xx. Check paystack_error field on the refunds row for details. Refund manually via Paystack dashboard, then UPDATE refunds row with paystack_refund_id + status='pending'.",
+    },
+    REFUND_UNHANDLED_ERROR: {
+      severity: "🚨 CRITICAL",
+      subject: "Unhandled exception in refundBooking()",
+      action: "Something threw inside the refund helper. Check stack trace. Customer state unclear — verify pending_bookings.status and refunds table by hand, refund manually if needed.",
+    },
+    REFUND_EVENT_MISSING_IDS: {
+      severity: "⚠️ HIGH",
+      subject: "Paystack refund webhook missing id/transaction",
+      action: "A refund event arrived with neither a refund id nor a transaction id. Likely a Paystack payload change. Check paystack-webhook logs for the raw payload.",
+    },
+    REFUND_EVENT_NO_ROW: {
+      severity: "ℹ️ INFO",
+      subject: "Paystack refund event for unknown refund",
+      action: "A refund event fired for a refund not initiated by refundBooking() (typically a manual refund from Paystack dashboard). Expected for manual refunds; reconcile if unexpected.",
+    },
+    REFUND_FAILED: {
+      severity: "🚨 CRITICAL",
+      subject: "Paystack refund.failed event fired",
+      action: "Paystack rejected the refund it initially accepted. pending_bookings stuck at refund_pending. Investigate the refund_id in Paystack dashboard, resolve with customer, then update DB.",
+    },
+    // ── Paystack webhook plumbing (Session 20/25) ───────────────────────────
+    PAYSTACK_MALFORMED_WEBHOOK: {
+      severity: "⚠️ HIGH",
+      subject: "Paystack webhook body was not valid JSON",
+      action: "Something upstream is sending malformed payloads. Check paystack-webhook logs. If ongoing, contact Paystack support.",
+    },
+    PAYSTACK_SIGNATURE_FAILURE: {
+      severity: "🚨 CRITICAL",
+      subject: "Paystack webhook signature verification failed",
+      action: "Either a bad-actor request OR a signing secret mismatch. Confirm PAYSTACK_API_KEY in env vars matches the key Paystack dashboard is signing with. If keys are correct, treat as attempted attack.",
+    },
+    PAYSTACK_MISSING_REFERENCE: {
+      severity: "🚨 CRITICAL",
+      subject: "Paystack charge.success with no reference",
+      action: "Payment came through but we can't match it to a merchant_ref. Paystack tx_id is in the alert context. Manually reconcile via Paystack dashboard.",
+    },
+    PAYSTACK_OR_DUFFEL_MODE_KEY_MISMATCH: {
+      severity: "🚨 CRITICAL",
+      subject: "Environment key/mode mismatch in paystack-webhook",
+      action: "DUFFEL_MODE or PAYSTACK_MODE doesn't match the corresponding API key prefix. All requests refused with 503. Fix env vars in Supabase dashboard.",
+    },
+    PAYSTACK_MODE_KEY_MISMATCH: {
+      severity: "🚨 CRITICAL",
+      subject: "Environment key/mode mismatch in verify-payment",
+      action: "PAYSTACK_MODE doesn't match the PAYSTACK_API_KEY prefix. All verify-payment requests refused with 503. Fix env vars in Supabase dashboard.",
+    },
+  };
 
 function buildEmailHtml(
   alertType: AlertType,
