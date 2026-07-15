@@ -10407,7 +10407,15 @@
       // fires) still preserves the fresh value in sessionStorage.
       let _emailStashTimer = null;
       contactEmailEl.addEventListener('input', () => {
-        if (emailBlurred) runEmailValidation();
+        // Re-run validation on every keystroke once EITHER a blur has
+        // occurred OR the submit path has flagged the field (error class
+        // present). The second condition catches the case where the user
+        // hits Continue without ever blurring: warning surfaces, user
+        // starts correcting, warning must clear as soon as the value
+        // becomes valid. Session 27b Commit 2.
+        if (emailBlurred || contactEmailEl.classList.contains('pax-input-err')) {
+          runEmailValidation();
+        }
         if (_emailStashTimer) clearTimeout(_emailStashTimer);
         _emailStashTimer = setTimeout(() => {
           try { stashBookingPassengers(); } catch (_) {}
@@ -10428,7 +10436,14 @@
       contactPhoneEl.addEventListener('blur', () => { phoneBlurred = true; runContactPhoneValidation(); try { stashBookingPassengers(); } catch (_) {} });
       let _phoneStashTimer = null;
       contactPhoneEl.addEventListener('input', () => {
-        if (phoneBlurred) runContactPhoneValidation();
+        // Re-run validation on every keystroke once EITHER a blur has
+        // occurred OR the submit path has flagged the field group (error
+        // class lives on 'contact-phone-group', not on the input itself
+        // — see showPhoneHint). Session 27b Commit 2.
+        const grp = document.getElementById('contact-phone-group');
+        if (phoneBlurred || (grp && grp.classList.contains('pax-input-err'))) {
+          runContactPhoneValidation();
+        }
         if (_phoneStashTimer) clearTimeout(_phoneStashTimer);
         _phoneStashTimer = setTimeout(() => {
           try { stashBookingPassengers(); } catch (_) {}
