@@ -13438,10 +13438,34 @@
       // Built here so we can reuse the same diff/baseline logic as the cabin cells.
       let chipHtml = '';
       {
-        // Pick the cabin to feature on the chip
+        // Pick the cabin to feature on the chip.
+        //
+        // Inbound (RT step 2): locked to the outbound cabin — Duffel prices
+        // paired offers at one cabin class, so the cabin filter is a step-1
+        // concern only.
+        //
+        // Outbound / one-way: if the user has an active cabin filter,
+        // feature THAT cabin's price so the chip matches what they're
+        // filtering by (e.g. Premium Economy filter → PE price, not Economy).
+        // 'business_first' maps to either 'business' or 'first' — feature
+        // the cheaper of whichever exists on this offer. Falls through to
+        // lowestCabin only if the filtered cabin isn't on the offer, which
+        // filterOffers should have already excluded but guard anyway.
+        // Session 27b Commit 3a.
         let chipCabin = null;
         if (kind === 'inbound' && selectedOutbound?.cabin) {
           chipCabin = selectedOutbound.cabin;
+        } else if (activeCabinFilter && activeCabinFilter !== 'all') {
+          const filterCabins = activeCabinFilter === 'business_first'
+            ? ['business', 'first']
+            : [activeCabinFilter];
+          const available = filterCabins.filter(k => cabinPriceOf(offer, k) != null);
+          if (available.length) {
+            chipCabin = available.reduce((cheapest, k) =>
+              cabinPriceOf(offer, k) < cabinPriceOf(offer, cheapest) ? k : cheapest);
+          } else {
+            chipCabin = lowestCabin(offer);
+          }
         } else {
           chipCabin = lowestCabin(offer);
         }
