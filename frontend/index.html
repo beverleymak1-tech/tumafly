@@ -12848,7 +12848,12 @@
     const mode = document.getElementById('sort-by')?.value || 'recommended';
     const arr = [...offers];
     const priceOfLowest = (o) => currentCurrency === 'USD' ? o.lowest_price_usd : o.lowest_price_kes;
-    const dur = (o) => o.slices[0]?.duration || 99999;
+    // slice.duration is an ISO 8601 string like "PT4H27M", not a number.
+    // Subtracting strings yields NaN, so `arr.sort((a,b) => dur(a) - dur(b))`
+    // was silently no-op'ing and leaving results in Duffel response order
+    // (price-ascending) — the reason "Fastest" and "Recommended" tray picks
+    // updated the label but never re-sorted. Session 27b Commit 3.
+    const dur = (o) => isoDurationToMinutes(o.slices[0]?.duration) || 99999;
     const dep = (o) => new Date(o.slices[0]?.departure || 0).getTime();
 
     if (mode === 'cheapest') arr.sort((a, b) => priceOfLowest(a) - priceOfLowest(b));
