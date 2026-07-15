@@ -13485,7 +13485,7 @@
             metaLine = `${CABIN_LABELS[chipCabin]} · ${isRoundTrip ? 'Round-trip per traveler' : 'One-way per traveler'}`;
           }
           chipHtml = `
-            <button class="fc-mobile-price-chip" onclick="openFareSheet('${escapeHtml(offer.flight_key)}','${kind}')" type="button" aria-label="Choose fare">
+            <button class="fc-mobile-price-chip" onclick="openFareSheet('${escapeHtml(offer.flight_key)}','${kind}','${chipCabin || ''}')" type="button" aria-label="Choose fare">
               <span class="fc-chip-body">
                 <span class="fc-chip-price">${priceLine}</span>
                 <span class="fc-chip-meta">${metaLine}</span>
@@ -17663,7 +17663,13 @@
     `;
   }
 
-  function openFareSheet(flightKey, kind) {
+  function openFareSheet(flightKey, kind, initialCabin) {
+    // initialCabin (optional): the cabin to open the carousel on. Passed by
+    // the mobile price chip when an active cabin filter is set, so the sheet
+    // lands on the cabin the user is filtering by rather than always Economy.
+    // Currency-toggle re-render (setCurrency ~L12511) doesn't pass this, so
+    // that path preserves current behavior (opens on first card). Session 27b
+    // Commit 3a.
     _lastFareSheet = { flightKey, kind };
     const offer = allOffers.find(o => o.flight_key === flightKey);
     if (!offer) return;
@@ -17742,8 +17748,21 @@
 
     // Wire up the dot indicator via IntersectionObserver — fires when each card
     // is mostly in view, then we mark the corresponding dot active.
+    // Also apply the initialCabin scroll (if provided) inside the same rAF so
+    // the carousel starts at the requested card and the observer picks up the
+    // right dot on its first callback. Session 27b Commit 3a.
     if (cabinsToShow.length > 1) {
-      requestAnimationFrame(() => attachFareCarouselDots());
+      requestAnimationFrame(() => {
+        if (initialCabin) {
+          const idx = cabinsToShow.indexOf(initialCabin);
+          if (idx > 0) {
+            const carousel = document.getElementById('fare-sheet-carousel');
+            const card = carousel?.children[idx];
+            if (carousel && card) carousel.scrollLeft = card.offsetLeft;
+          }
+        }
+        attachFareCarouselDots();
+      });
     }
   }
 
