@@ -11558,6 +11558,34 @@
     }
     return lowestK;
   }
+  // The cabin key to use when we need one "featured" price per offer — for
+  // sort, badges, and any list-level display that must pick a single cabin.
+  // Honors the active cabin filter so 'Cheapest' with a Business & First
+  // filter sorts by business price (not by hidden Economy price), and the
+  // 'Lowest price' / 'Best' badges mark the right card. When no filter is
+  // active (or 'all'), falls back to lowestCabin. business_first picks the
+  // cheaper of business/first on that offer if both exist.
+  //
+  // Kept in sync manually with the chipCabin computation inside
+  // renderFlightList — same rule, deliberately inlined there. If the rule
+  // ever changes, update both sites. Session 27b Commit 3b.
+  function featuredCabinOf(offer) {
+    if (activeCabinFilter && activeCabinFilter !== 'all') {
+      const filterCabins = activeCabinFilter === 'business_first'
+        ? ['business', 'first']
+        : [activeCabinFilter];
+      const available = filterCabins.filter(k => cabinPriceOf(offer, k) != null);
+      if (available.length) {
+        return available.reduce((cheapest, k) =>
+          cabinPriceOf(offer, k) < cabinPriceOf(offer, cheapest) ? k : cheapest);
+      }
+    }
+    return lowestCabin(offer);
+  }
+  function featuredPriceOf(offer) {
+    const c = featuredCabinOf(offer);
+    return c ? cabinPriceOf(offer, c) : null;
+  }
   function formatPrice(amount) {
     if (currentCurrency === 'USD') return 'USD ' + Number(amount).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
     return 'KES ' + Math.round(amount).toLocaleString();
@@ -12847,7 +12875,12 @@
   function sortOffers(offers) {
     const mode = document.getElementById('sort-by')?.value || 'recommended';
     const arr = [...offers];
-    const priceOfLowest = (o) => currentCurrency === 'USD' ? o.lowest_price_usd : o.lowest_price_kes;
+    // Sort by the FEATURED cabin's price (respects activeCabinFilter) rather
+    // than the offer's absolute lowest cabin. Otherwise 'Cheapest' with a
+    // Business & First filter sorts by hidden Economy price, and cards land
+    // out of order relative to the Business labels they display.
+    // Session 27b Commit 3b.
+    const priceOfFeatured = (o) => featuredPriceOf(o) ?? Infinity;
     // slice.duration is an ISO 8601 string like "PT4H27M", not a number.
     // Subtracting strings yields NaN, so `arr.sort((a,b) => dur(a) - dur(b))`
     // was silently no-op'ing and leaving results in Duffel response order
@@ -12856,7 +12889,7 @@
     const dur = (o) => isoDurationToMinutes(o.slices[0]?.duration) || 99999;
     const dep = (o) => new Date(o.slices[0]?.departure || 0).getTime();
 
-    if (mode === 'cheapest') arr.sort((a, b) => priceOfLowest(a) - priceOfLowest(b));
+    if (mode === 'cheapest') arr.sort((a, b) => priceOfFeatured(a) - priceOfFeatured(b));
     else if (mode === 'fastest') arr.sort((a, b) => dur(a) - dur(b));
     else if (mode === 'earliest') arr.sort((a, b) => dep(a) - dep(b));
     // Batch 2 · #11a — Latest departure sort (mirrors 'earliest' with the
@@ -12864,13 +12897,12 @@
     // tray. Users who prefer to leave later in the day (business folks,
     // late-night flyers) grab this.
     else if (mode === 'latest') arr.sort((a, b) => dep(b) - dep(a));
-    else {
-      // Recommended: normalized score combining price + duration + stops, lower better
-      const maxPrice = Math.max(...arr.map(priceOfLowest));
+    else {   // Recommended: normalized score combining price + duration + stops, lower better
+      const maxPrice = Math.max(...arr.map(priceOfFeatured));
       const maxDur = Math.max(...arr.map(dur));
       arr.sort((a, b) => {
-        const sa = (priceOfLowest(a) / maxPrice) + (dur(a) / maxDur) * 0.4 + (a.slices[0].stops || 0) * 0.1;
-        const sb = (priceOfLowest(b) / maxPrice) + (dur(b) / maxDur) * 0.4 + (b.slices[0].stops || 0) * 0.1;
+        const sa = (priceOfFeatured(a) / maxPrice) + (dur(a) / maxDur) * 0.4 + (a.slices[0].stops || 0) * 0.1;
+        const sb = (priceOfFeatured(b) / maxPrice) + (dur(b) / maxDur) * 0.4 + (b.slices[0].stops || 0) * 0.1;
         return sa - sb;
       });
     }
@@ -13002,7 +13034,10 @@
     }
 
     const sorted = sortOffers(filtered);
-    const byPrice = [...sorted].sort((a, b) => (currentCurrency === 'USD' ? a.lowest_price_usd - b.lowest_price_usd : a.lowest_price_kes - b.lowest_price_kes));
+    // 'Lowest price' badge target — pick the offer with the cheapest FEATURED
+    // cabin (Business under a Business & First filter, etc.) so the badge
+    // marks the right card. Session 27b Commit 3b.
+    const byPrice = [...sorted].sort((a, b) => (featuredPriceOf(a) ?? Infinity) - (featuredPriceOf(b) ?? Infinity));
     const lowestPriceId = byPrice[0]?.flight_key;
     const bestId = sortOffers(filtered)[0]?.flight_key;
 
