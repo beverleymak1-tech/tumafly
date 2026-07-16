@@ -109,7 +109,13 @@ Deno.serve(async (req) => {
         created_at
       `)
       .eq("user_id", user.id)
-      .in("status", ["booked", "paid"])
+      .in("status", [
+              "booked",             // original — successful ticketed booking
+              "paid",               // original — payment captured
+              "refund_pending",     // Batch 2 lifecycle — user requested refund, being processed
+              "refunded",           // Batch 2 lifecycle — refund complete, keep visible to user
+              "paid_booking_failed" // Batch 2 lifecycle — payment succeeded but Duffel booking failed
+            ])
       .order("created_at", { ascending: false })
       .limit(50);
 
