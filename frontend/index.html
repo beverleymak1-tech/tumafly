@@ -8402,6 +8402,16 @@
   // that resolves it). Used by the popstate handler to intercept back
   // navigation and warn the user their payment is still in flight.
   let _pollingActive = false;
+  // Session 27b Commit 5 — floating summary FAB state. Hoisted from the
+  // renderBookingSummary block below because restoreFromUrl (called at
+  // module load, line ~11211) may fire showView during boot, which
+  // reads _ctaSummaryExpanded — and hitting a `let`-declared variable
+  // before its initialization line trips TDZ. Original placement was
+  // right before renderBookingSummary; hoisted here for boot-order
+  // safety. Original initial-value comments preserved.
+  let _ctaSummaryExpanded = false;
+  let _ctaSummaryObserver = null;
+  let _priceSlotInView = false;
   let pollStartedAt = null;
 
   // Stashed by runSearch so the fare-timer's "Search again" CTA can re-run the
@@ -16464,9 +16474,8 @@
   // IntersectionObserver on the mobile price slot hides the FAB summary
   // row when the slot is in view (so total isn't shown twice) and morphs
   // the Continue button copy back to plain "Continue to payment".
-  let _ctaSummaryExpanded = false;
-  let _ctaSummaryObserver = null;
-  let _priceSlotInView = false;
+  // (Variables hoisted to top of module — see line ~8240 area.
+  // Retained comment here for context on the FAB itself.)
 
   function toggleCtaSummary() {
     if (_ctaSummaryExpanded) {
@@ -20456,15 +20465,14 @@
     activeItineraryPnr = pnr;
     activeMerchantRef = pnr;   // legacy compatibility for any code reading this
     loadItinerary(pnr);
-    // Session 27b Commit 6 Part 1 — push #itinerary?ref=<pnr> so the URL
-    // is F5-recoverable and shareable. Uses safeHistory to sit within
-    // the same history contract used by results/booking. restoreFromUrl
-    // (Part 2) parses the ref back out and calls viewTrip on refresh.
-    try {
-      safeHistory('push', { view: 'itinerary', params: { ref: pnr } },
-        window.location.pathname + '#itinerary?ref=' + encodeURIComponent(pnr));
-    } catch (_) {}
-    showView('itinerary');
+    // Session 27b Commit 6 Part 1 — push #itinerary?ref=<pnr> via the
+    // standard showView opts.params contract. showView builds the hash
+    // (name + '?ref=<pnr>') and calls safeHistory internally, so we
+    // don't do a manual push here — a manual push would be immediately
+    // overwritten by showView's own push (which would use no params if
+    // we didn't pass them), stripping the ref. restoreFromUrl (Part 2)
+    // parses the ref back out on F5.
+    showView('itinerary', { params: { ref: pnr } });
   }
 
   // Format helpers reused from the trip card. (Defined globally in this file;
