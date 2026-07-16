@@ -8396,6 +8396,12 @@
   let contactData = {};
   let activeMerchantRef = null;
   let pollHandle = null;
+  // Session 27b Commit 6 Part 4b — State A polling protection.
+  // True while pollPostRedirect is actively polling (between the
+  // _handlePaystackSuccess call that starts it and the terminal state
+  // that resolves it). Used by the popstate handler to intercept back
+  // navigation and warn the user their payment is still in flight.
+  let _pollingActive = false;
   let pollStartedAt = null;
 
   // Stashed by runSearch so the fare-timer's "Search again" CTA can re-run the
@@ -9029,6 +9035,29 @@
       clearBookingExtras();
       showView('home');
       try { safeHistory('replace', { view: 'home' }, window.location.pathname); } catch (_) {}
+      return true;
+    }
+    if (view === 'itinerary') {
+      // Session 27b Commit 6 Part 2 — F5 on #itinerary?ref=<pnr>.
+      // Read the PNR from the URL and dispatch viewTrip, which:
+      //   - Sets activeItineraryPnr
+      //   - Reads from _allTrips cache if populated; otherwise shows a
+      //     loading state and kicks off loadMyTrips (which fetches via
+      //     get-user-trips, with the broadened status filter from Part 3).
+      //   - Calls showView('itinerary') on entry.
+      // Same TDZ defer pattern as the other data-bearing restorers —
+      // viewTrip touches auth helpers declared later in the file.
+      const ref = (params.ref || '').trim();
+      if (!ref) {
+        console.warn('[restoreItinerary] missing ref param, falling back to home', params);
+        showView('home');
+        try { safeHistory('replace', { view: 'home' }, window.location.pathname); } catch (_) {}
+        return false;
+      }
+      setTimeout(() => {
+        try { viewTrip(ref); }
+        catch (e) { console.warn('[restoreItinerary] deferred failed:', e); }
+      }, 0);
       return true;
     }
     return false;
@@ -11204,6 +11233,21 @@
     if (pollHandle) {
       clearTimeout(pollHandle);
       pollHandle = null;
+    }
+    // Session 27b Commit 6 Part 4b — State A back protection.
+    // If the user is leaving #success while pollPostRedirect is still
+    // actively polling (State A — spinner visible, no PNR yet), intercept
+    // the back navigation and show a warn+choice modal. The browser has
+    // already popped the entry; push #success back onto history and
+    // re-show the view while the modal is up. Modal Stay leaves the
+    // pushed entry alone; Leave navigates to home explicitly. State B
+    // (check mark) navigates freely — history was replaced with #home
+    // at that point (see renderPostRedirectSuccess 'confirmed' branch).
+    if (document.body.dataset.view === 'success' && _pollingActive) {
+      try { safeHistory('push', { view: 'success' }, window.location.pathname); } catch (_) {}
+      showView('success', { fromPopState: true });
+      showStateAPollingWarnModal();
+      return;
     }
     // The state object is set when WE push history (via showView with params),
     // but it's null/incomplete for cases the user controls directly: manually
@@ -16852,6 +16896,61 @@
   //
   // Announced via role="alert" + aria-live="assertive" so screen readers pick
   // up the notice immediately rather than waiting for the user to tab to it.
+  // Session 27b Commit 6 Part 4b — State A back protection modal.
+  // Called from the popstate handler when the user tries to leave
+  // #success while pollPostRedirect is still active. Popstate has
+  // already re-pushed #success and re-shown the view; this modal
+  // presents a Stay vs Go-home choice.
+  //
+  // - Stay: just close the modal. History and view are already correct.
+  // - Go to home: showView('home') and replace history with a home
+  //   entry so a subsequent back won't loop back into this modal.
+  //   Polling continues in background (stash intact, pollPostRedirect
+  //   still running). If it resolves while user is on home, the
+  //   confirmation email is the primary signal; there's no in-app
+  //   banner today (deliberately scoped out of Commit 6).
+  function showStateAPollingWarnModal() {
+    if (document.getElementById('state-a-warn-modal')) return;
+
+    const modal = document.createElement('div');
+    modal.id = 'state-a-warn-modal';
+    modal.className = 'search-loading-backdrop';
+    modal.setAttribute('role', 'alertdialog');
+    modal.setAttribute('aria-live', 'assertive');
+    modal.innerHTML = `
+      <div class="search-loading-card" style="max-width:400px;text-align:center;padding:24px;">
+        <div style="display:flex;justify-content:center;margin-bottom:14px;">
+          <div style="width:48px;height:48px;border-radius:50%;background:var(--warning-soft,#FEF6E7);display:flex;align-items:center;justify-content:center;">
+            <svg width="26" height="26" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+              <path d="M12 7v5l3 2" stroke="var(--warning,#B45309)" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+              <circle cx="12" cy="12" r="10" stroke="var(--warning,#B45309)" stroke-width="2"/>
+            </svg>
+          </div>
+        </div>
+        <div style="font-size:18px;font-weight:600;color:var(--ink,#0F1923);margin-bottom:8px;">
+          Your payment is still processing
+        </div>
+        <div style="font-size:14px;color:var(--text-2,#4A5568);line-height:1.5;margin-bottom:20px;">
+          Leaving this page won't cancel the booking. We'll email you the confirmation once it's complete.
+        </div>
+        <div style="display:flex;flex-direction:column;gap:8px;">
+          <button class="btn btn-primary" id="state-a-warn-stay" style="min-height:44px;">Stay on this page</button>
+          <button class="btn btn-ghost" id="state-a-warn-leave" style="min-height:44px;">Go to home</button>
+        </div>
+      </div>
+    `;
+    document.body.appendChild(modal);
+
+    document.getElementById('state-a-warn-stay').onclick = () => {
+      modal.remove();
+    };
+    document.getElementById('state-a-warn-leave').onclick = () => {
+      modal.remove();
+      showView('home');
+      try { safeHistory('replace', { view: 'home' }, window.location.pathname); } catch (_) {}
+    };
+  }
+
   function showSearchExpiredModal() {
     // Kill any open Paystack modal — the fare is dead, so we don't want
     // the customer completing a charge on an expired offer.
@@ -18544,6 +18643,14 @@
         <p style="color:var(--text-2);max-width:42ch;margin:8px auto 0;">A confirmation is on its way to your email. Your booking reference:</p>
         <div class="success-ref" id="success-ref">${escapeHtml(pnr)}</div>
       `;
+      // Session 27b Commit 6 Part 4a — State B navigation prep.
+      // Booking is confirmed and the check mark is showing. Replace the
+      // current history entry with #home, then push a #success entry on
+      // top. Result: browser back → popstate to home. F5 → stash was
+      // already cleared by pollPostRedirect, so _isPaystackPostPay is
+      // false and restoreFromUrl handles #success → showView('home').
+      try { safeHistory('replace', { view: 'home' }, window.location.pathname); } catch (_) {}
+      try { safeHistory('push', { view: 'success' }, window.location.pathname + '#success'); } catch (_) {}
       return;
     }
 
@@ -18601,7 +18708,12 @@
   }
 
   async function pollPostRedirect(merchantRef) {
+    // Session 27b Commit 6 Part 4b — flag polling as active so the
+    // popstate handler can intercept State A back navigation. Cleared
+    // in every terminal branch below plus the timeout.
+    _pollingActive = true;
     if (Date.now() - _postRedirectPollStarted > POST_REDIRECT_POLL_TIMEOUT_MS) {
+      _pollingActive = false;
       // 60s without terminal state → soft-fallback rather than spin forever.
       // Server-side webhook + email confirmation continue independently.
       renderPostRedirectSuccess('still-processing', { merchantRef });
@@ -18617,6 +18729,7 @@
       console.log('[Paystack callback poll] state=', data?.state, 'pnr=', data?.booking?.booking_reference);
 
       if (data?.state === 'confirmed' && data?.booking?.booking_reference) {
+        _pollingActive = false;
         // Booking done — clear the post-pay stash so a subsequent F5
         // doesn't re-enter the polling flow for this completed booking.
         try {
@@ -18628,6 +18741,7 @@
         return;
       }
       if (data?.state === 'failed') {
+        _pollingActive = false;
         // Same — terminal state, clear the stash.
         try {
           sessionStorage.removeItem('tumafly_post_pay_ref');
@@ -18638,6 +18752,7 @@
         return;
       }
       if (data?.state === 'needs_support') {
+        _pollingActive = false;
         // Soft-terminal — payment is fine, ticket is delayed. Still clear
         // the stash: the user will contact support with the merchant_ref
         // (surfaced in the hero) rather than re-loading this state.
@@ -20341,6 +20456,14 @@
     activeItineraryPnr = pnr;
     activeMerchantRef = pnr;   // legacy compatibility for any code reading this
     loadItinerary(pnr);
+    // Session 27b Commit 6 Part 1 — push #itinerary?ref=<pnr> so the URL
+    // is F5-recoverable and shareable. Uses safeHistory to sit within
+    // the same history contract used by results/booking. restoreFromUrl
+    // (Part 2) parses the ref back out and calls viewTrip on refresh.
+    try {
+      safeHistory('push', { view: 'itinerary', params: { ref: pnr } },
+        window.location.pathname + '#itinerary?ref=' + encodeURIComponent(pnr));
+    } catch (_) {}
     showView('itinerary');
   }
 
