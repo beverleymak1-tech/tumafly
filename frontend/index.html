@@ -8272,16 +8272,6 @@
   let baggageModalState = null;
   let baggageOfferId = null;
   let baggagePassengerIds = [];
-  // Session 27b Commit 4 — auto-launch bags → seats chain (mobile-only).
-  // _lastBaggageLoadPromise is stashed by proceedToBooking so the chain
-  // awaits the same in-flight fetch instead of re-firing get-baggage-options.
-  // The two callback slots hold the chain's resolve() during the await
-  // phase — set by runAutoLaunchChainMobile before each open, fired and
-  // cleared by closeBaggageModal / closeSeatModal on any exit path
-  // (Done button, backdrop tap, close X, back-button popstate).
-  let _lastBaggageLoadPromise = null;
-  let _chainOnBaggageClose = null;
-  let _chainOnSeatClose = null;
   // Step 2b: inbound picker drift banner state. Set by
   // _restoreInboundPickerFromOffer when a refresh detects the outbound's
   // fresh Duffel-quoted KES differs > 1% from what the URL's op= says the
@@ -14096,21 +14086,12 @@
         }, 250);
       });
     }
-   // Kick off baggage options fetch in the background — when it arrives, the
+    // Kick off baggage options fetch in the background — when it arrives, the
     // Baggage card swaps from the static fallback to the active picker.
-    // Session 27b Commit 4: stash the load promise so the mobile auto-launch
-    // chain can await the same fetch without re-firing it.
-    _lastBaggageLoadPromise = loadBaggageForBookingOffer();
-    _lastBaggageLoadPromise.then(() => {
+    loadBaggageForBookingOffer().then(() => {
       renderBaggageList();
       renderBookingSummary();
     });
-    // Session 27b Commit 4 — auto-launch bags → seats chain (mobile-only).
-    // Fires ONLY from this fresh-commit path, never from restoreBooking, so
-    // F5-restored booking views don't re-trigger the choreography. Async
-    // fire-and-forget; the runner internally awaits its own dependencies
-    // (baggage catalog load + seat-map fetches) and no-ops on desktop.
-    runAutoLaunchChainMobile().catch(e => console.warn('[auto-chain]', e));
   }
 
   // Renders a row per slice (Outbound + Return if round-trip) inside the Seats card.
@@ -14286,106 +14267,6 @@
     renderSeatModal();
   }
 
-  // ── Session 27b Commit 4 — auto-launch bags → seats chain (mobile-only) ──
-  //
-  // On fresh offer commit (OW outbound / RT inbound), auto-open the baggage
-  // picker; on close, auto-open the seat picker; on close, scroll #booking
-  // to top so the user lands on Traveler details. Bags first per spec
-  // (matches original Session 12 baggage-upsell intent).
-  //
-  // Guardrails:
-  //   - Only fires when viewport <= 768px (same breakpoint used by the
-  //     mobile price chip and Session 23's field reorder).
-  //   - Fires only from proceedToBooking (never from restoreBooking) so
-  //     F5-restored views don't re-trigger the choreography.
-  //   - Availability soft-skips: if bags are missing, skip the bag picker;
-  //     if seats are missing (on ALL segments), skip the seat picker.
-  //     Booking cards keep their existing generic-copy fallback via
-  //     renderBaggageList / renderSeatsList — no new UI markers or badges.
-  //   - Navigation guards: if the user leaves #booking mid-flow (back
-  //     button, deep link, etc.) the chain bails silently at the next
-  //     checkpoint.
-  //   - Fetch errors on get-baggage-options / get-seat-maps are treated
-  //     as "no availability" and the corresponding picker is skipped
-  //     (spec Q2 with an added error-treated-as-empty carve-out).
-  //
-  // The chain is a nudge, not a workflow gate: booking cards remain
-  // fully editable after completion, and no auto-nav to #payment happens
-  // (user still needs to fill Traveler details before advancing).
-
-  function isMobileViewport() {
-    return typeof window !== 'undefined'
-      && typeof window.matchMedia === 'function'
-      && window.matchMedia('(max-width: 768px)').matches;
-  }
-
-  function _bookingViewActive() {
-    const v = document.getElementById('view-booking');
-    return !!(v && !v.classList.contains('hidden'));
-  }
-
-  async function runAutoLaunchChainMobile() {
-    if (!isMobileViewport()) return;
-
-    // Defensive: clear any stale chain callbacks from a prior aborted flow.
-    _chainOnBaggageClose = null;
-    _chainOnSeatClose = null;
-
-    // Kick off seat-map fetches in parallel with the baggage picker so
-    // they're ready by the time the user closes bags — avoids a visible
-    // delay between the two modals.
-    const legsAtEntry = collectLegs();
-    const uniqueOffers = Array.from(new Set(legsAtEntry.map(l => l.offer_id)));
-    const seatMapsLoadPromise = Promise.all(
-      uniqueOffers.map(loadSeatMapForOffer)
-    ).catch(e => console.warn('[auto-chain] seat-maps prefetch failed:', e));
-
-    // ── Step 1 — baggage picker ─────────────────────────────────────
-    try {
-      if (_lastBaggageLoadPromise) await _lastBaggageLoadPromise;
-    } catch (_) { /* treated as no-bags below */ }
-
-    if (!_bookingViewActive()) return;
-
-    if (baggageAnyOptionsAvailable()) {
-      await new Promise(resolve => {
-        _chainOnBaggageClose = resolve;
-        openBaggageModal(0);
-      });
-    }
-    // else: no eligible bags → skip; Baggage card keeps its generic copy.
-
-    // ── Step 2 — seat picker ────────────────────────────────────────
-    if (!_bookingViewActive()) return;
-
-    try { await seatMapsLoadPromise; } catch (_) { /* treated as no-seats */ }
-
-    const legsNow = collectLegs();
-    const anySeatsAvailable = legsNow.some(
-      l => !seatMapsData[l.segment_id]?.unavailable
-    );
-
-    if (anySeatsAvailable) {
-      await new Promise(resolve => {
-        _chainOnSeatClose = resolve;
-        openSeatModal(0, 0);
-      });
-    }
-    // else: no seats on any segment → skip; Seats card keeps its generic copy.
-
-    // ── Step 3 — land user at top of #booking on Traveler details ───
-    if (!_bookingViewActive()) return;
-
-    // Short delay so the seat-modal close animation completes before the
-    // scroll fires; otherwise the scroll runs under a fading modal and
-    // reads as jumpy.
-    setTimeout(() => {
-      if (_bookingViewActive()) {
-        window.scrollTo({ top: 0, behavior: 'smooth' });
-      }
-    }, 250);
-  }
-
   async function loadSeatMapForOffer(offerId) {
     if (seatMapsByOffer[offerId]) return;
     try {
@@ -14460,15 +14341,6 @@
     if (el) el.remove();
     renderSeatsList();
     renderBookingSummary();
-    // Session 27b Commit 4: if the mobile auto-launch chain is awaiting
-    // this close, resolve it. One-shot — cleared before firing so a
-    // subsequent manual open/close (user tapping the Seats card later)
-    // doesn't re-trigger the chain.
-    if (_chainOnSeatClose) {
-      const cb = _chainOnSeatClose;
-      _chainOnSeatClose = null;
-      cb();
-    }
   }
 
   function renderSeatModal() {
@@ -14962,15 +14834,6 @@
     baggageModalState = null;
     const el = document.getElementById('bag-modal-root');
     if (el) el.remove();
-    // Session 27b Commit 4: if the mobile auto-launch chain is awaiting
-    // this close, resolve it. One-shot — cleared before firing so a
-    // subsequent manual open/close (user tapping the Baggage card later)
-    // doesn't re-trigger the chain.
-    if (_chainOnBaggageClose) {
-      const cb = _chainOnBaggageClose;
-      _chainOnBaggageClose = null;
-      cb();
-    }
   }
 
   function switchBaggageModalPax(paxIdx) {
