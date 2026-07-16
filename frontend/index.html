@@ -9047,29 +9047,11 @@
       try { safeHistory('replace', { view: 'home' }, window.location.pathname); } catch (_) {}
       return true;
     }
-    if (view === 'itinerary') {
-      // Session 27b Commit 6 Part 2 — F5 on #itinerary?ref=<pnr>.
-      // Read the PNR from the URL and dispatch viewTrip, which:
-      //   - Sets activeItineraryPnr
-      //   - Reads from _allTrips cache if populated; otherwise shows a
-      //     loading state and kicks off loadMyTrips (which fetches via
-      //     get-user-trips, with the broadened status filter from Part 3).
-      //   - Calls showView('itinerary') on entry.
-      // Same TDZ defer pattern as the other data-bearing restorers —
-      // viewTrip touches auth helpers declared later in the file.
-      const ref = (params.ref || '').trim();
-      if (!ref) {
-        console.warn('[restoreItinerary] missing ref param, falling back to home', params);
-        showView('home');
-        try { safeHistory('replace', { view: 'home' }, window.location.pathname); } catch (_) {}
-        return false;
-      }
-      setTimeout(() => {
-        try { viewTrip(ref); }
-        catch (e) { console.warn('[restoreItinerary] deferred failed:', e); }
-      }, 0);
-      return true;
-    }
+    // Session 27b Commit 6 Part 2 — REVERTED. The #itinerary restore
+    // branch was hanging the page on F5 (blank content, header profile
+    // chip missing, page unresponsive). Falls through to the return
+    // false below → on-load home-wipe → user lands on #home. Diagnosis
+    // pending in Session 28.
     return false;
   }
 
@@ -20465,14 +20447,10 @@
     activeItineraryPnr = pnr;
     activeMerchantRef = pnr;   // legacy compatibility for any code reading this
     loadItinerary(pnr);
-    // Session 27b Commit 6 Part 1 — push #itinerary?ref=<pnr> via the
-    // standard showView opts.params contract. showView builds the hash
-    // (name + '?ref=<pnr>') and calls safeHistory internally, so we
-    // don't do a manual push here — a manual push would be immediately
-    // overwritten by showView's own push (which would use no params if
-    // we didn't pass them), stripping the ref. restoreFromUrl (Part 2)
-    // parses the ref back out on F5.
-    showView('itinerary', { params: { ref: pnr } });
+    // Session 27b Commit 6 Part 1 — REVERTED. Attempted URL push
+    // #itinerary?ref=<pnr> hung the page on F5. Back to pre-Commit-6
+    // behavior: no URL push, no ref. Diagnosis pending in Session 28.
+    showView('itinerary');
   }
 
   // Format helpers reused from the trip card. (Defined globally in this file;
