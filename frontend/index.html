@@ -8395,6 +8395,19 @@
   let passengerData = [];
   let contactData = {};
   let activeMerchantRef = null;
+  // Session 28 — hoisted from ~L20443 so restoreFromUrl's #itinerary
+  // branch (fires during module-eval at ~L11432) can set the target
+  // PNR before onSignedIn's post-auth restore branch reads it. The
+  // original declaration site at ~L20443 has been removed.
+  let activeItineraryPnr = null;
+  // Session 28 — one-shot retry guard for loadItinerary's fallback
+  // path. The Session 27b Attempt-2 hang was infinite recursion here:
+  // loadItinerary → loadMyTrips (returns synchronously via
+  // !currentUser guard) → .then() → loadItinerary → …
+  // With this guard, we only refetch _allTrips once per pnr; a second
+  // miss shows a "trip not found" shell instead of looping. Reset in
+  // viewTrip on any new nav.
+  let _itineraryRetriedFor = null;
   let pollHandle = null;
   // Session 27b Commit 6 Part 4b — State A polling protection.
   // True while pollPostRedirect is actively polling (between the
@@ -9047,11 +9060,67 @@
       try { safeHistory('replace', { view: 'home' }, window.location.pathname); } catch (_) {}
       return true;
     }
-    // Session 27b Commit 6 Part 2 — REVERTED. The #itinerary restore
-    // branch was hanging the page on F5 (blank content, header profile
-    // chip missing, page unresponsive). Falls through to the return
-    // false below → on-load home-wipe → user lands on #home. Diagnosis
-    // pending in Session 28.
+    if (view === 'itinerary') {
+      // Session 28 — F5 on #itinerary?ref=<pnr>.
+      //
+      // The Session 27b Attempt-2 approach fired
+      //   setTimeout(() => viewTrip(ref), 0)
+      // synchronously from here. That queued a loadItinerary call
+      // before auth had restored. loadItinerary's fallback (line
+      // ~20482) then called loadMyTrips, which returned immediately
+      // via its `if (!currentUser)` guard. The .then() re-entered
+      // loadItinerary, which fell into the same fallback, which
+      // called loadMyTrips again, …infinite recursion. Browser
+      // tab locked. That's what Bev saw.
+      //
+      // The correct pattern — mirroring #profile / #my-trips
+      // above — is to defer BOTH the URL parse and the data load
+      // to the auth-restore path:
+      //   1. Save activeItineraryPnr so a later loader can pick it up.
+      //   2. Render the shell via showView (fromPopState so we don't
+      //      double-push URL — the browser already has it).
+      //   3. Paint a "Loading your trip…" state into #itin-content so
+      //      the empty shell isn't user-visible during the auth wait.
+      //   4. Return true so the on-load home-wipe is skipped.
+      // From here:
+      //   - If NO session: the auth IIFE (~L18911) sees data-view
+      //     'itinerary' and bounces to home + auth modal.
+      //   - If session: onSignedIn (~L18980) sees data-view
+      //     'itinerary' and calls loadMyTrips().then(loadItinerary).
+      // Extra loop protection lives inside loadItinerary itself
+      // (_itineraryRetriedFor guard) — belt and suspenders.
+      const ref = params.ref;
+      console.log('[restoreItinerary] step 1 — entered', { ref });
+      if (!ref) {
+        // No ref → nothing to restore. Fall through to my-trips.
+        console.log('[restoreItinerary] no ref — bouncing to my-trips');
+        showView('my-trips');
+        try {
+          safeHistory('replace', { view: 'my-trips' }, window.location.pathname + '#my-trips');
+        } catch (_) {}
+        return true;
+      }
+      activeItineraryPnr = ref;
+      activeMerchantRef = ref;   // legacy compatibility
+      _itineraryRetriedFor = null;
+      // Paint a loading state before showView flips visibility so
+      // the itin shell isn't a bare "Back to My trips" button for
+      // the auth-restore window.
+      try {
+        const _itinContent = document.getElementById('itin-content');
+        if (_itinContent) {
+          _itinContent.innerHTML = `
+            <div style="text-align:center;padding:60px 0;color:var(--text-2);">
+              <div style="font-size:18px;font-weight:600;color:var(--ink);margin-bottom:8px;">
+                Loading your trip…
+              </div>
+            </div>`;
+        }
+      } catch (_) {}
+      console.log('[restoreItinerary] step 2 — pnr saved, rendering shell');
+      showView('itinerary', { fromPopState: true });
+      return true;
+    }
     return false;
   }
 
@@ -18904,12 +18973,16 @@
         onSignedIn(session.user);
       } else {
         // Refresh-restore (#4 step 1): when restoreFromUrl() lands the user
-        // on an auth-gated view (#profile, #my-trips) but no session was
-        // restored, bounce to home + open the auth modal. Matches the
-        // click-flow guard at the top of loadProfile() / loadMyTrips() that
-        // catches the same case when those functions are called normally.
+        // on an auth-gated view (#profile, #my-trips, #itinerary) but no
+        // session was restored, bounce to home + open the auth modal.
+        // Matches the click-flow guard at the top of
+        // loadProfile() / loadMyTrips() that catches the same case when
+        // those functions are called normally. #itinerary added Session 28
+        // so an F5 on a signed-out itinerary tab lands cleanly on home
+        // instead of a "Loading your trip…" shell that never resolves.
         const _dv = document.body.getAttribute('data-view');
-        if ((_dv === 'profile' || _dv === 'my-trips') && typeof showView === 'function') {
+        if ((_dv === 'profile' || _dv === 'my-trips' || _dv === 'itinerary') && typeof showView === 'function') {
+          console.log('[auth-restore] no session on auth-gated view — bouncing home', { view: _dv });
           showView('home');
           if (typeof openAuthModal === 'function') openAuthModal();
         }
@@ -18983,6 +19056,33 @@
     }
     if (_dvForRestore === 'my-trips' && typeof loadMyTrips === 'function') {
       loadMyTrips().catch(e => console.warn('[my-trips] post-signin restore-load failed:', e));
+    }
+    if (_dvForRestore === 'itinerary' && typeof loadMyTrips === 'function' && activeItineraryPnr) {
+      // Session 28 — F5 on #itinerary?ref=<pnr> restore. restoreFromUrl
+      // saved the target PNR to activeItineraryPnr and rendered the
+      // shell. Now that auth is available, populate _allTrips then
+      // render the itinerary. Mirrors the my-trips block above.
+      const _pnr = activeItineraryPnr;
+      console.log('[itinerary-restore] step 3 — auth restored, loading trips', { pnr: _pnr });
+      loadMyTrips()
+        .then(() => {
+          // Guard: user may have navigated away during the fetch, or
+          // activeItineraryPnr may have been overwritten by another
+          // viewTrip click. In either case, don't override what's
+          // on screen now.
+          const _dvNow = document.body.getAttribute('data-view');
+          if (_dvNow !== 'itinerary') {
+            console.log('[itinerary-restore] view changed during fetch — skipping loadItinerary', { dvNow: _dvNow });
+            return;
+          }
+          if (activeItineraryPnr !== _pnr) {
+            console.log('[itinerary-restore] activeItineraryPnr changed during fetch — skipping loadItinerary');
+            return;
+          }
+          console.log('[itinerary-restore] step 4 — loadMyTrips resolved, calling loadItinerary');
+          if (typeof loadItinerary === 'function') loadItinerary(_pnr);
+        })
+        .catch(e => console.warn('[itinerary] post-signin restore-load failed:', e));
     }
 
     // If there's a pending post-booking link, hide the nudge banner
@@ -20440,17 +20540,25 @@
   // ── Itinerary detail view ─────────────────────────────────────
   // Called from My Trips card click. Reads the trip from the cached
   // _allTrips array (populated by loadMyTrips) — no extra network call.
-  let activeItineraryPnr = null;
+  // NOTE: activeItineraryPnr is declared near L8397 (hoisted Session 28
+  // so restoreFromUrl can set it during module-eval).
 
   function viewTrip(pnr) {
     if (!pnr) return;
     activeItineraryPnr = pnr;
     activeMerchantRef = pnr;   // legacy compatibility for any code reading this
+    // Session 28 — clear any stale retry guard from a prior itinerary
+    // view so the current click gets a fresh one-shot refetch budget.
+    _itineraryRetriedFor = null;
     loadItinerary(pnr);
-    // Session 27b Commit 6 Part 1 — REVERTED. Attempted URL push
-    // #itinerary?ref=<pnr> hung the page on F5. Back to pre-Commit-6
-    // behavior: no URL push, no ref. Diagnosis pending in Session 28.
-    showView('itinerary');
+    // Session 28 — URL push with ?ref=<pnr> so F5 can restore the
+    // itinerary view. Safe now that restoreFromUrl's #itinerary branch
+    // defers loading via the onSignedIn pattern (see L~18980) instead
+    // of the Session 27b Attempt-2 synchronous setTimeout re-entry
+    // (which triggered a loadItinerary → loadMyTrips-noop → .then →
+    // loadItinerary recursion). The URL push itself was never the
+    // problem — the loop in loadItinerary was.
+    showView('itinerary', { params: { ref: pnr } });
   }
 
   // Format helpers reused from the trip card. (Defined globally in this file;
@@ -20461,6 +20569,32 @@
     if (!trip) {
       // Defensive — should never happen if viewTrip was called from My Trips,
       // but if a user deep-links or refreshes, _allTrips is empty.
+      //
+      // Session 28 — one-shot retry guard. The Session 27b Attempt-2 hang
+      // was infinite recursion here: on F5 to #itinerary?ref=<pnr>, auth
+      // hadn't restored yet, loadMyTrips's !currentUser guard returned
+      // synchronously, .then() re-entered loadItinerary, and the loop
+      // flooded the microtask queue until the tab locked. With the guard,
+      // we refetch at most once per pnr; a second miss shows a proper
+      // "trip not found" shell.
+      console.log('[loadItinerary] step 5 — trip not in _allTrips', {
+        pnr,
+        retriedFor: _itineraryRetriedFor,
+        allTripsLen: (_allTrips || []).length,
+      });
+      if (_itineraryRetriedFor === pnr) {
+        console.log('[loadItinerary] already retried for this pnr — rendering not-found');
+        container.innerHTML = `
+          <div style="text-align:center;padding:60px 0;color:var(--text-2);">
+            <div style="font-size:18px;font-weight:600;color:var(--ink);margin-bottom:8px;">
+              We couldn't find that booking.
+            </div>
+            <div style="margin-bottom:20px;">It may be under a different account, or the link may be stale.</div>
+            <button class="btn btn-primary" onclick="showView('my-trips');loadMyTrips();">Back to My trips</button>
+          </div>`;
+        return;
+      }
+      _itineraryRetriedFor = pnr;
       container.innerHTML = `
         <div style="text-align:center;padding:60px 0;color:var(--text-2);">
           <div style="font-size:18px;font-weight:600;color:var(--ink);margin-bottom:8px;">
@@ -20475,6 +20609,9 @@
       });
       return;
     }
+    // Session 28 — successful render clears the retry guard so a
+    // subsequent viewTrip on a different pnr starts fresh.
+    _itineraryRetriedFor = null;
 
     const slices = trip.offer?.slices || [];
     const out    = slices[0] || {};
