@@ -3232,6 +3232,8 @@
     }
     /* Desktop: inline back/continue row visible, sticky bar hidden */
     .booking-cta-bar { display: none; }
+    /* Session 27b Commit 5 — mobile-only slot hidden by default on desktop. */
+    .booking-price-slot-mobile { display: none; }
     .booking-inline-cta { display: flex; }
     /* Desktop: hide mobile-only payment header and inline price slot */
     .payment-mobile-header { display: none; }
@@ -6217,6 +6219,119 @@
          the sticky bar is now Continue-only. */
       .booking-cta-bar .btn-secondary { display: none !important; }
 
+      /* Session 27b Commit 5 — mobile price-slot swap + FAB summary.
+         The aside's price slot is hidden on mobile; the duplicated slot
+         under Seats card takes over as the running-total card the user
+         scrolls to. Aside still holds trip-slot (order: -1 above puts it
+         at the top of the mobile view — trip info + compliance stay in
+         their existing places). */
+      .booking-layout > aside > #booking-price-slot { display: none; }
+      .booking-price-slot-mobile { display: block; }
+
+      /* FAB restructured: vertical stack (summary row on top, button row
+         below), rounded card, subtle background. The Continue button
+         retains its brand primary color; the summary row is a muted top
+         section that visually reads as one card with two zones. */
+      .booking-cta-bar {
+        flex-direction: column;
+        gap: 0;
+        background: #ffffff;
+        border-radius: 18px;
+        overflow: hidden;
+        box-shadow:
+          0 10px 28px rgba(15, 25, 35, 0.20),
+          0 3px 8px rgba(15, 25, 35, 0.10);
+      }
+      /* The primary button inside no longer needs its own shadow — the
+         card's shadow carries it. Also drop the pill radius; the card
+         corners handle rounding. */
+      .booking-cta-bar .btn-primary {
+        box-shadow: none;
+        border-radius: 0;
+        min-height: 52px;
+        flex: 1;
+      }
+      .cta-btn-row {
+        display: flex;
+        gap: 0;
+      }
+      .cta-summary-row {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        width: 100%;
+        padding: 12px 16px;
+        background: var(--bg, #f7fafc);
+        border: none;
+        border-bottom: 1px solid var(--border, #e5e7eb);
+        cursor: pointer;
+        text-align: left;
+        font: inherit;
+        color: var(--ink, #0f172a);
+      }
+      .cta-summary-row:active { background: var(--brand-soft, #e8f3ff); }
+      .cta-summary-label {
+        flex: 1;
+        font-size: 14px;
+        font-weight: 500;
+      }
+      .cta-summary-total {
+        font-size: 14px;
+        font-weight: 600;
+        font-variant-numeric: tabular-nums;
+        color: var(--ink, #0f172a);
+      }
+      .cta-summary-chev {
+        color: var(--text-2, #64748b);
+        transition: transform 200ms ease;
+      }
+      .cta-summary-row[aria-expanded="true"] .cta-summary-chev {
+        transform: rotate(180deg);
+      }
+
+      /* Expanded panel — fixed above the FAB, slides up from bottom.
+         Contains a clone of the mobile price slot's HTML (rendered by
+         _syncCtaSummaryFromPriceSlot on expand). */
+      .cta-summary-panel {
+        position: fixed;
+        left: 50%;
+        transform: translateX(-50%);
+        /* Sits above the CTA bar with a small gap. CTA bar's bottom
+           offset is max(16px, safe-area+12px); the summary panel bottom
+           starts where the bar starts + bar height + gap. Approximated
+           by placing at 108px from bottom which clears the ~92px FAB
+           height plus safe-area budget on most devices. */
+        bottom: max(108px, calc(env(safe-area-inset-bottom) + 104px));
+        width: calc(100vw - 32px);
+        max-width: 560px;
+        background: #ffffff;
+        border-radius: 18px;
+        box-shadow:
+          0 -10px 28px rgba(15, 25, 35, 0.18),
+          0 -3px 8px rgba(15, 25, 35, 0.08);
+        padding: 16px;
+        z-index: 31;
+        max-height: 60vh;
+        overflow-y: auto;
+      }
+      .cta-summary-panel[hidden] { display: none; }
+
+      .cta-summary-backdrop {
+        position: fixed;
+        inset: 0;
+        background: rgba(15, 25, 35, 0.35);
+        z-index: 29;                  /* Below the FAB (30) and panel (31) */
+      }
+      .cta-summary-backdrop[hidden] { display: none; }
+
+      /* Part C — when the mobile price slot is in viewport, hide the
+         FAB summary row so total isn't shown twice on the same screen.
+         Continue button stays; its copy morphs via JS. Class toggled
+         by _installCtaSummaryObserver. */
+      .booking-cta-bar.summary-in-view .cta-summary-row {
+        display: none;
+      }
+
       /* Batch 1 · #3 — Flight summary + estimated price above travelers on
          mobile. The aside currently sits below main (order: 10) — flip to
          -1 so trip-slot + price-slot render first. The mobile-compliance
@@ -7061,6 +7176,12 @@
           <p class="sub" style="margin-top:6px;">Available seat options for this flight. Selection may not be available on every airline; in that case you can choose seats at check-in.</p>
           <div id="seats-list"></div>
         </div>
+        <!-- Session 27b Commit 5 Part A — mobile-only price slot below Seats.
+             Duplicates the aside's #booking-price-slot so mobile users see
+             the running summary as the last content card before the CTA.
+             Desktop hides this via CSS and keeps the aside slot.
+             renderBookingSummary populates both slots identically. -->
+        <div id="booking-price-slot-mobile" class="booking-price-slot-mobile"></div>
         <!-- Desktop-only compliance note (hidden on mobile; mobile mirror below sits near sticky CTA) -->
         <p class="compliance booking-compliance-desktop">
           By continuing, you confirm you have valid travel documents for your destination.
@@ -7080,12 +7201,29 @@
           <button class="btn btn-secondary" onclick="showView('results')">← Back to results</button>
           <button class="btn btn-primary btn-lg" id="continue-to-pay-btn" onclick="goToPayment()">Continue to payment →</button>
         </div>
-        <!-- Phase E: sticky bottom CTA bar (mobile only; hidden on desktop via .booking-inline-cta show) -->
+        <!-- Session 27b Commit 5 Part B — mobile-only floating summary FAB.
+             Stack: summary row (tap to expand) on top, Continue button
+             below. Back button hidden by Batch 1 · #4. Backdrop + expanded
+             panel are siblings so they can render above the FAB itself
+             when open. Only the Continue button copy morphs with the total
+             when the mobile price slot is out of viewport (see Part C). -->
         <div class="booking-cta-bar" id="booking-cta-bar">
-          <button class="btn btn-secondary" onclick="showView('results')" aria-label="Back to results">←</button>
-          <button class="btn btn-primary" id="continue-to-pay-btn-mobile" onclick="goToPayment()">Continue to payment</button>
+          <button type="button" class="cta-summary-row" id="cta-summary-toggle" onclick="toggleCtaSummary()" aria-expanded="false" aria-controls="cta-summary-panel">
+            <span class="cta-summary-label">View the summary of charges</span>
+            <span class="cta-summary-total" id="cta-summary-total"></span>
+            <svg class="cta-summary-chev" width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+              <path d="M6 9l6 6 6-6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+            </svg>
+          </button>
+          <div class="cta-btn-row">
+            <button class="btn btn-secondary" onclick="showView('results')" aria-label="Back to results">←</button>
+            <button class="btn btn-primary" id="continue-to-pay-btn-mobile" onclick="goToPayment()">Continue to payment</button>
+          </div>
         </div>
-      </div>
+        <div class="cta-summary-panel" id="cta-summary-panel" role="region" aria-labelledby="cta-summary-toggle" hidden>
+          <div id="cta-summary-content"></div>
+        </div>
+        <div class="cta-summary-backdrop" id="cta-summary-backdrop" onclick="collapseCtaSummary()" hidden></div>
 
       <aside>
         <div id="booking-trip-slot"></div>
@@ -8396,6 +8534,17 @@
       startFareTimer(name);
     } else {
       stopFareTimer();
+    }
+    // Session 27b Commit 5 — install the FAB summary observer whenever we
+    // enter booking view. Idempotent (disconnects prior observer first).
+    // Deferred to rAF so the view's DOM has painted and the target price
+    // slot exists. Also collapse any previously-open summary panel on
+    // any view transition — stale panel state from a prior visit would
+    // otherwise linger.
+    if (name === 'booking') {
+      requestAnimationFrame(_installCtaSummaryObserver);
+    } else {
+      if (_ctaSummaryExpanded) collapseCtaSummary();
     }
 
     // Step 2 home preservation hierarchy. On EVERY showView('home') call
@@ -14023,6 +14172,10 @@
     renderBaggageList();        // initial render with empty/loading state
     renderBookingSummary();
     showView('booking');
+    // Session 27b Commit 5 — install the FAB summary observer on fresh
+    // booking-view entry. Re-installed rather than reused so the target
+    // element is the currently-mounted mobile price slot.
+    requestAnimationFrame(_installCtaSummaryObserver);
     // Step 3: seed the sessionStorage shadow right after entry so a refresh
     // BEFORE any user interaction still has fare_expires_at_ms to read from,
     // letting restoreBooking start the fare timer at t=0. Previously the shadow
@@ -16240,9 +16393,114 @@
     `;
   }
 
+  // Session 27b Commit 5 — floating summary FAB state + handlers.
+  // The FAB has a collapsible summary row above Continue; tapping the
+  // row expands a panel with the full price breakdown. An
+  // IntersectionObserver on the mobile price slot hides the FAB summary
+  // row when the slot is in view (so total isn't shown twice) and morphs
+  // the Continue button copy back to plain "Continue to payment".
+  let _ctaSummaryExpanded = false;
+  let _ctaSummaryObserver = null;
+  let _priceSlotInView = false;
+
+  function toggleCtaSummary() {
+    if (_ctaSummaryExpanded) {
+      collapseCtaSummary();
+    } else {
+      expandCtaSummary();
+    }
+  }
+  function expandCtaSummary() {
+    _ctaSummaryExpanded = true;
+    _syncCtaSummaryFromPriceSlot();
+    const toggle = document.getElementById('cta-summary-toggle');
+    const panel = document.getElementById('cta-summary-panel');
+    const backdrop = document.getElementById('cta-summary-backdrop');
+    if (toggle) toggle.setAttribute('aria-expanded', 'true');
+    if (panel) panel.hidden = false;
+    if (backdrop) backdrop.hidden = false;
+  }
+  function collapseCtaSummary() {
+    _ctaSummaryExpanded = false;
+    const toggle = document.getElementById('cta-summary-toggle');
+    const panel = document.getElementById('cta-summary-panel');
+    const backdrop = document.getElementById('cta-summary-backdrop');
+    if (toggle) toggle.setAttribute('aria-expanded', 'false');
+    if (panel) panel.hidden = true;
+    if (backdrop) backdrop.hidden = true;
+  }
+  // Mirror the mobile price slot's rendered HTML into the expanded panel
+  // so the two always show identical content. Called on every expand and
+  // also from renderBookingSummary when the panel is currently open.
+  function _syncCtaSummaryFromPriceSlot() {
+    const src = document.getElementById('booking-price-slot-mobile');
+    const dst = document.getElementById('cta-summary-content');
+    if (src && dst) dst.innerHTML = src.innerHTML;
+  }
+  // Update the running total shown on the FAB summary row and the copy on
+  // the Continue button. Continue button reads "Continue for KES X" when
+  // the mobile price slot is off-screen (Q2 answer (b)) and reverts to
+  // plain "Continue to payment" when in view (Q2 answer (a)) — the
+  // observer's summary-in-view class toggle drives the swap here.
+  function _updateCtaSummaryTotalDisplay() {
+    const totalEl = document.getElementById('cta-summary-total');
+    const contBtn = document.getElementById('continue-to-pay-btn-mobile');
+    let totalStr = '';
+    try {
+      const b = estimateBreakdown();
+      if (b && typeof b.total_kes === 'number' && b.total_kes > 0) {
+        totalStr = formatKes(b.total_kes);
+      }
+    } catch (_) { /* keep totalStr empty on failure */ }
+    if (totalEl) totalEl.textContent = totalStr;
+    if (contBtn) {
+      contBtn.textContent = (!_priceSlotInView && totalStr)
+        ? `Continue for ${totalStr}`
+        : 'Continue to payment';
+    }
+  }
+  // IntersectionObserver: when the top edge of the mobile price slot
+  // enters the viewport, mark the FAB with `summary-in-view` (hides the
+  // FAB summary row via CSS) and flip the Continue-button copy back to
+  // plain. Re-installed on every booking-view entry so the observer's
+  // target is always the currently-mounted element.
+  function _installCtaSummaryObserver() {
+    if (_ctaSummaryObserver) {
+      try { _ctaSummaryObserver.disconnect(); } catch (_) {}
+      _ctaSummaryObserver = null;
+    }
+    const target = document.getElementById('booking-price-slot-mobile');
+    const bar = document.getElementById('booking-cta-bar');
+    if (!target || !bar || typeof IntersectionObserver !== 'function') {
+      _priceSlotInView = false;
+      _updateCtaSummaryTotalDisplay();
+      return;
+    }
+    _ctaSummaryObserver = new IntersectionObserver((entries) => {
+      const entry = entries[0];
+      if (!entry) return;
+      _priceSlotInView = entry.isIntersecting;
+      bar.classList.toggle('summary-in-view', entry.isIntersecting);
+      _updateCtaSummaryTotalDisplay();
+      // If the price slot came into view while the panel is open, collapse
+      // it — the same info is now visible in-flow.
+      if (entry.isIntersecting && _ctaSummaryExpanded) collapseCtaSummary();
+    }, {
+      // Fire the moment the top pixel crosses into the viewport (Q5 (b)).
+      threshold: 0,
+      rootMargin: '0px 0px 0px 0px',
+    });
+    _ctaSummaryObserver.observe(target);
+  }
+
   function renderBookingSummary() {
     renderTripPanel('booking-trip-slot');
     renderPricePanel('booking-price-slot');
+    // Session 27b Commit 5 — also populate the mobile-only slot below Seats
+    // + refresh FAB total and (if open) the expanded panel content.
+    renderPricePanel('booking-price-slot-mobile');
+    _updateCtaSummaryTotalDisplay();
+    if (_ctaSummaryExpanded) _syncCtaSummaryFromPriceSlot();
   }
 
   let lastPaymentBreakdown = null;
