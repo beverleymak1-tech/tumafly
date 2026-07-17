@@ -8408,6 +8408,18 @@
   // miss shows a "trip not found" shell instead of looping. Reset in
   // viewTrip on any new nav.
   let _itineraryRetriedFor = null;
+  // Session 28 #1c — restore-intent flag that survives the auth-gate
+  // bounce. When restoreFromUrl's #itinerary branch fires on a fresh
+  // page load but no session is available, the auth IIFE bounces to
+  // home + auth modal. Without this flag, onSignedIn's data-view check
+  // (data-view === 'itinerary') fails because we're now on 'home', and
+  // the itinerary intent is silently dropped — user signs in and stays
+  // on home. With this flag: restoreFromUrl AND the popstate #itinerary
+  // branch set it; onSignedIn consumes it (regardless of current view)
+  // to navigate back to the pending itinerary; closeAuthModal clears it
+  // if user X's out without signing in, so a later unrelated sign-in
+  // doesn't yank them into an old URL.
+  let _itineraryRestorePending = false;
   let pollHandle = null;
   // Session 27b Commit 6 Part 4b — State A polling protection.
   // True while pollPostRedirect is actively polling (between the
@@ -9101,6 +9113,12 @@
       activeItineraryPnr = ref;
       activeMerchantRef = ref;   // legacy compatibility
       _itineraryRetriedFor = null;
+      // Session 28 #1c — flag intent for post-signin restore. If auth
+      // succeeds without a bounce (session preserved), onSignedIn
+      // consumes this immediately; the data-view check is redundant
+      // for that case but harmless. If auth bounces (no session), the
+      // flag survives until the user completes sign-in.
+      _itineraryRestorePending = true;
       // Paint a loading state before showView flips visibility so
       // the itin shell isn't a bare "Back to My trips" button for
       // the auth-restore window.
@@ -11426,6 +11444,52 @@
         try { restoreBooking(params); }
         catch (err) { console.warn('[restoreBooking popstate] failed:', err); }
       }, 0);
+      return;
+    }
+    if (view === 'itinerary') {
+      // Session 28 #1c — same intent as restoreFromUrl's #itinerary
+      // branch, but for URL changes on a live page (browser back /
+      // forward, URL-bar hash edit within the same tab). Without this,
+      // typing #itinerary?ref=<pnr> into the URL bar of an existing tab
+      // fell through to the plain showView at the bottom of this
+      // handler — data-view flipped to 'itinerary' but no data load
+      // ran, leaving an empty shell forever.
+      const ref = (params.ref || '').trim();
+      if (!ref) {
+        // No ref → bounce to my-trips.
+        showView('my-trips');
+        try {
+          safeHistory('replace', { view: 'my-trips' }, window.location.pathname + '#my-trips');
+        } catch (_) {}
+        return;
+      }
+      activeItineraryPnr = ref;
+      activeMerchantRef = ref;
+      _itineraryRetriedFor = null;
+      if (currentUser) {
+        // Signed in — load and render immediately. Same body as viewTrip
+        // minus the URL push (popstate already updated the URL for us).
+        if (typeof loadItinerary === 'function') loadItinerary(ref);
+        showView('itinerary', { fromPopState: true });
+      } else {
+        // Signed out — save intent, paint loading shell, bounce to home
+        // + auth modal. onSignedIn will consume the flag on successful
+        // sign-in and navigate back.
+        _itineraryRestorePending = true;
+        try {
+          const _itinContent = document.getElementById('itin-content');
+          if (_itinContent) {
+            _itinContent.innerHTML = `
+              <div style="text-align:center;padding:60px 0;color:var(--text-2);">
+                <div style="font-size:18px;font-weight:600;color:var(--ink);margin-bottom:8px;">
+                  Loading your trip…
+                </div>
+              </div>`;
+          }
+        } catch (_) {}
+        showView('home');
+        if (typeof openAuthModal === 'function') openAuthModal();
+      }
       return;
     }
     showView(view, { fromPopState: true });
@@ -19097,18 +19161,53 @@
     if (_dvForRestore === 'my-trips' && typeof loadMyTrips === 'function') {
       loadMyTrips().catch(e => console.warn('[my-trips] post-signin restore-load failed:', e));
     }
-    if (_dvForRestore === 'itinerary' && typeof loadMyTrips === 'function' && activeItineraryPnr) {
-      // Session 28 — F5 on #itinerary?ref=<pnr> restore. restoreFromUrl
-      // saved the target PNR to activeItineraryPnr and rendered the
-      // shell. Now that auth is available, populate _allTrips then
-      // render the itinerary. Mirrors the my-trips block above.
+    // Session 28 #1c — consume itinerary restore intent.
+    //
+    // Two entry paths set _itineraryRestorePending=true:
+    //   1. restoreFromUrl's #itinerary branch on fresh page load
+    //      (F5 or new-tab paste of #itinerary?ref=<pnr>).
+    //   2. Popstate handler's #itinerary branch on same-tab URL-bar
+    //      hash edits (see ~L11365).
+    //
+    // Both save activeItineraryPnr and either paint the itinerary shell
+    // (if signed in / session preserved) or bounce to home + auth modal
+    // (if no session). This block runs on ANY successful sign-in and
+    // completes the intent regardless of the current view:
+    //   - If already on 'itinerary' (fast path — session was preserved,
+    //     shell painted, no bounce happened) → just loadMyTrips +
+    //     loadItinerary; showView is skipped since we're already there.
+    //   - If on 'home' (auth-restore bounced us) → showView back to
+    //     itinerary with the URL param, then loadMyTrips + loadItinerary.
+    //
+    // Fires once per intent — flag is cleared on consume. Supabase's
+    // getSession + INITIAL_SESSION double-fire is idempotent: second
+    // call sees flag=false and skips.
+    if (_itineraryRestorePending && activeItineraryPnr && typeof loadMyTrips === 'function') {
+      _itineraryRestorePending = false;
       const _pnr = activeItineraryPnr;
+      const _alreadyOnItinerary = document.body.getAttribute('data-view') === 'itinerary';
+      if (!_alreadyOnItinerary) {
+        // Navigate back to itinerary — this pushes #itinerary?ref=<pnr>
+        // onto history, overwriting the #home entry the auth-restore
+        // bounce pushed earlier. Repaint the loading shell since
+        // showView doesn't touch #itin-content.
+        showView('itinerary', { params: { ref: _pnr } });
+        try {
+          const _itinContent = document.getElementById('itin-content');
+          if (_itinContent) {
+            _itinContent.innerHTML = `
+              <div style="text-align:center;padding:60px 0;color:var(--text-2);">
+                <div style="font-size:18px;font-weight:600;color:var(--ink);margin-bottom:8px;">
+                  Loading your trip…
+                </div>
+              </div>`;
+          }
+        } catch (_) {}
+      }
       loadMyTrips()
         .then(() => {
-          // Guard: user may have navigated away during the fetch, or
-          // activeItineraryPnr may have been overwritten by another
-          // viewTrip click. In either case, don't override what's
-          // on screen now.
+          // Same guards as before — user may have navigated away or
+          // switched pnr during the fetch.
           if (document.body.getAttribute('data-view') !== 'itinerary') return;
           if (activeItineraryPnr !== _pnr) return;
           if (typeof loadItinerary === 'function') loadItinerary(_pnr);
@@ -19410,6 +19509,16 @@
           await sb.auth.signOut();
         } catch (e) { console.warn('[auth] signOut on profile-capture-close failed:', e); }
       })();
+    }
+    // Session 28 #1c — if user X'd out without signing in (currentUser
+    // still null AND no profile capture pending), clear the pending
+    // itinerary restore intent so a later unrelated sign-in doesn't
+    // yank them into an old URL. Preserves the intent on the success
+    // paths: after OTP verify + profile capture, currentUser is set
+    // by the SIGNED_IN event's onSignedIn call, and this branch is
+    // skipped.
+    if (!currentUser && !_pendingProfileCapture) {
+      _itineraryRestorePending = false;
     }
     document.getElementById('auth-overlay').classList.add('hidden');
     authCallback = null;
