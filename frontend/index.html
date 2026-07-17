@@ -9071,7 +9071,7 @@
       // via its `if (!currentUser)` guard. The .then() re-entered
       // loadItinerary, which fell into the same fallback, which
       // called loadMyTrips again, …infinite recursion. Browser
-      // tab locked. That's what Bev saw.
+      // tab locked.
       //
       // The correct pattern — mirroring #profile / #my-trips
       // above — is to defer BOTH the URL parse and the data load
@@ -9090,10 +9090,8 @@
       // Extra loop protection lives inside loadItinerary itself
       // (_itineraryRetriedFor guard) — belt and suspenders.
       const ref = params.ref;
-      console.log('[restoreItinerary] step 1 — entered', { ref });
       if (!ref) {
         // No ref → nothing to restore. Fall through to my-trips.
-        console.log('[restoreItinerary] no ref — bouncing to my-trips');
         showView('my-trips');
         try {
           safeHistory('replace', { view: 'my-trips' }, window.location.pathname + '#my-trips');
@@ -9117,7 +9115,6 @@
             </div>`;
         }
       } catch (_) {}
-      console.log('[restoreItinerary] step 2 — pnr saved, rendering shell');
       showView('itinerary', { fromPopState: true });
       return true;
     }
@@ -18982,7 +18979,6 @@
         // instead of a "Loading your trip…" shell that never resolves.
         const _dv = document.body.getAttribute('data-view');
         if ((_dv === 'profile' || _dv === 'my-trips' || _dv === 'itinerary') && typeof showView === 'function') {
-          console.log('[auth-restore] no session on auth-gated view — bouncing home', { view: _dv });
           showView('home');
           if (typeof openAuthModal === 'function') openAuthModal();
         }
@@ -18996,6 +18992,50 @@
       console.warn('[auth] init failed:', e);
     }
   })();
+
+  // Session 28 — visibilitychange safety net for Chrome tab-throttling.
+  //
+  // Symptom: when the user pastes a URL like #itinerary?ref=<pnr> into a
+  // fresh incognito tab (Chromebook especially), Chrome sometimes treats
+  // the initial load as "not attentively focused" and throttles the
+  // getSession() promise + the loadMyTrips fetch + the .then(loadItinerary)
+  // callback chain. The restoreFromUrl branch runs synchronously so the
+  // "Loading your trip…" shell paints, but the async chain gets suspended
+  // indefinitely. User workaround: tab-switch away and back — that fires
+  // visibilitychange with visibilityState='visible' and Chrome releases
+  // the throttle, cascading every pending promise.
+  //
+  // Fix: when the tab becomes visible AND we're stuck on an itinerary
+  // view for which we already know the target PNR but the trip isn't
+  // in _allTrips, re-kick the load. Same code path as onSignedIn's
+  // itinerary restore branch. Idempotent — if a fast load already
+  // populated _allTrips, the guard skips.
+  //
+  // Same pattern likely applies to #profile / #my-trips restores but
+  // symptoms haven't been reported there yet; scoped to itinerary for
+  // now.
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState !== 'visible') return;
+    if (document.body.getAttribute('data-view') !== 'itinerary') return;
+    if (!activeItineraryPnr) return;
+    if (!currentUser) return;   // still awaiting auth; onSignedIn will handle it
+    const _pnr = activeItineraryPnr;
+    const alreadyLoaded = (_allTrips || []).some(t =>
+      t.pnr === _pnr || t.merchantReference === _pnr
+    );
+    if (alreadyLoaded) return;   // trip already in cache; loadItinerary
+                                  // either already rendered or is about to
+    if (typeof loadMyTrips !== 'function') return;
+    loadMyTrips()
+      .then(() => {
+        // Same guards as onSignedIn — user may have navigated away or
+        // switched pnr during the fetch.
+        if (document.body.getAttribute('data-view') !== 'itinerary') return;
+        if (activeItineraryPnr !== _pnr) return;
+        if (typeof loadItinerary === 'function') loadItinerary(_pnr);
+      })
+      .catch(e => console.warn('[itinerary] visibility restore-load failed:', e));
+  });
 
   // Set to true between OTP verification and profile completion. When true,
   // onSignedIn skips the nav update so the pill stays "Sign in" until the
@@ -19063,23 +19103,14 @@
       // shell. Now that auth is available, populate _allTrips then
       // render the itinerary. Mirrors the my-trips block above.
       const _pnr = activeItineraryPnr;
-      console.log('[itinerary-restore] step 3 — auth restored, loading trips', { pnr: _pnr });
       loadMyTrips()
         .then(() => {
           // Guard: user may have navigated away during the fetch, or
           // activeItineraryPnr may have been overwritten by another
           // viewTrip click. In either case, don't override what's
           // on screen now.
-          const _dvNow = document.body.getAttribute('data-view');
-          if (_dvNow !== 'itinerary') {
-            console.log('[itinerary-restore] view changed during fetch — skipping loadItinerary', { dvNow: _dvNow });
-            return;
-          }
-          if (activeItineraryPnr !== _pnr) {
-            console.log('[itinerary-restore] activeItineraryPnr changed during fetch — skipping loadItinerary');
-            return;
-          }
-          console.log('[itinerary-restore] step 4 — loadMyTrips resolved, calling loadItinerary');
+          if (document.body.getAttribute('data-view') !== 'itinerary') return;
+          if (activeItineraryPnr !== _pnr) return;
           if (typeof loadItinerary === 'function') loadItinerary(_pnr);
         })
         .catch(e => console.warn('[itinerary] post-signin restore-load failed:', e));
@@ -20577,13 +20608,7 @@
       // flooded the microtask queue until the tab locked. With the guard,
       // we refetch at most once per pnr; a second miss shows a proper
       // "trip not found" shell.
-      console.log('[loadItinerary] step 5 — trip not in _allTrips', {
-        pnr,
-        retriedFor: _itineraryRetriedFor,
-        allTripsLen: (_allTrips || []).length,
-      });
       if (_itineraryRetriedFor === pnr) {
-        console.log('[loadItinerary] already retried for this pnr — rendering not-found');
         container.innerHTML = `
           <div style="text-align:center;padding:60px 0;color:var(--text-2);">
             <div style="font-size:18px;font-weight:600;color:var(--ink);margin-bottom:8px;">
