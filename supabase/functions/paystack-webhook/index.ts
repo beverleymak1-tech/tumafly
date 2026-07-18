@@ -807,6 +807,7 @@ serve(async (req) => {
 
     const { error: dbErr } = await supabase.from("bookings").insert({
       user_id: pending.user_id || null,
+      pending_booking_id: pending.id,
       duffel_order_id: order.id,
       booking_reference: order.booking_reference,
       origin: outbound.origin.iata_code,
