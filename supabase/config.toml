@@ -486,3 +486,6 @@ verify_jwt = false
 
 [functions.send-refund-notification]
 verify_jwt = false
+
+[functions.process-duffel-booking]
+verify_jwt = false
