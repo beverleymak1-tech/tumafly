@@ -31,7 +31,18 @@ type AlertType =
   | "PAYSTACK_SIGNATURE_FAILURE"           // HMAC-SHA512 mismatch on webhook
   | "PAYSTACK_MISSING_REFERENCE"           // charge.success with no reference
   | "PAYSTACK_OR_DUFFEL_MODE_KEY_MISMATCH" // mode/key mismatch in paystack-webhook
-  | "PAYSTACK_MODE_KEY_MISMATCH";          // mode/key mismatch in verify-payment
+  | "PAYSTACK_MODE_KEY_MISMATCH"           // mode/key mismatch in verify-payment
+  // Pre-Paystack plumbing (mpesa-callback, pesapal-webhook, create-payment)
+  // Session 28b audit: was raised for months, never in the whitelist —
+  // silently dropped on every fire. Adding now to close the visibility gap.
+  | "DUFFEL_MODE_KEY_MISMATCH"             // mode/key mismatch in mpesa/pesapal/create-payment
+  // Async Duffel decoupling (Session 28b commit #7b-ii)
+  | "PROCESS_DUFFEL_PENDING_NOT_FOUND"     // DB webhook fired for a pending row that no longer exists
+  | "PROCESS_DUFFEL_PAYSTACK_VERIFY_MISMATCH" // Paystack verify disagreed post-payment (soft-degrade)
+  | "PROCESS_DUFFEL_NETWORK_ERROR"         // Duffel POST /air/orders threw (network/timeout/DNS)
+  | "PROCESS_DUFFEL_UNHANDLED_ERROR"       // try/catch at handler top in process-duffel-booking
+  | "DUFFEL_ORDER_ACCEPTED_ASYNC"          // Duffel 202 — rare, informational, reconciler will finish
+  | "CONFIRMATION_EMAIL_FAILED";           // send-confirmation returned non-2xx or threw; reconciler retries
 
 const ALERT_CONFIG: Record<AlertType, { severity: string; subject: string; action: string }> = {
   PAID_NO_OFFER: {
@@ -117,11 +128,48 @@ const ALERT_CONFIG: Record<AlertType, { severity: string; subject: string; actio
       action: "DUFFEL_MODE or PAYSTACK_MODE doesn't match the corresponding API key prefix. All requests refused with 503. Fix env vars in Supabase dashboard.",
     },
     PAYSTACK_MODE_KEY_MISMATCH: {
-      severity: "🚨 CRITICAL",
-      subject: "Environment key/mode mismatch in verify-payment",
-      action: "PAYSTACK_MODE doesn't match the PAYSTACK_API_KEY prefix. All verify-payment requests refused with 503. Fix env vars in Supabase dashboard.",
-    },
-  };
+          severity: "🚨 CRITICAL",
+          subject: "Environment key/mode mismatch in verify-payment",
+          action: "PAYSTACK_MODE doesn't match the PAYSTACK_API_KEY prefix. All verify-payment requests refused with 503. Fix env vars in Supabase dashboard.",
+        },
+        // ── Pre-Paystack plumbing (Session 28b audit gap-fill) ──────────────────
+        DUFFEL_MODE_KEY_MISMATCH: {
+          severity: "🚨 CRITICAL",
+          subject: "Environment key/mode mismatch in mpesa/pesapal/create-payment",
+          action: "DUFFEL_MODE doesn't match the DUFFEL_API_KEY prefix in one of the pre-Paystack EFs (mpesa-callback, pesapal-webhook, create-payment, get-baggage-options). All calls to that EF refused with 503. Fix env vars in Supabase dashboard.",
+        },
+        // ── Async Duffel decoupling (Session 28b commit #7b-ii) ─────────────────
+        PROCESS_DUFFEL_PENDING_NOT_FOUND: {
+          severity: "⚠️ HIGH",
+          subject: "process-duffel-booking fired for missing pending_booking row",
+          action: "DB webhook fired with a pending_booking_id that no longer exists in the pending_bookings table. Either the row was deleted between transition and this EF's read (unusual — check for admin action), or the webhook payload is malformed. Check the pending_booking_id in context and reconcile against the row's history in booking_status_history.",
+        },
+        PROCESS_DUFFEL_PAYSTACK_VERIFY_MISMATCH: {
+          severity: "⚠️ HIGH",
+          subject: "Paystack verify disagreed post-payment in process-duffel-booking",
+          action: "Paystack's /transaction/verify endpoint returned a non-success state for a transaction that paystack-webhook had already confirmed. Booking continued (soft-degrade) with NULL authorization_code and payment_account_last4 on the bookings row. Investigate whether the transaction is a Paystack timeline anomaly or an actual state divergence. Manual reconciliation may be needed if payment was reversed.",
+        },
+        PROCESS_DUFFEL_NETWORK_ERROR: {
+          severity: "⚠️ HIGH",
+          subject: "Duffel POST /air/orders network error",
+          action: "process-duffel-booking's Duffel call threw (network/timeout/DNS). Row stays at duffel_pending — DB webhook will retry. If this fires repeatedly for the same row, Duffel or our egress is degraded. Duffel-Idempotency-Key ensures retries won't create duplicates.",
+        },
+        PROCESS_DUFFEL_UNHANDLED_ERROR: {
+          severity: "🚨 CRITICAL",
+          subject: "Unhandled exception in process-duffel-booking",
+          action: "The top-level try/catch in process-duffel-booking fired. Row is likely stuck at duffel_pending. Check logs for the stack trace. Manually inspect the pending_booking_id in context and, if it's still at duffel_pending, either fix the underlying error and let the DB webhook retry, or move it to paid_booking_failed manually and refund via refundBooking().",
+        },
+        DUFFEL_ORDER_ACCEPTED_ASYNC: {
+          severity: "ℹ️ INFO",
+          subject: "Duffel returned 202 async accepted",
+          action: "Rare with type:instant — Duffel accepted the order but hasn't created it synchronously. Row stays at duffel_pending. retry-stuck-bookings (#9) will poll GET /air/orders?duffel_idempotency_key=<pending.id> and complete the transition. No action needed unless it stays stuck > 10 minutes.",
+        },
+        CONFIRMATION_EMAIL_FAILED: {
+          severity: "⚠️ HIGH",
+          subject: "send-confirmation returned non-2xx or threw",
+          action: "Booking is safe — customer is 'booked' in DB and at Duffel. Only the confirmation email failed. retry-stuck-bookings (#9) sweeps 'booked' rows with NULL confirmation_email_sent_at and retries. If this fires more than once for the same row, investigate send-confirmation and RESEND_API_KEY. Customer will not have their e-ticket until email delivers — WhatsApp them their PNR + ticket numbers if 15+ minutes have passed since booking.",
+        },
+      };
 
 function buildEmailHtml(
   alertType: AlertType,
