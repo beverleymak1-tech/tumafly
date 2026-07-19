@@ -59,7 +59,12 @@ if (!DUFFEL_API_KEY) {
 }
 let modeKeyAlertFired = false;
 
-async function alertFounder(level: string, code: string, detail: string) {
+// Standardized two-arg shape to match all other EFs (Session 28b #7b-ii-alerts).
+// Prior three-arg (level, code, detail) also sent { level, code, detail } as the
+// body, but alert-founder reads { alert_type, context } — so this helper was
+// silently dropping every fire. Two bugs stacked (wrong signature + wrong body
+// shape), both closed here.
+async function alertFounder(alertType: string, context: Record<string, unknown>) {
   try {
     await fetch(`${SUPABASE_URL}/functions/v1/alert-founder`, {
       method: 'POST',
@@ -67,7 +72,7 @@ async function alertFounder(level: string, code: string, detail: string) {
         'Content-Type': 'application/json',
         'Authorization': `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`,
       },
-      body: JSON.stringify({ level, code, detail }),
+      body: JSON.stringify({ alert_type: alertType, context }),
     });
   } catch (_) { /* swallow — alerts must never block the response */ }
 }
@@ -125,8 +130,10 @@ serve(async (req: Request) => {
   if (!MODE_KEY_OK) {
     if (!modeKeyAlertFired) {
       modeKeyAlertFired = true;
-      await alertFounder('CRITICAL', 'DUFFEL_MODE_KEY_MISMATCH',
-        `[get-baggage-options] ${MODE_KEY_REASON}`);
+      await alertFounder("DUFFEL_MODE_KEY_MISMATCH", {
+              source: "get-baggage-options",
+              reason: MODE_KEY_REASON,
+            });
     }
     return new Response(
       JSON.stringify({ error: 'Service temporarily unavailable. Please try again shortly.' }),
