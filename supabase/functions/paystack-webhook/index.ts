@@ -293,11 +293,18 @@ serve(async (req) => {
       return new Response("ok", { status: 200, headers: CORS_HEADERS });
     }
 
-    // 2. Idempotency — already booked OR another worker is mid-booking.
-    if (pending.status === "booked" || pending.status === "booking") {
-      console.log(`Webhook re-fired for ${pending.status} booking (${reference})`);
-      return new Response("ok", { status: 200, headers: CORS_HEADERS });
-    }
+    // 2. Idempotency — 'pending' is the only valid entry state. Any other
+        //    value means this webhook has already fired for this row, or a
+        //    downstream EF (process-duffel-booking, refundBooking, refund event
+        //    handler) has moved the state forward. Post-#6, forward states
+        //    include: paid, duffel_pending, pnr_issued, booked, refund_pending,
+        //    refunded, paid_offer_expired, paid_booking_failed, failed_to_create,
+        //    payment_invalid, amount_mismatch. Bail on all of them so we never
+        //    regress a moved-forward row back to 'paid' via step 5's UPDATE.
+        if (pending.status !== "pending") {
+          console.log(`Webhook re-fired for ${pending.status} booking (${reference}) — idempotency bail`);
+          return new Response("ok", { status: 200, headers: CORS_HEADERS });
+        }
 
     // 3. Belt-and-braces: verify with Paystack directly, in case the webhook
     //    was replayed with a modified body that somehow passed signature
