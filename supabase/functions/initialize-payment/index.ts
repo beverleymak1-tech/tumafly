@@ -551,6 +551,15 @@ serve(async (req) => {
 
     const contactWithSeats = { ...contact, seats: validatedSeats, baggages: validatedBaggages };
 
+    // Per-row secret for guest Realtime auth (Session 28c #10a).
+        // 256 bits of entropy → 64 hex chars. Passed back to frontend so
+        // it can exchange this for a scoped JWT via mint-guest-token EF (#10c).
+        const guestTokenBytes = new Uint8Array(32);
+        crypto.getRandomValues(guestTokenBytes);
+        const guestToken = Array.from(guestTokenBytes)
+          .map(b => b.toString(16).padStart(2, "0"))
+          .join("");
+
     const { data: pending, error: insertErr } = await supabase
       .from("pending_bookings")
       .insert({
@@ -565,6 +574,7 @@ serve(async (req) => {
         total_kes: totalKES,
         payment_method: "pending", // set by webhook after Paystack confirms
         status: "pending",
+        guest_token: guestToken,
       })
       .select()
       .single();
@@ -623,6 +633,8 @@ serve(async (req) => {
       access_code: paystackData.data.access_code,
       authorization_url: paystackData.data.authorization_url, // fallback if InlineJS fails
       merchant_ref: merchantRef,
+      pending_booking_id: pending.id,
+      guest_token: guestToken,
       breakdown: {
         base_kes: baseAmountKES,
         seats_kes: seatsTotalKES,
