@@ -492,3 +492,6 @@ verify_jwt = false
 
 [functions.duffel-webhook]
 verify_jwt = false
+
+[functions.mint-guest-token]
+verify_jwt = false
