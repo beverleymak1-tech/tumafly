@@ -489,3 +489,6 @@ verify_jwt = false
 
 [functions.process-duffel-booking]
 verify_jwt = false
+
+[functions.duffel-webhook]
+verify_jwt = false
