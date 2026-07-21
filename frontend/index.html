@@ -8395,6 +8395,15 @@
   let passengerData = [];
   let contactData = {};
   let activeMerchantRef = null;
+  // Session 28c #10-proper — Realtime substrate for #success/#payment polling.
+  // Populated in the initialize-payment success branch alongside
+  // activeMerchantRef; consumed by _openRealtimeChannel to mint a guest JWT
+  // and subscribe to the pending_bookings row so state transitions push
+  // instantly instead of waiting for the next 2.5s poll tick. NOT persisted
+  // across F5 by design — restore paths silently fall back to polling
+  // (which still works fine).
+  let activePendingBookingId = null;
+  let activeGuestToken = null;
   // Session 28 — hoisted from ~L20443 so restoreFromUrl's #itinerary
   // branch (fires during module-eval at ~L11432) can set the target
   // PNR before onSignedIn's post-auth restore branch reads it. The
@@ -10091,6 +10100,10 @@
       // activeMerchantRef is a module-level let, so page reload already
       // reset it to null — belt-and-braces to be explicit.
       activeMerchantRef = null;
+      // Session 28c #10-proper — same reset for the Realtime stash.
+      activePendingBookingId = null;
+      activeGuestToken = null;
+      _closeRealtimeChannel();
 
       // Restore seats + baggage from the extras shadow. Guarded by offer_id
       // match. Any stale service_ids will be pruned by indexBaggageOptionsByPax
@@ -11578,6 +11591,12 @@
     passengerData = [];
     contactData = {};
     activeMerchantRef = null;
+    // Session 28c #10-proper — clear the Realtime stash + tear down any
+    // open subscription. Safe to call _closeRealtimeChannel even if it
+    // was never opened (no-op guards inside).
+    activePendingBookingId = null;
+    activeGuestToken = null;
+    _closeRealtimeChannel();
     lastPaymentBreakdown = null;
     // Step 4 (Path A1): drop the payment-return shadow — this booking
     // session is over. Without this, a subsequent #payment refresh would
@@ -17575,6 +17594,12 @@
         return;
       }
       activeMerchantRef = data.merchant_ref;
+      // Session 28c #10-proper — stash the two values needed to mint a
+      // guest JWT (see _openRealtimeChannel). Optional-null fallback so a
+      // deploy skew (frontend running ahead of a rolled-back EF) doesn't
+      // break the payment flow — we just fall through to polling.
+      activePendingBookingId = data.pending_booking_id || null;
+      activeGuestToken = data.guest_token || null;
       if (data.breakdown) renderPaymentSummary(data.breakdown);
 
       // Step 2b: switch to payment view now, RIGHT before rendering the
@@ -17703,6 +17728,116 @@
     _paystackHandle = null;
   }
 
+  // ═══════════════════════════════════════════════════════════════════
+  // Session 28c #10-proper — Realtime substrate
+  // ═══════════════════════════════════════════════════════════════════
+  //
+  // Replaces (well, augments) the 2.5s verify-payment poll loop with a
+  // Supabase Realtime subscription against the customer's pending_bookings
+  // row. On every UPDATE we poke pollOnce, which re-runs verify-payment.
+  //
+  // Design:
+  //   - Realtime pushes are a "look now" signal. The push payload itself
+  //     is NOT trusted for state derivation — verify-payment remains the
+  //     authoritative source. This means zero risk of a state-machine
+  //     divergence bug and preserves every branch (confirmed/failed/
+  //     needs_support/processing) verify-payment already handles.
+  //   - Polling continues as fallback. Interval stretches from 2.5s to
+  //     15s when Realtime is confirmed subscribed (belt + suspenders vs.
+  //     silent Realtime drops), and stays at 2.5s if Realtime never
+  //     opens (mint failed, F5-restore paths, etc.).
+  //   - Uses stashed activePendingBookingId + activeGuestToken from the
+  //     initialize-payment response. Restore paths (F5, post-redirect)
+  //     don't have these in memory, so they fall through to pure polling
+  //     with no behavior change vs. pre-Session-28c.
+  //
+  // Subtle blocker resolved in Session 28c #10d hotfix: Realtime's
+  // internal realtime.apply_rls unconditionally casts the JWT sub claim
+  // to uuid, so mint-guest-token uses the raw pending_booking_id as sub
+  // rather than a "guest:<uuid>" prefixed marker.
+
+  let _realtimeChannel = null;
+  let _realtimeClient = null;
+  let _realtimeSubscribed = false;
+
+  async function _openRealtimeChannel() {
+    if (!activePendingBookingId || !activeGuestToken) return false;
+    if (_realtimeSubscribed) return true;
+
+    try {
+      // 1. Mint a scoped guest JWT
+      const mintRes = await fetch(`${SUPABASE_URL}/functions/v1/mint-guest-token`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          pending_booking_id: activePendingBookingId,
+          guest_token: activeGuestToken,
+        }),
+      });
+      const mintData = await mintRes.json().catch(() => ({}));
+      if (!mintRes.ok || !mintData.token) {
+        // Any mint failure (attempts exhausted, token mismatch, network)
+        // is silently absorbed. Polling picks up the slack.
+        return false;
+      }
+
+      // 2. Lazy-import supabase-js and open a Realtime client with the JWT
+      const { createClient } = await import('https://esm.sh/@supabase/supabase-js@2');
+      _realtimeClient = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+      await _realtimeClient.realtime.setAuth(mintData.token);
+
+      // 3. Subscribe to pending_bookings row + booking_status_history.
+      //    booking_status_history joins let us see intermediate transitions
+      //    that pending_bookings.status doesn't itself change on (e.g. side-
+      //    effects logged for observability). Bookings-table push is not
+      //    subscribed here — verify-payment reads from pending_bookings
+      //    exclusively, so a bookings-side push wouldn't change what we'd
+      //    poll for.
+      return await new Promise((resolve) => {
+        const pid = activePendingBookingId;
+        _realtimeChannel = _realtimeClient
+          .channel(`guest:${pid}`)
+          .on('postgres_changes',
+              { event: '*', schema: 'public', table: 'pending_bookings',
+                filter: `id=eq.${pid}` },
+              () => {
+                // A row transition happened. Poke pollOnce so the existing
+                // verify-payment-based state machine picks it up.
+                if (typeof pollOnce === 'function') pollOnce();
+              })
+          .on('postgres_changes',
+              { event: 'INSERT', schema: 'public', table: 'booking_status_history',
+                filter: `booking_id=eq.${pid}` },
+              () => {
+                if (typeof pollOnce === 'function') pollOnce();
+              })
+          .subscribe((state) => {
+            if (state === 'SUBSCRIBED') {
+              _realtimeSubscribed = true;
+              resolve(true);
+            } else if (state === 'CHANNEL_ERROR' || state === 'TIMED_OUT' || state === 'CLOSED') {
+              _realtimeSubscribed = false;
+              resolve(false);
+            }
+          });
+      });
+    } catch (_) {
+      _realtimeSubscribed = false;
+      return false;
+    }
+  }
+
+  function _closeRealtimeChannel() {
+    try {
+      if (_realtimeChannel && _realtimeClient) {
+        _realtimeClient.removeChannel(_realtimeChannel);
+      }
+    } catch (_) {}
+    _realtimeChannel = null;
+    _realtimeClient = null;
+    _realtimeSubscribed = false;
+  }
+
   function startPolling() {
     pollStartedAt = Date.now();
     // Don't show any "waiting" UI here — the Pesapal iframe is fully in charge
@@ -17714,7 +17849,18 @@
     // If polling times out, we surface a status message at that point.
     document.getElementById('poll-area').classList.add('hidden');
     document.getElementById('poll-area').innerHTML = '';
+
+    // Fire the first poll immediately — this is the initial state fetch,
+    // and if Realtime never opens it becomes the first tick of the classic
+    // polling loop. Independent of Realtime succeeding or failing.
     pollOnce();
+
+    // Kick off Realtime in the background. If it opens, pollOnce will
+    // start getting poked on every DB transition; the setTimeout fallback
+    // in pollOnce's tail will keep firing at a stretched interval as a
+    // safety net. If it fails, nothing changes — polling proceeds as
+    // before at POLL_INTERVAL_MS.
+    _openRealtimeChannel();
   }
 
   async function pollOnce() {
@@ -17755,6 +17901,12 @@
         try { sessionStorage.removeItem(BOOKING_SECURE_SHADOW_KEY); } catch (_) {}
         // Also wipe the extras shadow (seats + baggage) — same lifecycle.
         clearBookingExtras();
+        // Session 28c #10-proper — booking terminal. Close the Realtime
+        // channel now rather than leaving the WebSocket hanging until the
+        // tab closes. Any late DB updates (email idempotency flag, etc.)
+        // are no longer interesting to this page. Idempotent — safe to
+        // call even if Realtime never opened for this booking.
+        _closeRealtimeChannel();
         showView('success');
         return;
       }
@@ -17771,31 +17923,31 @@
         return;
       }
 
-      if (data.state === 'needs_support') {
-        // Session 23: payment captured but ticket not issued
-        // (paid_offer_expired or paid_booking_failed). Batch 2 will
-        // auto-refund via Paystack Refund API; until then, support
-        // handles refund manually within 24h. Copy is honest about the
-        // current manual state — will be updated in Batch 2 to reflect
-        // the automated refund path.
-        const p = document.getElementById('poll-area');
-        p.classList.remove('hidden');
-        p.innerHTML = `
-          <div class="alert alert-warn">
-            <b>We couldn't complete your booking.</b><br>
-            Your payment went through but the airline couldn't issue the ticket. Our team has been alerted and will process your refund within 24 hours — you'll get a WhatsApp or email confirmation once it's issued.
-          </div>
-          <div style="font-size:13px;color:var(--text-2);margin-top:10px;">
-            Reference: <code style="font-family:var(--mono);">${escapeHtml(activeMerchantRef)}</code>
-          </div>
-          <div style="margin-top:14px;text-align:center;">
-            <a class="btn btn-primary" target="_blank" rel="noopener noreferrer"
-               href="${whatsappLink('Hi TumaFly, my booking (ref ' + activeMerchantRef + ') needs support — payment went through but I do not have my ticket. Please help.')}"
-               style="display:inline-flex;align-items:center;gap:8px;text-decoration:none;">
-              Message us on WhatsApp
-            </a>
-          </div>
-        `;
+      // Session 28c #11 — refund-family terminal states on the pre-redirect
+      // (modal) flow. Post-Batch-2 (Session 24), automated Paystack refunds
+      // are guaranteed on any of these states. Instead of showing an inline
+      // alert on #payment (which strands the customer on a pane with a
+      // dismissed modal above dead poll area), we flip to #success and
+      // render State 3 (Refunding) — the same render post-redirect uses.
+      // Both paths converge on the same terminal UX.
+      if (data.state === 'needs_support'
+       || data.state === 'refund_pending'
+       || data.state === 'refunded'
+       || data.state === 'paid_booking_failed'
+       || data.state === 'paid_offer_expired') {
+        // Session 28c #10 — booking terminal (refund). Close the Realtime
+        // channel now; any late DB updates (refund.processed webhook,
+        // email idempotency flag) are no longer interesting to this page.
+        _closeRealtimeChannel();
+        // Clear passenger/extras shadows — same lifecycle as confirmed
+        // terminal. A refund is still "this booking attempt is over."
+        try { sessionStorage.removeItem(BOOKING_PASSENGER_SHADOW_KEY); } catch (_) {}
+        try { sessionStorage.removeItem(BOOKING_SECURE_SHADOW_KEY); } catch (_) {}
+        clearBookingExtras();
+        showView('success');
+        // Render State 3 in the success hero. Pass the full data through
+        // plus merchantRef so the render can pull KES amount defensively.
+        renderPostRedirectSuccess('refunding', { ...data, merchantRef: activeMerchantRef });
         return;
       }
 
@@ -17814,8 +17966,16 @@
         `;
       }
 
-      pollHandle = setTimeout(pollOnce, POLL_INTERVAL_MS);
+      // Session 28c #10-proper — when Realtime is subscribed, stretch
+      // the fallback poll interval from 2.5s to 15s. Realtime pushes are
+      // the fast path (100-200ms); polling is just belt-and-suspenders.
+      // If Realtime isn't up, we stay at the original 2.5s cadence.
+      const nextTick = _realtimeSubscribed ? 15000 : POLL_INTERVAL_MS;
+      pollHandle = setTimeout(pollOnce, nextTick);
     } catch (e) {
+      // On network error, always fall back to the tight interval — the
+      // network hiccup may have also killed the WebSocket, so we can't
+      // assume Realtime is delivering pushes.
       pollHandle = setTimeout(pollOnce, POLL_INTERVAL_MS);
     }
   }
@@ -17826,6 +17986,13 @@
     // clear state, queue modal auto-open on the fresh initialize-payment
     // success, and fire. No accordion .open toggle — pane is dead code.
     activeMerchantRef = null;
+    // Session 28c #10-proper — the retry will fire a fresh
+    // initialize-payment which mints a NEW pending_booking + guest_token.
+    // Clear the stale ones and tear down the old Realtime channel so a
+    // future Realtime open re-mints under the fresh row.
+    activePendingBookingId = null;
+    activeGuestToken = null;
+    _closeRealtimeChannel();
     _paystackAccessCode = null;
     document.getElementById('poll-area').classList.add('hidden');
     clearAlert('payment-alert');
@@ -18775,15 +18942,18 @@
       return;
     }
 
-    if (state === 'still-processing') {
-      // Soft-fallback after 60s without a terminal state: payment likely
-      // succeeded, ticketing is taking longer than expected. Calm "we'll
-      // email you" state with merchant ref for support.
+    if (state === 'ticketing-delayed') {
+      // Session 28c #11 — State 2 (Ticketing delayed). Honest handoff to
+      // email delivery. Replaces the pre-28c "still-processing" render whose
+      // copy lied about the airline "issuing your ticket now" — that copy
+      // could fire on the 60s timeout regardless of whether the ticket was
+      // actually being issued or whether a refund was in flight.
       //
-      // Session 23: added a WhatsApp CTA so the customer isn't stuck
-      // waiting for an email if this stretches beyond a few minutes.
-      // (Batch 2 will differentiate this from the true 'needs_support'
-      // terminal state, which will trigger auto-refund via Paystack.)
+      // 28c rule: at second 60, if no terminal state has arrived via
+      // Realtime, State 2 is the ONLY honest thing to say. Copy explicitly
+      // acknowledges the email may say EITHER a confirmation OR a refund
+      // notice. Safe because 28a shipped the customer refund notification
+      // email.
       const mref = payload?.merchantRef || '';
       const waHref = whatsappLink(
         'Hi TumaFly, my booking (ref ' + mref + ') is finalising and I\'d like to check the status. Please help.'
@@ -18795,16 +18965,80 @@
             <circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="2"/>
           </svg>
         </div>
-        <div class="success-title">Finalizing your ticket…</div>
-        <p style="color:var(--text-2);max-width:46ch;margin:8px auto 0;">Your payment went through. The airline is issuing your ticket now. We'll email your confirmation within a few minutes.</p>
+        <div class="success-title">We're finalizing your booking.</div>
+        <p style="color:var(--text-2);max-width:48ch;margin:8px auto 0;">
+          Payment received. The airline's system is running a bit slow —
+          we're waiting on your ticket confirmation. You can safely close
+          this window and we'll email you within 15 minutes with either
+          your booking confirmation or a refund notice if something went
+          wrong.
+        </p>
+        <p style="color:var(--text-2);max-width:48ch;margin:12px auto 0;font-size:13px;">
+          If you don't hear from us in 15 minutes, message us on WhatsApp
+          with the reference below.
+        </p>
         <div class="success-ref" id="success-ref" style="margin-top:14px;">${escapeHtml(mref)}</div>
-        <p style="font-size:13px;color:var(--text-3);max-width:42ch;margin:8px auto 0;">Save this reference in case you need it for support.</p>
         <div style="margin-top:18px;">
           <a class="btn btn-ghost" target="_blank" rel="noopener noreferrer"
              href="${waHref}"
              style="display:inline-flex;align-items:center;gap:8px;text-decoration:none;">
             Message us on WhatsApp
           </a>
+        </div>
+      `;
+      return;
+    }
+
+    if (state === 'refunding') {
+      // Session 28c #11 — State 3 (Refunding). Terminal state — reached
+      // only when the backend has DEFINITIVELY determined a failure
+      // (paid_booking_failed, paid_offer_expired, refund_pending,
+      // refunded). Never a timeout fallback. If we don't yet know, we
+      // show State 2 (ticketing-delayed) instead.
+      //
+      // Automated refund via Paystack Refund API is guaranteed by
+      // Session 24 Batch 2. Customer's card is being credited back the
+      // full amount (3–5 business days per Paystack settlement window).
+      const mref = payload?.merchantRef
+                || payload?.booking?.merchant_ref
+                || payload?.pending?.merchant_ref
+                || '';
+      const kesAmount = payload?.booking?.total_kes
+                     || payload?.pending?.total_kes
+                     || payload?.pending_booking?.total_kes
+                     || payload?.total_kes
+                     || null;
+      const amountFragment = kesAmount
+        ? `refund of KES ${Number(kesAmount).toLocaleString()}`
+        : 'refund';
+      const waHref = whatsappLink(
+        'Hi TumaFly, my booking (ref ' + mref + ') is being refunded and I have a question. Please help.'
+      );
+      hero.innerHTML = `
+        <div class="success-check" style="background:var(--warning-soft,#FEF6E7);color:var(--warning,#B45309);">
+          <svg width="26" height="26" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+            <path d="M12 8v4M12 16h.01" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"/>
+            <circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="2"/>
+          </svg>
+        </div>
+        <div class="success-title">We couldn't complete your booking.</div>
+        <p style="color:var(--text-2);max-width:48ch;margin:8px auto 0;">
+          Your payment went through but the airline couldn't issue the
+          ticket. We've automatically initiated your ${amountFragment} —
+          it should appear in your account within 3–5 business days.
+        </p>
+        <p style="color:var(--text-2);max-width:48ch;margin:12px auto 0;font-size:13px;">
+          If you have questions, message us on WhatsApp or email
+          support@tumafly.com.
+        </p>
+        <div class="success-ref" id="success-ref" style="margin-top:14px;">${escapeHtml(mref)}</div>
+        <div style="margin-top:18px;display:flex;gap:10px;justify-content:center;flex-wrap:wrap;">
+          <a class="btn btn-ghost" target="_blank" rel="noopener noreferrer"
+             href="${waHref}"
+             style="display:inline-flex;align-items:center;gap:8px;text-decoration:none;">
+            Message us on WhatsApp
+          </a>
+          <button class="btn btn-secondary" onclick="resetAndGoHome()">Book another trip</button>
         </div>
       `;
       return;
@@ -18835,9 +19069,15 @@
     _pollingActive = true;
     if (Date.now() - _postRedirectPollStarted > POST_REDIRECT_POLL_TIMEOUT_MS) {
       _pollingActive = false;
-      // 60s without terminal state → soft-fallback rather than spin forever.
-      // Server-side webhook + email confirmation continue independently.
-      renderPostRedirectSuccess('still-processing', { merchantRef });
+      // Session 28c #11 — 60s hard wall. In pre-28c code this rendered
+      // "still-processing" with copy that lied about the airline issuing
+      // the ticket. Post-28c: at the 60s wall the ONLY honest thing we
+      // can say is State 2 (ticketing-delayed), which explicitly
+      // acknowledges the email may say either a confirmation OR a
+      // refund. A "we timed out and don't know" fallback to State 3
+      // (Refunding) would itself be a lie — State 3 is only backend-
+      // confirmed.
+      renderPostRedirectSuccess('ticketing-delayed', { merchantRef });
       return;
     }
 
@@ -18849,43 +19089,47 @@
       const data = await res.json();
       console.log('[Paystack callback poll] state=', data?.state, 'pnr=', data?.booking?.booking_reference);
 
-      if (data?.state === 'confirmed' && data?.booking?.booking_reference) {
-        _pollingActive = false;
-        // Booking done — clear the post-pay stash so a subsequent F5
-        // doesn't re-enter the polling flow for this completed booking.
+      // Helper to clear the post-pay sessionStorage stash — used on every
+      // terminal state below.
+      const _clearPostPayStash = () => {
         try {
           sessionStorage.removeItem('tumafly_post_pay_ref');
           sessionStorage.removeItem('tumafly_post_pay_pnr');
           sessionStorage.removeItem('tumafly_post_pay_consumed');
         } catch (_) {}
+      };
+
+      if (data?.state === 'confirmed' && data?.booking?.booking_reference) {
+        _pollingActive = false;
+        _clearPostPayStash();
         renderPostRedirectSuccess('confirmed', data);
         return;
       }
       if (data?.state === 'failed') {
         _pollingActive = false;
-        // Same — terminal state, clear the stash.
-        try {
-          sessionStorage.removeItem('tumafly_post_pay_ref');
-          sessionStorage.removeItem('tumafly_post_pay_pnr');
-          sessionStorage.removeItem('tumafly_post_pay_consumed');
-        } catch (_) {}
+        _clearPostPayStash();
         renderPostRedirectSuccess('failed', data);
         return;
       }
-      if (data?.state === 'needs_support') {
+      // Session 28c #11 — refund-family terminal states. Post-Batch-2
+      // (Session 24), the automated refund flow guarantees a customer is
+      // being credited on any of these states. `needs_support` is the
+      // pre-Batch-2 name — verify-payment still maps paid_booking_failed
+      // and paid_offer_expired to it. We handle both the mapped name and
+      // the raw statuses defensively in case verify-payment changes.
+      if (data?.state === 'needs_support'
+       || data?.state === 'refund_pending'
+       || data?.state === 'refunded'
+       || data?.state === 'paid_booking_failed'
+       || data?.state === 'paid_offer_expired') {
         _pollingActive = false;
-        // Soft-terminal — payment is fine, ticket is delayed. Still clear
-        // the stash: the user will contact support with the merchant_ref
-        // (surfaced in the hero) rather than re-loading this state.
-        try {
-          sessionStorage.removeItem('tumafly_post_pay_ref');
-          sessionStorage.removeItem('tumafly_post_pay_pnr');
-          sessionStorage.removeItem('tumafly_post_pay_consumed');
-        } catch (_) {}
-        renderPostRedirectSuccess('still-processing', { merchantRef });
+        _clearPostPayStash();
+        // Pass the full data through — renderPostRedirectSuccess reads
+        // total_kes from booking/pending/total_kes defensively.
+        renderPostRedirectSuccess('refunding', { ...data, merchantRef });
         return;
       }
-      // 'pending' / 'processing' / undefined / network blip → keep polling
+      // 'pending' / 'processing' / 'duffel_pending' / undefined / network blip → keep polling
     } catch (e) {
       console.warn('[Paystack callback poll] fetch failed:', e);
       // Network blip — keep polling (don't terminate on transient errors)
