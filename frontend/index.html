@@ -19138,18 +19138,18 @@
       // Automated refund via Paystack Refund API is guaranteed by
       // Session 24 Batch 2. Customer's card is being credited back the
       // full amount (3–5 business days per Paystack settlement window).
+      //
+      // Session 28c #15 — copy no longer surfaces the KES amount.
+      // Rationale: at this stage the customer is being refunded in
+      // full and the refund email carries the exact amount. Showing
+      // "KES X,XXX" here (a) requires reliable pass-through from
+      // verify-payment which isn't guaranteed for every state, (b)
+      // creates a mismatch risk if the number differs from the email.
+      // Simpler + safer to keep the copy amount-agnostic.
       const mref = payload?.merchantRef
                 || payload?.booking?.merchant_ref
                 || payload?.pending?.merchant_ref
                 || '';
-      const kesAmount = payload?.booking?.total_kes
-                     || payload?.pending?.total_kes
-                     || payload?.pending_booking?.total_kes
-                     || payload?.total_kes
-                     || null;
-      const amountFragment = kesAmount
-        ? `refund of KES ${Number(kesAmount).toLocaleString()}`
-        : 'refund';
       const waHref = whatsappLink(
         'Hi TumaFly, my booking (ref ' + mref + ') is being refunded and I have a question. Please help.'
       );
@@ -19163,8 +19163,8 @@
         <div class="success-title">We couldn't complete your booking.</div>
         <p style="color:var(--text-2);max-width:48ch;margin:8px auto 0;">
           Your payment went through but the airline couldn't issue the
-          ticket. We've automatically initiated your ${amountFragment} —
-          it should appear in your account within 3–5 business days.
+          ticket. We've automatically initiated your refund — it should
+          appear in your account within 3–5 business days.
         </p>
         <p style="color:var(--text-2);max-width:48ch;margin:12px auto 0;font-size:13px;">
           If you have questions, message us on WhatsApp or email
@@ -19186,6 +19186,21 @@
     if (state === 'failed') {
       _stopPhasedProgression();
       _wipeTerminalStash();
+      // Session 28c #15 — copy updated to §8.7 second-block spec.
+      // Payment-decline path: honest diagnostic hints + two-CTA
+      // (Try again / WhatsApp) matching the master handoff design.
+      // Session 22/23 copy ("Payment didn't complete" / "was not
+      // processed") was too generic — didn't help the customer
+      // troubleshoot or route them to next action.
+      const mref = payload?.merchantRef
+                || payload?.booking?.merchant_ref
+                || payload?.pending?.merchant_ref
+                || '';
+      const waHref = whatsappLink(
+        (mref
+          ? 'Hi TumaFly, my payment (ref ' + mref + ') was declined and I need help.'
+          : 'Hi TumaFly, my payment was declined and I need help.')
+      );
       hero.innerHTML = `
         <div class="success-check" style="background:var(--danger-soft,#FDE8E8);color:var(--danger,#c0392b);">
           <svg width="26" height="26" viewBox="0 0 24 24" fill="none" aria-hidden="true">
@@ -19193,10 +19208,20 @@
             <circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="2"/>
           </svg>
         </div>
-        <div class="success-title">Payment didn't complete</div>
-        <p style="color:var(--text-2);max-width:42ch;margin:8px auto 0;">${escapeHtml(payload?.message || 'Your payment was not processed. No charge was made.')}</p>
-        <div style="margin-top:18px;">
-          <button class="btn btn-primary" onclick="resetAndGoHome()">Start over</button>
+        <div class="success-title">Payment didn't go through and no charge was made.</div>
+        <p style="color:var(--text-2);max-width:48ch;margin:8px auto 0;">
+          Common causes: insufficient funds, incorrect card details, or
+          your bank blocking the transaction for security. Try again
+          with the same card, use a different card, or message us on
+          WhatsApp if this keeps happening.
+        </p>
+        <div style="margin-top:18px;display:flex;gap:10px;justify-content:center;flex-wrap:wrap;">
+          <button class="btn btn-primary" onclick="resetAndGoHome()">Try again</button>
+          <a class="btn btn-ghost" target="_blank" rel="noopener noreferrer"
+             href="${waHref}"
+             style="display:inline-flex;align-items:center;gap:8px;text-decoration:none;">
+            Message us on WhatsApp
+          </a>
         </div>
       `;
       return;
