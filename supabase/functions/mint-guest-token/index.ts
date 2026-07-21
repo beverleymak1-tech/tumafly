@@ -170,7 +170,11 @@ serve(async (req) => {
     role: "authenticated",
     aud: "authenticated",
     iss: "supabase",
-    sub: `guest:${pending_booking_id}`,
+    // Realtime's internal apply_rls unconditionally casts sub to uuid
+        // (Session 28c #10d debugging), so it must be a valid UUID. Safe because
+        // the *_select_own RLS policies guard on guest_pending_booking_id IS NULL —
+        // a guest JWT will never satisfy them regardless of what sub contains.
+        sub: pending_booking_id,
     guest_pending_booking_id: pending_booking_id,
     iat: now,
     exp,

@@ -1,0 +1,189 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>TumaFly Realtime POC — Session 28c #10d</title>
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; max-width: 900px; margin: 2rem auto; padding: 0 1rem; }
+    h1 { font-size: 1.2rem; }
+    .status { padding: .5rem .75rem; border-radius: 6px; margin: .5rem 0; font-family: monospace; font-size: .85rem; }
+    .status.ok { background: #d4edda; color: #155724; }
+    .status.err { background: #f8d7da; color: #721c24; }
+    .status.info { background: #d1ecf1; color: #0c5460; }
+    .event { padding: .5rem; border-left: 3px solid #007bff; background: #f8f9fa; margin: .25rem 0; font-family: monospace; font-size: .8rem; white-space: pre-wrap; }
+    .event .ts { color: #6c757d; font-size: .75rem; }
+    .event .table { color: #007bff; font-weight: bold; }
+    .event .type { color: #28a745; }
+    button { padding: .5rem 1rem; margin: .25rem; cursor: pointer; }
+    input { padding: .4rem; margin: .25rem; font-family: monospace; font-size: .8rem; width: 400px; }
+    label { display: block; margin: .5rem 0 .1rem; font-size: .85rem; color: #495057; }
+    #events { max-height: 500px; overflow-y: auto; border: 1px solid #dee2e6; padding: .5rem; margin-top: 1rem; }
+  </style>
+</head>
+<body>
+
+<h1>TumaFly Realtime POC — Session 28c #10d</h1>
+
+<p style="font-size: .9rem; color: #495057;">
+  Enter a <code>pending_booking_id</code> and its <code>guest_token</code> (from
+  a fresh <code>initialize-payment</code> response or a SQL query). This page
+  will mint a scoped JWT and open a Realtime subscription against the three
+  tables. Manually flip the row's status in the SQL Editor to see pushes.
+</p>
+
+<label for="pid">pending_booking_id (UUID)</label>
+<input id="pid" placeholder="00000000-0000-0000-0000-000000000000" />
+
+<label for="tok">guest_token (64-char hex)</label>
+<input id="tok" placeholder="64 hex chars" />
+
+<div>
+  <button id="connect">Mint JWT + Connect</button>
+  <button id="disconnect" disabled>Disconnect</button>
+  <button id="clear">Clear log</button>
+</div>
+
+<div id="status-panel"></div>
+<div id="events"></div>
+
+<script type="module">
+  import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
+
+  const SUPABASE_URL = 'https://wmplcauhaqtyenwvkrkq.supabase.co';
+  const SUPABASE_ANON_KEY = ''; // filled at page load below — see note
+
+  // The anon key is required by the JS client to initialize, even though
+  // we'll immediately swap in our guest JWT. It's public — safe to hardcode.
+  // Fetch it from the same place the frontend reads it. If you want to
+  // hardcode it here, grab it from Dashboard → API → anon public.
+  // For POC purposes we prompt for it if it's blank.
+
+  const statusPanel = document.getElementById('status-panel');
+  const eventsDiv = document.getElementById('events');
+  const pidInput = document.getElementById('pid');
+  const tokInput = document.getElementById('tok');
+  const connectBtn = document.getElementById('connect');
+  const disconnectBtn = document.getElementById('disconnect');
+  const clearBtn = document.getElementById('clear');
+
+  let supabase = null;
+  let channel = null;
+
+  function status(msg, kind = 'info') {
+    const div = document.createElement('div');
+    div.className = `status ${kind}`;
+    div.textContent = `[${new Date().toISOString().slice(11, 19)}] ${msg}`;
+    statusPanel.appendChild(div);
+    statusPanel.scrollTop = statusPanel.scrollHeight;
+  }
+
+  function logEvent(table, payload) {
+    const div = document.createElement('div');
+    div.className = 'event';
+    const ts = new Date().toISOString().slice(11, 23);
+    div.innerHTML =
+      `<div class="ts">${ts}</div>` +
+      `<span class="table">${table}</span> ` +
+      `<span class="type">${payload.eventType || 'unknown'}</span>\n` +
+      JSON.stringify(payload.new || payload.old || payload, null, 2);
+    eventsDiv.prepend(div);
+  }
+
+  clearBtn.onclick = () => {
+    eventsDiv.innerHTML = '';
+    statusPanel.innerHTML = '';
+  };
+
+  disconnectBtn.onclick = async () => {
+    if (channel) {
+      await supabase.removeChannel(channel);
+      channel = null;
+    }
+    status('Disconnected.', 'info');
+    connectBtn.disabled = false;
+    disconnectBtn.disabled = true;
+  };
+
+  connectBtn.onclick = async () => {
+    const pid = pidInput.value.trim();
+    const tok = tokInput.value.trim();
+
+    if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(pid)) {
+      status('pending_booking_id is not a valid UUID.', 'err');
+      return;
+    }
+    if (!/^[0-9a-f]{64}$/i.test(tok)) {
+      status('guest_token is not a 64-char hex string.', 'err');
+      return;
+    }
+
+    // Prompt for anon key if not hardcoded
+    let anonKey = SUPABASE_ANON_KEY;
+    if (!anonKey) {
+      anonKey = prompt('Paste the Supabase anon (public) key. Get it from Dashboard → Settings → API → anon public.');
+      if (!anonKey) { status('Cancelled — anon key required.', 'err'); return; }
+    }
+
+    connectBtn.disabled = true;
+
+    // 1. Mint the guest JWT
+    status(`Minting JWT for pending_booking_id=${pid}…`);
+    let jwt;
+    try {
+      const res = await fetch(`${SUPABASE_URL}/functions/v1/mint-guest-token`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ pending_booking_id: pid, guest_token: tok }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        status(`mint-guest-token failed: HTTP ${res.status} — ${data.error || 'unknown'}`, 'err');
+        connectBtn.disabled = false;
+        return;
+      }
+      jwt = data.token;
+      status(`JWT minted. Expires at ${data.expires_at}.`, 'ok');
+    } catch (err) {
+      status(`Network error contacting mint-guest-token: ${err.message}`, 'err');
+      connectBtn.disabled = false;
+      return;
+    }
+
+    // 2. Create Supabase client with the guest JWT
+    supabase = createClient(SUPABASE_URL, anonKey, {
+      global: { headers: { Authorization: `Bearer ${jwt}` } },
+      realtime: { params: { apikey: anonKey } },
+    });
+
+    // Also tell Realtime specifically about our JWT
+    await supabase.realtime.setAuth(jwt);
+
+    // 3. Open a channel subscribing to the three tables
+    status('Opening Realtime channel…');
+    channel = supabase
+      .channel(`guest:${pid}`)
+      .on('postgres_changes',
+          { event: '*', schema: 'public', table: 'pending_bookings', filter: `id=eq.${pid}` },
+          (payload) => logEvent('pending_bookings', payload))
+      .on('postgres_changes',
+          { event: '*', schema: 'public', table: 'bookings', filter: `pending_booking_id=eq.${pid}` },
+          (payload) => logEvent('bookings', payload))
+      .on('postgres_changes',
+          { event: '*', schema: 'public', table: 'booking_status_history' },
+          (payload) => logEvent('booking_status_history', payload))
+      .subscribe((state, err) => {
+        if (state === 'SUBSCRIBED') {
+          status(`Channel SUBSCRIBED. Listening for changes on pending_booking_id=${pid}.`, 'ok');
+          disconnectBtn.disabled = false;
+        } else if (state === 'CHANNEL_ERROR' || state === 'TIMED_OUT') {
+          status(`Channel state: ${state} — ${err?.message || 'no detail'}`, 'err');
+          connectBtn.disabled = false;
+        } else {
+          status(`Channel state: ${state}`, 'info');
+        }
+      });
+  };
+</script>
+
+</body>
+</html>
