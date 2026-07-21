@@ -17600,6 +17600,19 @@
       // break the payment flow — we just fall through to polling.
       activePendingBookingId = data.pending_booking_id || null;
       activeGuestToken = data.guest_token || null;
+      // Session 28c #12 — persist to sessionStorage so the top-level
+      // Paystack redirect (majority path) and F5-during-polling flow can
+      // hydrate these values back into memory on boot. Without this, the
+      // Realtime substrate only benefits the pre-redirect modal flow —
+      // most customers still fall back to pure polling.
+      //
+      // Cleared on every terminal state (see _clearPostPayStash). Safe to
+      // have stale values across abandoned bookings — next initialize-
+      // payment overwrites them.
+      try {
+        if (activePendingBookingId) sessionStorage.setItem('tumafly_post_pay_pbid', activePendingBookingId);
+        if (activeGuestToken) sessionStorage.setItem('tumafly_post_pay_gtok', activeGuestToken);
+      } catch (_) {}
       if (data.breakdown) renderPaymentSummary(data.breakdown);
 
       // Step 2b: switch to payment view now, RIGHT before rendering the
@@ -17713,7 +17726,10 @@
     // Route to #success and reuse the post-redirect polling state machine.
     activeMerchantRef = ref;
     if (typeof showView === 'function') showView('success');
-    renderPostRedirectSuccess('loading', {});
+    // Session 28c #13 — kick off the guided 60-second phased progression.
+    // Replaces the plain spinner. Progress bar + phase copy driven by
+    // _phasedProgressionTimer inside the render.
+    renderPostRedirectSuccess('phased-loading', {});
     _postRedirectPollStarted = Date.now();
     pollPostRedirect(ref);
   }
@@ -18906,6 +18922,78 @@
   let _postRedirectPollHandle  = null;
   let _postRedirectPollStarted = null;
 
+  // ═══════════════════════════════════════════════════════════════════
+  // Session 28c #13 — Guided 60-second phased progression
+  // ═══════════════════════════════════════════════════════════════════
+  //
+  // During seconds 0–60 of the post-payment wait, the customer sees a
+  // guided progression through four phase messages + a progress bar.
+  // Realtime pushes short-circuit the timer (terminal state jumps
+  // straight to render). At second 60, if no terminal has arrived,
+  // pollPostRedirect's timeout branch transitions to State 2
+  // (Ticketing delayed) — the timer stays at 95% pulsing until that
+  // handoff.
+  //
+  // Timing (§8.4 of the Session 28 split handoff):
+  //   0–5s   — "Confirming your payment..."           bar 0%  → 25%
+  //   5–20s  — "Reserving your seats with the airline..." bar 25% → 60%
+  //   20–45s — "Almost there — issuing your ticket..."   bar 60% → 90%
+  //   45–60s — same copy, bar pulses at ~95%
+  //
+  // The bar NEVER fills to 100% until State 1 is achieved. No "the bar
+  // filled but nothing happened" broken moment.
+  let _phasedProgressionTimer = null;
+  let _phasedProgressionStartedAt = null;
+
+  function _stopPhasedProgression() {
+    if (_phasedProgressionTimer) {
+      clearInterval(_phasedProgressionTimer);
+      _phasedProgressionTimer = null;
+    }
+    _phasedProgressionStartedAt = null;
+  }
+
+  // Session 28c #14 (Commit D — exhaustive terminal-render cleanup per
+  // §8.13 of the Session 28 split handoff). Wipes every booking-flow
+  // shadow key + the post-pay stash + the Paystack access code. Called
+  // from the TOP of every definitive terminal render (confirmed /
+  // refunding / failed / decline) so no stale booking-flow shadow can
+  // survive into a subsequent booking attempt in the same tab.
+  //
+  // NOT called from 'ticketing-delayed' — that's a soft-transitional
+  // state; the stash may still be needed if a late Realtime terminal
+  // arrives while the customer is on-screen (Scenarios 5/6 in §8.8).
+  //
+  // Belt-and-suspenders: same sweep runs on #home entry too (see the
+  // popstate-restore guard for the sibling call site).
+  function _wipeTerminalStash() {
+    try { sessionStorage.removeItem(BOOKING_PASSENGER_SHADOW_KEY); } catch (_) {}
+    try { sessionStorage.removeItem(BOOKING_SECURE_SHADOW_KEY); } catch (_) {}
+    try { clearPaymentReturn(); } catch (_) {}
+    try { clearBookingExtras(); } catch (_) {}
+    try {
+      sessionStorage.removeItem('tumafly_post_pay_ref');
+      sessionStorage.removeItem('tumafly_post_pay_pnr');
+      sessionStorage.removeItem('tumafly_post_pay_consumed');
+      sessionStorage.removeItem('tumafly_post_pay_pbid');
+      sessionStorage.removeItem('tumafly_post_pay_gtok');
+    } catch (_) {}
+    // Also tear down the Realtime channel — terminal renders are the
+    // point at which we no longer need pushes for THIS booking.
+    _closeRealtimeChannel();
+    // Reset the Paystack access code so a fresh booking in the same
+    // tab doesn't accidentally reuse a stale modal handle.
+    try { _paystackAccessCode = null; } catch (_) {}
+  }
+
+  function _phaseCopyFor(elapsedSeconds) {
+    if (elapsedSeconds < 5)  return { copy: 'Confirming your payment…',                     pct: 25 * (elapsedSeconds / 5) };
+    if (elapsedSeconds < 20) return { copy: 'Reserving your seats with the airline…',       pct: 25 + 35 * ((elapsedSeconds - 5) / 15) };
+    if (elapsedSeconds < 45) return { copy: 'Almost there — issuing your ticket…',          pct: 60 + 30 * ((elapsedSeconds - 20) / 25) };
+    if (elapsedSeconds < 60) return { copy: 'Almost there — issuing your ticket…',          pct: 90 + 5 * Math.abs(Math.sin(elapsedSeconds * 1.2)) };
+    return { copy: 'Almost there — issuing your ticket…', pct: 95 };
+  }
+
   // Swap the contents of #view-success's hero block to reflect the current
   // post-redirect state. Each branch is fully self-contained markup.
   function renderPostRedirectSuccess(state, payload) {
@@ -18913,6 +19001,10 @@
     if (!hero) return;
 
     if (state === 'loading') {
+      // Legacy fallback — kept as defensive alias. Any code path still
+      // rendering 'loading' will show a benign spinner rather than
+      // breaking. The main paths now use 'phased-loading' below.
+      _stopPhasedProgression();
       hero.innerHTML = `
         <div style="display:flex;justify-content:center;margin-bottom:20px;">
           <div class="spinner" style="width:36px;height:36px;border-width:3px;"></div>
@@ -18923,7 +19015,51 @@
       return;
     }
 
+    if (state === 'phased-loading') {
+      // Session 28c #13 — guided 60-second experience. Renders the
+      // progress bar + phased copy container; the interval below drives
+      // both. Killed by _stopPhasedProgression when any terminal state
+      // renders, or by pollPostRedirect's 60s wall transitioning to
+      // ticketing-delayed.
+      hero.innerHTML = `
+        <div style="display:flex;justify-content:center;margin-bottom:20px;">
+          <div class="spinner" style="width:36px;height:36px;border-width:3px;"></div>
+        </div>
+        <div class="success-title" id="phased-progression-copy">Confirming your payment…</div>
+        <div style="max-width:340px;margin:20px auto 0;">
+          <div style="height:8px;background:var(--brand-soft,#e8f3ff);border-radius:999px;overflow:hidden;">
+            <div id="phased-progression-bar"
+                 style="height:100%;width:0%;background:var(--brand,#3D95F5);border-radius:999px;transition:width 400ms cubic-bezier(.2,.7,.2,1);"></div>
+          </div>
+        </div>
+        <p style="color:var(--text-3);max-width:42ch;margin:14px auto 0;font-size:13px;">
+          Sit tight — this usually takes under a minute.
+        </p>
+      `;
+      const barEl = hero.querySelector('#phased-progression-bar');
+      const textEl = hero.querySelector('#phased-progression-copy');
+      _stopPhasedProgression();
+      _phasedProgressionStartedAt = Date.now();
+      _phasedProgressionTimer = setInterval(() => {
+        // Defensive: if DOM was blown away by another render, kill self.
+        if (!barEl.isConnected || !textEl.isConnected) {
+          _stopPhasedProgression();
+          return;
+        }
+        const elapsed = (Date.now() - _phasedProgressionStartedAt) / 1000;
+        const { copy, pct } = _phaseCopyFor(elapsed);
+        if (textEl.textContent !== copy) textEl.textContent = copy;
+        barEl.style.width = Math.min(95, pct) + '%';
+        // Note: we never fill to 100% here. Only the 'confirmed' render
+        // achieves visual completion, by replacing the entire hero
+        // markup with the checkmark.
+      }, 250);
+      return;
+    }
+
     if (state === 'confirmed') {
+      _stopPhasedProgression();
+      _wipeTerminalStash();
       const pnr = payload?.booking?.booking_reference || '';
       hero.innerHTML = `
         <div class="success-check">✓</div>
@@ -18943,6 +19079,7 @@
     }
 
     if (state === 'ticketing-delayed') {
+      _stopPhasedProgression();
       // Session 28c #11 — State 2 (Ticketing delayed). Honest handoff to
       // email delivery. Replaces the pre-28c "still-processing" render whose
       // copy lied about the airline "issuing your ticket now" — that copy
@@ -18990,6 +19127,8 @@
     }
 
     if (state === 'refunding') {
+      _stopPhasedProgression();
+      _wipeTerminalStash();
       // Session 28c #11 — State 3 (Refunding). Terminal state — reached
       // only when the backend has DEFINITIVELY determined a failure
       // (paid_booking_failed, paid_offer_expired, refund_pending,
@@ -19045,6 +19184,8 @@
     }
 
     if (state === 'failed') {
+      _stopPhasedProgression();
+      _wipeTerminalStash();
       hero.innerHTML = `
         <div class="success-check" style="background:var(--danger-soft,#FDE8E8);color:var(--danger,#c0392b);">
           <svg width="26" height="26" viewBox="0 0 24 24" fill="none" aria-hidden="true">
@@ -19063,6 +19204,14 @@
   }
 
   async function pollPostRedirect(merchantRef) {
+    // Session 28c #12 — best-effort Realtime open. Idempotent (guard
+    // flag inside _openRealtimeChannel returns true if already up), fire-
+    // and-forget. If pbid/gtok haven't been hydrated (older tab, storage
+    // disabled), returns false silently and we proceed with pure polling.
+    // The setTimeout tail in this function still fires at 2s cadence for
+    // the fallback case.
+    _openRealtimeChannel();
+
     // Session 27b Commit 6 Part 4b — flag polling as active so the
     // popstate handler can intercept State A back navigation. Cleared
     // in every terminal branch below plus the timeout.
@@ -19090,12 +19239,17 @@
       console.log('[Paystack callback poll] state=', data?.state, 'pnr=', data?.booking?.booking_reference);
 
       // Helper to clear the post-pay sessionStorage stash — used on every
-      // terminal state below.
+      // terminal state below. Session 28c #12: also wipes pbid + gtok so
+      // a subsequent booking in the same tab starts with a clean slate
+      // and doesn't accidentally reuse the previous booking's Realtime
+      // credentials.
       const _clearPostPayStash = () => {
         try {
           sessionStorage.removeItem('tumafly_post_pay_ref');
           sessionStorage.removeItem('tumafly_post_pay_pnr');
           sessionStorage.removeItem('tumafly_post_pay_consumed');
+          sessionStorage.removeItem('tumafly_post_pay_pbid');
+          sessionStorage.removeItem('tumafly_post_pay_gtok');
         } catch (_) {}
       };
 
@@ -19157,6 +19311,15 @@
         console.log('[Paystack] Detected post-pay stash, merchant_ref=', ref);
 
         activeMerchantRef = ref;
+        // Session 28c #12 — hydrate pbid + gtok so pollPostRedirect can
+        // open Realtime instead of falling back to pure polling. Best-
+        // effort; if the values aren't present (older tab that pre-dates
+        // Session 28c #12, or storage disabled) we just poll. Unchanged
+        // customer-facing behavior in that case.
+        try {
+          activePendingBookingId = sessionStorage.getItem('tumafly_post_pay_pbid') || null;
+          activeGuestToken = sessionStorage.getItem('tumafly_post_pay_gtok') || null;
+        } catch (_) {}
         location.hash = 'success';
         // Booking complete — wipe the passenger + secure + extras + payment-return
         // shadows so a back-nav / stray #payment URL can't resurrect the dead offer.
@@ -19180,14 +19343,20 @@
             sessionStorage.removeItem('tumafly_post_pay_pnr');
             sessionStorage.removeItem('tumafly_post_pay_ref');
             sessionStorage.removeItem('tumafly_post_pay_consumed');
+            // Session 28c #12 — same wipe for the two new stash keys.
+            sessionStorage.removeItem('tumafly_post_pay_pbid');
+            sessionStorage.removeItem('tumafly_post_pay_gtok');
           } catch (_) {}
           return;
         }
 
         // No stash → resume the poll. When it terminates, pollPostRedirect
         // clears tumafly_post_pay_ref so a subsequent F5 doesn't re-enter
-        // this handler for a completed booking.
-        renderPostRedirectSuccess('loading', {});
+        // this handler for a completed booking. Session 28c #13 — same
+        // phased-loading render as the pre-redirect entry, so an F5-mid-
+        // poll continues to feel like the same guided experience rather
+        // than resetting to a plain spinner.
+        renderPostRedirectSuccess('phased-loading', {});
         _postRedirectPollStarted = Date.now();
         pollPostRedirect(ref);
       } catch (e) {
