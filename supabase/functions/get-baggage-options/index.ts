@@ -249,87 +249,25 @@ serve(async (req: Request) => {
     }
 
     // Sort each passenger's options by price ascending, then weight ascending
-        for (const pid of Object.keys(grouped)) {
-          grouped[pid].sort((a, b) => {
-            const pa = parseFloat(a.cost_amount) || 0;
-            const pb = parseFloat(b.cost_amount) || 0;
-            if (pa !== pb) return pa - pb;
-            return (a.weight_kg ?? 0) - (b.weight_kg ?? 0);
-          });
-        }
+    for (const pid of Object.keys(grouped)) {
+      grouped[pid].sort((a, b) => {
+        const pa = parseFloat(a.cost_amount) || 0;
+        const pb = parseFloat(b.cost_amount) || 0;
+        if (pa !== pb) return pa - pb;
+        return (a.weight_kg ?? 0) - (b.weight_kg ?? 0);
+      });
+    }
 
-        // ── Fare-included baggage aggregation (Session 28f) ────────────────
-        // Duffel exposes fare-included allowance at
-        //   slices[].segments[].passengers[].baggages
-        // as [{ type, quantity }]. Ancillary (paid) baggages never overlap
-        // with these — per Duffel docs, ancillary baggages booked as services
-        // do NOT appear in slices[].segments[].passengers[].baggages[]. Zero
-        // risk of double-counting.
-        //
-        // Aggregation rule: MIN across segments per passenger per bag_type.
-        // If any segment strips a bag type, the passenger effectively doesn't
-        // have it end-to-end. Safe read for what's guaranteed to travel.
-        //
-        // Summary field: MIN across passengers WITH any non-zero bag total.
-        // Filters out infants / fare-differentiated pax so their zero doesn't
-        // drag the universal "per traveler" pill to zero. If every passenger
-        // has zero allowance, summary is empty and frontend hides the panel.
-        const freeBagsByPax: Record<string, Record<string, number>> = {};
-        for (const slice of (Array.isArray(offer.slices) ? offer.slices : [])) {
-          for (const seg of (Array.isArray(slice.segments) ? slice.segments : [])) {
-            for (const paxOnSeg of (Array.isArray(seg.passengers) ? seg.passengers : [])) {
-              const pid = paxOnSeg?.passenger_id;
-              if (!pid) continue;
-              const segCounts: Record<string, number> = {};
-              for (const b of (Array.isArray(paxOnSeg.baggages) ? paxOnSeg.baggages : [])) {
-                const t = String(b?.type || '').toLowerCase();
-                if (!t) continue;
-                segCounts[t] = (segCounts[t] || 0) + (Number(b.quantity) || 0);
-              }
-              if (!(pid in freeBagsByPax)) {
-                freeBagsByPax[pid] = { ...segCounts };
-              } else {
-                const allTypes = new Set([
-                  ...Object.keys(freeBagsByPax[pid]),
-                  ...Object.keys(segCounts),
-                ]);
-                for (const t of allTypes) {
-                  const cur = freeBagsByPax[pid][t] || 0;
-                  const sg = segCounts[t] || 0;
-                  freeBagsByPax[pid][t] = Math.min(cur, sg);
-                }
-              }
-            }
-          }
-        }
-        const paxWithAnyBag = Object.entries(freeBagsByPax)
-          .filter(([, counts]) => Object.values(counts).some(q => q > 0));
-        const freeBaggagesSummary: Record<string, number> = {};
-        if (paxWithAnyBag.length > 0) {
-          const allTypes = new Set<string>();
-          paxWithAnyBag.forEach(([, counts]) =>
-            Object.keys(counts).forEach(t => allTypes.add(t))
-          );
-          for (const t of allTypes) {
-            const minAcrossPax = Math.min(
-              ...paxWithAnyBag.map(([, c]) => c[t] || 0)
-            );
-            if (minAcrossPax > 0) freeBaggagesSummary[t] = minAcrossPax;
-          }
-        }
-
-        return new Response(
-              JSON.stringify({
-                baggages_by_passenger: grouped,
-                free_baggages_by_passenger: freeBagsByPax,
-                free_baggages_summary: freeBaggagesSummary,
-                passengers: (offer.passengers || []).map((p: any) => ({ id: p.id })),
-                offer_currency: offerCurrency,
-                mode: DUFFEL_MODE,
-              }),
-              { status: 200, headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' } }
-            );
-          } catch (err: any) {
+    return new Response(
+      JSON.stringify({
+        baggages_by_passenger: grouped,
+        passengers: (offer.passengers || []).map((p: any) => ({ id: p.id })),
+        offer_currency: offerCurrency,
+        mode: DUFFEL_MODE,
+      }),
+      { status: 200, headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' } }
+    );
+  } catch (err: any) {
     console.error('[get-baggage-options] error', err?.message, err?.stack);
     return new Response(
       JSON.stringify({ error: 'Internal error fetching baggage options' }),

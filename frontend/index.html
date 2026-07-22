@@ -3445,89 +3445,6 @@
       padding: 10px 0 2px;
     }
 
-    /* Session 28f — fare-included panel (Ulysse-style per-traveler pills) */
-    .bag-included-panel {
-      background: var(--success-soft);
-      border: 1px solid #C6E4CE;
-      border-radius: var(--radius-sm);
-      padding: 12px 14px;
-      margin: 4px 0 14px;
-    }
-    .bag-included-panel-head {
-      font-size: 12px;
-      font-weight: 700;
-      color: var(--success);
-      letter-spacing: 0.02em;
-      text-transform: uppercase;
-      margin-bottom: 8px;
-    }
-    .bag-included-pills {
-      display: flex;
-      flex-direction: column;
-      gap: 6px;
-    }
-    .bag-included-pill {
-      display: flex;
-      align-items: center;
-      gap: 10px;
-      font-size: 14px;
-      color: var(--ink);
-    }
-    .bag-included-pill-icon {
-      width: 26px;
-      height: 26px;
-      border-radius: 6px;
-      background: white;
-      color: var(--success);
-      display: grid;
-      place-items: center;
-      flex-shrink: 0;
-    }
-    .bag-included-pill-text { line-height: 1.35; }
-
-    /* Session 28f — card-level "Add extra bags" CTA (shown when no
-       travelers saved yet). Once any traveler saves, per-pax rows
-       replace this and it disappears. */
-    .bag-add-extra-cta {
-      display: flex;
-      align-items: center;
-      gap: 12px;
-      width: 100%;
-      padding: 12px 14px;
-      background: var(--brand-soft);
-      border: 1px solid var(--brand-border);
-      border-radius: var(--radius-sm);
-      font-family: inherit;
-      text-align: left;
-      cursor: pointer;
-      transition: background 0.15s ease, border-color 0.15s ease;
-    }
-    .bag-add-extra-cta:hover {
-      background: white;
-      border-color: var(--brand);
-    }
-    .bag-add-extra-cta-icon {
-      width: 32px;
-      height: 32px;
-      border-radius: 8px;
-      background: var(--brand);
-      color: white;
-      display: grid;
-      place-items: center;
-      flex-shrink: 0;
-    }
-    .bag-add-extra-cta-text { flex: 1; min-width: 0; }
-    .bag-add-extra-cta-title {
-      font-size: 14px;
-      font-weight: 600;
-      color: var(--brand-dark);
-    }
-    .bag-add-extra-cta-sub {
-      font-size: 12px;
-      color: var(--text-3);
-      margin-top: 2px;
-    }
-
     /* Baggage modal — same backdrop/surface as seat modal */
     .bag-modal-backdrop {
       position: fixed;
@@ -7264,6 +7181,7 @@
             </svg>
             <h3>Baggage</h3>
           </div>
+          <p class="sub" style="margin-top:6px;">Available baggage options for this flight. Selection may not be available on every airline; in that case extra bags can be added at check-in.</p>
           <div id="baggage-list"></div>
         </div>
 
@@ -15174,31 +15092,12 @@
     return false;
   }
 
-  // Render the Baggage card body. Three-section shape (Session 28f):
-  //   1. Fare-included panel  — always shown when Duffel offer exposes
-  //      inclusion data (per traveler pill display, à la Ulysse).
-  //   2. Per-pax rows          — one row per SAVED traveler, each with
-  //      Add/Change button opening the modal (unchanged from prior build).
-  //   3. Single card-level CTA — shown when paid options exist but no
-  //      traveler has been saved yet. Once any traveler saves, the
-  //      per-pax rows take over and the CTA disappears. Modal handles
-  //      the unsaved case gracefully via "Traveler N" fallback labels
-  //      (see renderBaggageModal ~L15295).
-  //
-  // When neither included data nor paid options exist, we fall back to
-  // the original honest note about airline check-in.
+  // Render the Baggage card body — either status rows + CTA group, or
+  // the static fallback note (mode kept identical to pre-baggage build).
   function renderBaggageList() {
     const slot = document.getElementById('baggage-list');
     if (!slot) return;
-
-    const anyPaidOptions = baggageAnyOptionsAvailable();
-    const efData = baggageOptionsByOffer[baggageOfferId] || {};
-    const includedSummary = efData.free_baggages_summary || {};
-    const includedTypes = Object.keys(includedSummary).filter(t => (includedSummary[t] || 0) > 0);
-    const hasIncluded = includedTypes.length > 0;
-
-    // Nothing to show either way — original fallback copy.
-    if (!anyPaidOptions && !hasIncluded) {
+    if (!baggageAnyOptionsAvailable()) {
       slot.innerHTML = `
         <div class="bag-empty-note">
           If you're travelling with bags, you can add them on the airline's website after completing your purchase. Additional fees may apply depending on the airline and fare.
@@ -15207,116 +15106,52 @@
       return;
     }
 
-    const sections = [];
+    // Status rows: one per passenger summarising their bag selection (if any).
+    // Skip unsaved/cleared slots — same rationale as renderSeatsList.
+    const rows = Array.from({ length: passengerCount }).map((_, i) => {
+      if (!travelerStates[i]?.saved) return '';
+      const opts = baggageOptionsByPax[i] || [];
+      const sel = selectedBaggages[i] || {};
+      const count = Object.values(sel).reduce((a, b) => a + b, 0);
+      const totalForPax = Object.keys(sel).reduce((sum, svcId) => {
+        const o = opts.find(x => x.service_id === svcId);
+        return sum + (o ? bagOptionCostKes(o) * sel[svcId] : 0);
+      }, 0);
+      const traveler = passengerData[i] || travelerStates[i]?.data || {};
+      const name = (traveler.given_name || `Traveler ${i + 1}`) + (traveler.family_name ? ' ' + traveler.family_name : '');
 
-    // ── Section 1 — Fare-included pills ─────────────────────────────
-    if (hasIncluded) {
-      // Sort by common priority: carry_on, personal_item, checked, others last
-      const priority = { carry_on: 0, personal_item: 1, checked: 2 };
-      const sorted = includedTypes.slice().sort((a, b) =>
-        (priority[a] ?? 99) - (priority[b] ?? 99));
-      const perTraveler = passengerCount > 1;
-      const pills = sorted.map(t => {
-        const n = includedSummary[t];
-        const singular = bagsLabelForType(t); // "Checked bag", "Carry-on bag", "Personal item"
-        // Pluralise cleanly: "bag" → "bags", "item" → "items"
-        const label = n > 1
-          ? singular.replace(/\bbag\b/, 'bags').replace(/\bitem\b/, 'items')
-          : singular;
-        const suffix = perTraveler ? ' per traveler' : '';
-        return `
-          <div class="bag-included-pill">
-            <div class="bag-included-pill-icon">
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-                <path d="M5 8h14M5 12h14M5 16h14" stroke="currentColor" stroke-width="0" />
-                <rect x="5" y="8" width="14" height="12" rx="1.5" stroke="currentColor" stroke-width="1.8"/>
-                <path d="M9 8V5.5a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1V8" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
-              </svg>
-            </div>
-            <div class="bag-included-pill-text">${n} × ${escapeHtml(label.toLowerCase())}${suffix}</div>
-          </div>
-        `;
-      }).join('');
-      sections.push(`
-        <div class="bag-included-panel">
-          <div class="bag-included-panel-head">Included with your fare</div>
-          <div class="bag-included-pills">${pills}</div>
-        </div>
-      `);
-    }
-
-    // ── Section 2/3 — Paid picker (per-pax rows OR card-level CTA) ──
-    if (anyPaidOptions) {
-      const anyTravelerSaved = travelerStates.some(s => s?.saved);
-      if (anyTravelerSaved) {
-        // Per-pax rows — one per saved traveler. Skip unsaved slots
-        // (same rationale as pre-28f: they'd render without a real name).
-        const rows = Array.from({ length: passengerCount }).map((_, i) => {
-          if (!travelerStates[i]?.saved) return '';
-          const opts = baggageOptionsByPax[i] || [];
-          const sel = selectedBaggages[i] || {};
-          const count = Object.values(sel).reduce((a, b) => a + b, 0);
-          const totalForPax = Object.keys(sel).reduce((sum, svcId) => {
-            const o = opts.find(x => x.service_id === svcId);
-            return sum + (o ? bagOptionCostKes(o) * sel[svcId] : 0);
-          }, 0);
-          const traveler = passengerData[i] || travelerStates[i]?.data || {};
-          const name = (traveler.given_name || `Traveler ${i + 1}`) + (traveler.family_name ? ' ' + traveler.family_name : '');
-
-          let statusHtml;
-          if (count > 0) {
-            statusHtml = `<div class="bag-row-status">${count} bag${count > 1 ? 's' : ''} · ${formatKes(totalForPax)}</div>
-              <button type="button" class="bag-row-cta" onclick="openBaggageModal(${i})">Change</button>`;
-          } else if (opts.length === 0) {
-            statusHtml = `<div class="bag-row-status empty">Not available</div>`;
-          } else {
-            statusHtml = `<button type="button" class="bag-row-cta" onclick="openBaggageModal(${i})">Add</button>`;
-          }
-
-          return `
-            <div class="bag-row">
-              <div class="bag-row-icon">
-                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-                  <rect x="5" y="8" width="14" height="12" rx="1.5" stroke="currentColor" stroke-width="1.7"/>
-                  <path d="M9 8V5.5a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1V8" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/>
-                </svg>
-              </div>
-              <div class="bag-row-info">
-                <div class="bag-row-name">${escapeHtml(name)}</div>
-                <div class="bag-row-meta">${opts.length > 0 ? `${opts.length} option${opts.length > 1 ? 's' : ''} available` : 'Add at airline check-in'}</div>
-              </div>
-              ${statusHtml}
-            </div>
-          `;
-        }).join('');
-        sections.push(rows);
+      let statusHtml;
+      if (count > 0) {
+        statusHtml = `<div class="bag-row-status">${count} bag${count > 1 ? 's' : ''} · ${formatKes(totalForPax)}</div>
+          <button type="button" class="bag-row-cta" onclick="openBaggageModal(${i})">Change</button>`;
+      } else if (opts.length === 0) {
+        statusHtml = `<div class="bag-row-status empty">Not available</div>`;
       } else {
-        // No traveler saved yet — single card-level entry point to the
-        // picker modal. Modal falls back to "Traveler N" labels while
-        // unsaved, and any bag added here stays keyed by pax index and
-        // follows through when the passenger form saves.
-        const ctaTitle = hasIncluded ? 'Add extra bags' : 'Add bags';
-        const ctaSub = passengerCount > 1 ? 'Pick per traveler' : 'Optional';
-        sections.push(`
-          <button type="button" class="bag-add-extra-cta" onclick="openBaggageModal(0)">
-            <div class="bag-add-extra-cta-icon">
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-                <path d="M12 5v14M5 12h14" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"/>
-              </svg>
-            </div>
-            <div class="bag-add-extra-cta-text">
-              <div class="bag-add-extra-cta-title">${escapeHtml(ctaTitle)}</div>
-              <div class="bag-add-extra-cta-sub">${escapeHtml(ctaSub)}</div>
-            </div>
-          </button>
-        `);
+        statusHtml = `<button type="button" class="bag-row-cta" onclick="openBaggageModal(${i})">Add</button>`;
       }
-    }
 
-    // The per-row "Add" / "Change" buttons and the card-level CTA handle
-    // all bag-picker entry. skipBags / expandBaggageCTA / baggageCTACollapsed
-    // remain in the file as no-ops in case other sites reference them.
-    slot.innerHTML = sections.join('');
+      return `
+        <div class="bag-row">
+          <div class="bag-row-icon">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+              <rect x="5" y="8" width="14" height="12" rx="1.5" stroke="currentColor" stroke-width="1.7"/>
+              <path d="M9 8V5.5a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1V8" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/>
+            </svg>
+          </div>
+          <div class="bag-row-info">
+            <div class="bag-row-name">${escapeHtml(name)}</div>
+            <div class="bag-row-meta">${opts.length > 0 ? `${opts.length} option${opts.length > 1 ? 's' : ''} available` : 'Add at airline check-in'}</div>
+          </div>
+          ${statusHtml}
+        </div>
+      `;
+    }).join('');
+
+    // The per-row "Add" / "Change" buttons handle all bag picking. No
+    // bottom CTA group needed. skipBags / expandBaggageCTA /
+    // baggageCTACollapsed remain in the file as no-ops in case other
+    // sites reference them.
+    slot.innerHTML = rows;
   }
 
   // "Continue without bags" — collapse the upsell + 2 buttons into a subtle
