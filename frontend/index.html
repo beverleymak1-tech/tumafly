@@ -3437,6 +3437,27 @@
     }
     .bag-cta-btn:last-child { margin-right: 0; }
 
+    /* Session 28f — fare-included icons row (one line, subtle) */
+    #baggage-included-row {
+      display: flex;
+      gap: 22px;
+      margin-top: 10px;
+      flex-wrap: wrap;
+      align-items: center;
+    }
+    #baggage-included-row:empty { display: none; }
+    .bag-included-item {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 13px;
+      color: var(--ink);
+    }
+    .bag-included-item svg {
+      color: var(--brand-dark);
+      flex-shrink: 0;
+    }
+
     /* Empty / unavailable fallback inside the Baggage card */
     .bag-empty-note {
       font-size: 13px;
@@ -7181,7 +7202,8 @@
             </svg>
             <h3>Baggage</h3>
           </div>
-          <p class="sub" style="margin-top:6px;">Available baggage options for this flight. Selection may not be available on every airline; in that case extra bags can be added at check-in.</p>
+          <p class="sub" id="baggage-boilerplate-copy" style="margin-top:6px;">Available baggage options for this flight. Selection may not be available on every airline; in that case extra bags can be added at check-in.</p>
+          <div id="baggage-included-row"></div>
           <div id="baggage-list"></div>
         </div>
 
@@ -15092,22 +15114,107 @@
     return false;
   }
 
-  // Render the Baggage card body — either status rows + CTA group, or
-  // the static fallback note (mode kept identical to pre-baggage build).
+  // Small helper — pluralised short label for the fare-included icons row.
+  function bagLabelShort(type, n) {
+    if (type === 'carry_on')     return n > 1 ? 'carry-ons'     : 'carry-on';
+    if (type === 'checked')      return n > 1 ? 'checked bags'  : 'checked bag';
+    if (type === 'personal_item')return n > 1 ? 'personal items': 'personal item';
+    return (type || '').replace(/_/g, ' ');
+  }
+
+  // Small helper — inline SVG per bag type, matching the existing bag-row
+  // icon language (line-only, 1.5–1.7 stroke, currentColor).
+  function bagIconSvg(type) {
+    if (type === 'carry_on') {
+      return `<svg width="14" height="16" viewBox="0 0 20 24" fill="none" aria-hidden="true">
+        <rect x="4" y="6" width="12" height="15" rx="1.5" stroke="currentColor" stroke-width="1.5"/>
+        <path d="M8 6V3.5a1 1 0 0 1 1-1h2a1 1 0 0 1 1 1V6" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+      </svg>`;
+    }
+    if (type === 'checked') {
+      return `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+        <rect x="4" y="8" width="16" height="12" rx="1.5" stroke="currentColor" stroke-width="1.5"/>
+        <path d="M9 8V5.5a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1V8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+      </svg>`;
+    }
+    if (type === 'personal_item') {
+      return `<svg width="14" height="14" viewBox="0 0 18 18" fill="none" aria-hidden="true">
+        <path d="M3 6c0-.5.5-1 1-1h10c.5 0 1 .5 1 1v9c0 .5-.5 1-1 1H4c-.5 0-1-.5-1-1V6z" stroke="currentColor" stroke-width="1.5"/>
+        <path d="M6 5V3.5a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1V5" stroke="currentColor" stroke-width="1.5"/>
+      </svg>`;
+    }
+    return '';
+  }
+
+  // Session 28f — transform the static boilerplate copy + optional icons row
+  // once (a) a passenger has been saved AND (b) get-baggage-options has landed.
+  // Before both conditions are met, the original long boilerplate stays put
+  // as the stable loading/onboarding state.
+  //
+  // Copy transitions:
+  //   • Not saved yet OR no data       → long boilerplate (unchanged)
+  //   • Saved + fare inclusions        → "Included in this flight"
+  //   • Saved + paid options only      → "Available baggage options for this flight."
+  //   • Saved + neither                → long boilerplate (nothing to say)
+  //
+  // Icons row renders only when saved + fare inclusions, one line, sorted
+  // carry-on → personal item → checked.
+  function renderBaggageHeader() {
+    const copyEl = document.getElementById('baggage-boilerplate-copy');
+    const iconsEl = document.getElementById('baggage-included-row');
+    if (!copyEl || !iconsEl) return;
+
+    const LONG_BOILERPLATE = 'Available baggage options for this flight. Selection may not be available on every airline; in that case extra bags can be added at check-in.';
+
+    const efData = baggageOptionsByOffer[baggageOfferId] || {};
+    const includedSummary = efData.free_baggages_summary || {};
+    const includedTypes = Object.keys(includedSummary).filter(t => (includedSummary[t] || 0) > 0);
+    const hasInclusion = includedTypes.length > 0;
+    const anyPaidOptions = baggageAnyOptionsAvailable();
+    const anyTravelerSaved = travelerStates.some(s => s?.saved);
+
+    if (anyTravelerSaved && hasInclusion) {
+      copyEl.textContent = 'Included in this flight';
+    } else if (anyTravelerSaved && anyPaidOptions) {
+      copyEl.textContent = 'Available baggage options for this flight.';
+    } else {
+      copyEl.textContent = LONG_BOILERPLATE;
+    }
+
+    if (anyTravelerSaved && hasInclusion) {
+      const priority = { carry_on: 0, personal_item: 1, checked: 2 };
+      const sorted = includedTypes.slice().sort((a, b) =>
+        (priority[a] ?? 99) - (priority[b] ?? 99));
+      iconsEl.innerHTML = sorted.map(t => {
+        const n = includedSummary[t];
+        return `
+          <div class="bag-included-item">
+            ${bagIconSvg(t)}
+            <span>${n} × ${escapeHtml(bagLabelShort(t, n))}</span>
+          </div>
+        `;
+      }).join('');
+    } else {
+      iconsEl.innerHTML = '';
+    }
+  }
+
+  // Render the Baggage card body. Header (boilerplate + included icons)
+  // is refreshed in renderBaggageHeader; this fn owns only the per-pax
+  // rows below. Rows appear once (a) paid options exist AND (b) a
+  // traveler has been saved. Otherwise the slot is empty and the header
+  // above communicates the current state.
   function renderBaggageList() {
+    renderBaggageHeader();
+
     const slot = document.getElementById('baggage-list');
     if (!slot) return;
+
     if (!baggageAnyOptionsAvailable()) {
-      slot.innerHTML = `
-        <div class="bag-empty-note">
-          If you're travelling with bags, you can add them on the airline's website after completing your purchase. Additional fees may apply depending on the airline and fare.
-        </div>
-      `;
+      slot.innerHTML = '';
       return;
     }
 
-    // Status rows: one per passenger summarising their bag selection (if any).
-    // Skip unsaved/cleared slots — same rationale as renderSeatsList.
     const rows = Array.from({ length: passengerCount }).map((_, i) => {
       if (!travelerStates[i]?.saved) return '';
       const opts = baggageOptionsByPax[i] || [];
@@ -15147,10 +15254,6 @@
       `;
     }).join('');
 
-    // The per-row "Add" / "Change" buttons handle all bag picking. No
-    // bottom CTA group needed. skipBags / expandBaggageCTA /
-    // baggageCTACollapsed remain in the file as no-ops in case other
-    // sites reference them.
     slot.innerHTML = rows;
   }
 
