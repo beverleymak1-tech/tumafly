@@ -15183,10 +15183,12 @@
     const anyPaidOptions = baggageAnyOptionsAvailable();
     const anyTravelerSaved = travelerStates.some(s => s?.saved);
 
+    // Session 28f follow-up — State C uses the LONG boilerplate (not the
+    // shortened version an earlier draft had), and the "Included" line
+    // now carries a (per traveler) suffix so multi-pax bookings can't
+    // misread the pills as being the whole party's total allowance.
     if (anyTravelerSaved && hasInclusion) {
-      copyEl.textContent = 'Included in this flight';
-    } else if (anyTravelerSaved && anyPaidOptions) {
-      copyEl.textContent = 'Available baggage options for this flight.';
+      copyEl.textContent = 'Included in this flight (per traveler)';
     } else {
       copyEl.textContent = LONG_BOILERPLATE;
     }
