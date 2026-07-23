@@ -8450,6 +8450,13 @@ const TUMAFLY_WHATSAPP_WAME = '254113165503';
   let _resultsRefreshInFlight = false;           // guards _refreshParentResultsIfStale
   let _offerConsumptionChannel = null;           // BroadcastChannel instance
   let _thisTabCommittedPay = false;              // this tab clicked Pay — ignore incoming preemption
+  // Handle for the background-close setTimeout armed when a sibling
+  // broadcasts preempt-modal-shown for our active pair. If the customer
+  // activates this tab during the modal-shower's 5s window, _preemptChildTab
+  // clears this timer and paints its own modal instead — so any tab the
+  // customer actually visits gets an honest 5s explanation, while un-visited
+  // siblings die quietly per the modal-shower's original schedule.
+  let _bgCloseTimerId = null;
   // Session 28 — hoisted from ~L20443 so restoreFromUrl's #itinerary
   // branch (fires during module-eval at ~L11432) can set the target
   // PNR before onSignedIn's post-auth restore branch reads it. The
@@ -11658,6 +11665,10 @@ const TUMAFLY_WHATSAPP_WAME = '254113165503';
     _thisTabCommittedPay = false;
     try { _consumedOfferCabinPairs.clear(); } catch (_) {}
     _resultsStale = false;
+    if (_bgCloseTimerId !== null) {
+      try { clearTimeout(_bgCloseTimerId); } catch (_) {}
+      _bgCloseTimerId = null;
+    }
     showView('home');
   }
 
@@ -17696,46 +17707,6 @@ const TUMAFLY_WHATSAPP_WAME = '254113165503';
     // other entrypoint (goToPayment, restore auto-fire, resetPaymentPane)
     // from stacking a duplicate initialize-payment mid-flight.
     if (_paystackInitInFlight) return;
-    // Session 28d — parent-tab BroadcastChannel defense.
-    //
-    // Pay-click is the consumption signal. Two things happen here BEFORE
-    // any network work:
-    //
-    //   1. If our current (offer_id + cabin) has already been consumed by
-    //      a sibling tab that clicked Pay first, we preempt this tab
-    //      instead of proceeding to initialize-payment. Guards the
-    //      (rare) case where a sibling's BC message arrived between the
-    //      Card-row tap and this function running.
-    //
-    //   2. Otherwise, we post 'offer-consumed' on the BroadcastChannel so
-    //      every sibling gets preempted on its next activation. We use
-    //      the module channel instance (spec guarantees no self-receive)
-    //      and set _thisTabCommittedPay so any incoming preemption from
-    //      a slower-clicking sibling is ignored — we've locked in.
-    //
-    // Neither guarantee is perfect against millisecond-simultaneous
-    // cross-tab Pay-clicks; that residual double-charge case is caught by
-    // the async-decoupling refund path (Session 28a-c).
-    try {
-      const _active28d = selectedInbound || selectedOutbound;
-      const _pair28d = (_active28d?.cabinPricing?.offer_id && _active28d?.cabin)
-        ? _active28d.cabinPricing.offer_id + ':' + _active28d.cabin
-        : null;
-      if (_pair28d && _consumedOfferCabinPairs.has(_pair28d)) {
-        _preemptChildTab();
-        return;
-      }
-      if (_pair28d && _offerConsumptionChannel) {
-        try {
-          _offerConsumptionChannel.postMessage({
-            type: 'offer-consumed',
-            offer_id: _active28d.cabinPricing.offer_id,
-            cabin: _active28d.cabin,
-          });
-        } catch (_) {}
-      }
-      _thisTabCommittedPay = true;
-    } catch (_) { /* selection missing — let the existing code path handle it */ }
     _paystackInitInFlight = true;
     clearAlert('payment-alert');
     const btn = document.getElementById('card-start-btn');
@@ -17999,6 +17970,57 @@ const TUMAFLY_WHATSAPP_WAME = '254113165503';
       showAlert('payment-alert', 'Payment session lost. Please refresh and try again.');
       return;
     }
+    // Session 28d — parent-tab BroadcastChannel defense.
+    //
+    // The Card row tap is the customer-perceived "Pay" click — it's the
+    // moment the Paystack overlay opens and card entry begins. Placing
+    // the consumption signal here (rather than at the earlier
+    // startCardPayment / initialize-payment step) means:
+    //
+    //   - A customer who clicks Continue-to-Payment then backs out
+    //     without tapping Card does NOT preempt siblings. Fewer false
+    //     positives.
+    //   - Siblings are still preempted from the earliest point at which
+    //     THIS tab could actually charge — one step before the Paystack
+    //     modal renders.
+    //
+    // All entry paths to the Paystack overlay go through this function
+    // (fresh Continue → Card tap → cached access_code → here; restore
+    // path → Card tap → _paystackOpenOnReady → here on init resolve;
+    // quick-Card path with cached code → Card tap → here). So this is
+    // the single choke point for the consumption signal.
+    //
+    // Pre-guard: if a sibling has ALREADY consumed our (offer_id, cabin)
+    // pair while we were mid-flow (BC message arrived between visibility
+    // and Card tap), preempt this tab instead of opening Paystack.
+    //
+    // Emit: post 'offer-consumed' so siblings get preempted on their
+    // next activation. Use the module channel instance — spec guarantees
+    // no self-receive. Set _thisTabCommittedPay so any incoming
+    // preemption from a slower-clicking sibling is ignored.
+    //
+    // Residual: millisecond-simultaneous Card taps in two tabs both slip
+    // past the pre-guard — backend refunds the loser via 28a-c.
+    try {
+      const _active28d = selectedInbound || selectedOutbound;
+      const _pair28d = (_active28d?.cabinPricing?.offer_id && _active28d?.cabin)
+        ? _active28d.cabinPricing.offer_id + ':' + _active28d.cabin
+        : null;
+      if (_pair28d && _consumedOfferCabinPairs.has(_pair28d)) {
+        _preemptChildTab();
+        return;
+      }
+      if (_pair28d && _offerConsumptionChannel) {
+        try {
+          _offerConsumptionChannel.postMessage({
+            type: 'offer-consumed',
+            offer_id: _active28d.cabinPricing.offer_id,
+            cabin: _active28d.cabin,
+          });
+        } catch (_) {}
+      }
+      _thisTabCommittedPay = true;
+    } catch (_) { /* selection missing — let the existing code path handle it */ }
     try {
       const popup = new PaystackPop();
       _paystackHandle = popup;
@@ -19902,12 +19924,43 @@ const TUMAFLY_WHATSAPP_WAME = '254113165503';
     _offerConsumptionChannel = new BroadcastChannel(OFFER_CONSUMPTION_CHANNEL);
     _offerConsumptionChannel.onmessage = (ev) => {
       const msg = ev?.data;
-      if (!msg || msg.type !== 'offer-consumed') return;
+      if (!msg) return;
+      // This tab already committed to its own Pay — a slower sibling's BC
+      // message cannot yank us out of an in-flight payment, and a modal-
+      // shower's preempt-modal-shown must not schedule a bg-close on the
+      // paying tab (which is showing State 1 confirmation).
+      if (_thisTabCommittedPay) return;
+      // preempt-modal-shown: a sibling has already painted the "This fare
+      // is no longer available" modal for this pair. If our own active
+      // selection matches, schedule a background silent-close ~5s from now
+      // — synchronised with the modal-shower's own close — so we die
+      // together and the customer doesn't have to hunt each tab down.
+      //
+      // If the customer activates this tab during the window,
+      // _preemptChildTab cancels this timer (clearTimeout) and paints its
+      // own honest 5s modal instead: presence at a tab earns explanation.
+      //
+      // Duplicate posts (multiple siblings each posting on their own
+      // activation) leave the FIRST timer alone — we want to close per the
+      // original modal-shower's schedule, not drift later each time a new
+      // sibling activates.
+      if (msg.type === 'preempt-modal-shown') {
+        if (typeof msg.pair !== 'string' || !msg.pair) return;
+        const active = selectedInbound || selectedOutbound;
+        const activePair = (active?.cabinPricing?.offer_id && active?.cabin)
+          ? active.cabinPricing.offer_id + ':' + active.cabin
+          : null;
+        if (activePair !== msg.pair) return;
+        if (_bgCloseTimerId !== null) return;   // first-post wins
+        _bgCloseTimerId = setTimeout(() => {
+          _bgCloseTimerId = null;
+          try { _silentCloseSibling(); } catch (_) {}
+        }, 5000);
+        return;
+      }
+      if (msg.type !== 'offer-consumed') return;
       if (typeof msg.offer_id !== 'string' || !/^off_[A-Za-z0-9]+$/.test(msg.offer_id)) return;
       if (typeof msg.cabin !== 'string' || !msg.cabin) return;
-      // This tab already committed to its own Pay — a slower sibling's
-      // BC message cannot yank us out of an in-flight payment.
-      if (_thisTabCommittedPay) return;
       const pair = msg.offer_id + ':' + msg.cabin;
       if (_consumedOfferCabinPairs.has(pair)) return;  // idempotent
       _consumedOfferCabinPairs.add(pair);
@@ -19936,15 +19989,30 @@ const TUMAFLY_WHATSAPP_WAME = '254113165503';
     // is a payment winner, not a sibling to preempt.
   }
 
-  // Sibling on #booking or #payment whose active offer_id + cabin was just
-  // consumed. Modal + 5s dwell + close tab. Non-PII form data is stashed to
-  // localStorage first so the next fresh #booking entry can restore it.
+  // Sibling on #booking or #payment whose active offer_id + cabin was
+  // just consumed AND that the customer has activated (foregrounded).
+  // Paints the "This fare is no longer available" modal, posts
+  // preempt-modal-shown to broadcast to other siblings, waits 5s, then
+  // closes. Presence at a tab earns the honest explanation.
+  //
+  // If a bg-close timer was armed by a prior preempt-modal-shown receipt
+  // (this tab was going to die quietly per the modal-shower's schedule),
+  // cancel it — we're the shower now, our own 5s dwell replaces it.
+  //
+  // Un-activated siblings never reach this function; they get
+  // _silentCloseSibling via the BC listener's setTimeout instead.
   //
   // Modal reuses the .search-loading-backdrop / .search-loading-card
   // mechanic (same shell as showSearchLoading, showSearchExpiredModal,
   // _showPriceDriftModal — consistency by design).
   function _preemptChildTab() {
     if (document.getElementById('fare-consumed-modal')) return;
+    // Customer activated us — cancel any bg-close that was pending; we
+    // handle the close ourselves through the modal timer below.
+    if (_bgCloseTimerId !== null) {
+      try { clearTimeout(_bgCloseTimerId); } catch (_) {}
+      _bgCloseTimerId = null;
+    }
     // Kill any open Paystack modal — customer must not complete a charge
     // on an offer that's now consumed elsewhere.
     try { _cancelPaystackModalOnFareExpiry(); } catch (_) {}
@@ -19959,6 +20027,21 @@ const TUMAFLY_WHATSAPP_WAME = '254113165503';
     // Wipe transient shadows so a subsequent boot in this tab doesn't
     // silently resurrect stale intent. Session 28c helper.
     try { _wipeTerminalStash(); } catch (_) {}
+
+    // Broadcast that we're painting the modal — so backgrounded siblings
+    // whose pair matches will arm their bg-close timers per this schedule.
+    const _active = selectedInbound || selectedOutbound;
+    const _activePair = (_active?.cabinPricing?.offer_id && _active?.cabin)
+      ? _active.cabinPricing.offer_id + ':' + _active.cabin
+      : null;
+    if (_activePair && _offerConsumptionChannel) {
+      try {
+        _offerConsumptionChannel.postMessage({
+          type: 'preempt-modal-shown',
+          pair: _activePair,
+        });
+      } catch (_) {}
+    }
 
     const modal = document.createElement('div');
     modal.id = 'fare-consumed-modal';
@@ -20007,6 +20090,38 @@ const TUMAFLY_WHATSAPP_WAME = '254113165503';
         }
       }, 500);
     }, 5000);
+  }
+
+  // Un-visited sibling whose active pair was consumed and whose bg-close
+  // timer just fired. No modal, no dwell — just silent cleanup + close.
+  // Called ONLY from the BC listener's setTimeout that fires 5s after
+  // preempt-modal-shown arrives with a matching pair. If the customer
+  // activated us during that window, _preemptChildTab already cancelled
+  // the timer and this function never runs.
+  //
+  // Same cleanup shape as _preemptChildTab's modal path — Paystack kill,
+  // in-flight surface cancel, non-PII stash, terminal wipe — then
+  // window.close(). Fallback for opener-less tabs: silent refresh to
+  // #results in same tab, matching the modal-path fallback.
+  function _silentCloseSibling() {
+    if (document.getElementById('fare-consumed-modal')) return;   // safety
+    try { _cancelPaystackModalOnFareExpiry(); } catch (_) {}
+    try { _paystackAccessCode = null; } catch (_) {}
+    try { _paystackOpenOnReady = false; } catch (_) {}
+    try { _paystackInitInFlight = false; } catch (_) {}
+    try { _stashSiblingRecovery(); } catch (_) {}
+    try { _wipeTerminalStash(); } catch (_) {}
+    let closed = false;
+    try { window.close(); closed = true; } catch (_) {}
+    setTimeout(() => {
+      if (closed) return;
+      try {
+        _resultsStale = true;
+        _refreshParentResultsIfStale({ userInitiated: true });
+      } catch (_) {
+        try { showView('home'); } catch (__) {}
+      }
+    }, 100);
   }
 
   // Parent on #results (or a child that failed to close). Silent re-run
