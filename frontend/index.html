@@ -1345,19 +1345,47 @@
          uses inset:0 so it's naturally bounded to hero anyway. */
     }
     .hero::before {
-      /* subtle horizon line — the one decorative element */
+      /* Warm-light atmosphere layer. Two soft warm highlights (upper-left
+         and mid, behind the search card), a subtle cool horizon at the
+         bottom, and an edge vignette in a warm brown so the corners feel
+         gently held rather than sharply cut. All rgba over transparent,
+         so it composites cleanly on top of --sand without changing it.
+         z-index: 0 pairs with .hero-inner's z-index: 1 to sit behind
+         content. pointer-events: none so it never eats clicks (the
+         travelers popup and pill fields extend beyond the card's box
+         and must remain interactive). */
       content: '';
       position: absolute;
       inset: 0;
       background:
-        radial-gradient(ellipse 80% 60% at 50% 100%, rgba(61, 149, 245, 0.06), transparent 70%);
+        radial-gradient(ellipse 70% 50% at 25% 15%, rgba(255, 244, 224, 0.7), transparent 60%),
+        radial-gradient(ellipse 60% 45% at 55% 60%, rgba(255, 248, 235, 0.55), transparent 65%),
+        radial-gradient(ellipse 80% 55% at 50% 100%, rgba(61, 149, 245, 0.08), transparent 70%),
+        radial-gradient(ellipse 120% 100% at 50% 50%, transparent 55%, rgba(180, 150, 100, 0.12) 100%);
       pointer-events: none;
+      z-index: 0;
+    }
+    .hero::after {
+      /* Grain layer. SVG turbulence at very low opacity, multiplied into
+         the sand — invisible individually but reads as "surface" rather
+         than a digital swatch. Kept as an inline data-URI so there's no
+         extra network fetch. Same pointer-events / z-index rules as
+         ::before above. */
+      content: '';
+      position: absolute;
+      inset: 0;
+      background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='200' height='200'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/><feColorMatrix values='0 0 0 0 0.4 0 0 0 0 0.3 0 0 0 0 0.2 0 0 0 0.5 0'/></filter><rect width='100%25' height='100%25' filter='url(%23n)'/></svg>");
+      opacity: 0.07;
+      mix-blend-mode: multiply;
+      pointer-events: none;
+      z-index: 0;
     }
     .hero-inner {
       max-width: var(--container);
       margin: 0 auto;
       padding: 0 24px;
       position: relative;
+      z-index: 1; /* sits above .hero::before and .hero::after atmosphere layers */
     }
     .hero-title {
       font-size: clamp(34px, 5.5vw, 56px);
@@ -1380,11 +1408,98 @@
     }
 
     .search {
-      background: var(--surface);
+      /* Frosted-glass card. Translucent white base + backdrop-filter blurs
+         whatever's behind the card (the warm sand + light layers), so the
+         card feels nested in the scene rather than pasted on top. The
+         inset top highlight is what gives it the "polished edge" that
+         reads as glass rather than just "transparent panel". Warm shadow
+         (brownish alpha) replaces the standard cool --shadow-lg so the
+         card's ground-shadow matches the sand around it. */
+      background: rgba(255, 255, 255, 0.55);
+      backdrop-filter: blur(24px) saturate(1.4);
+      -webkit-backdrop-filter: blur(24px) saturate(1.4);
       border-radius: var(--radius-lg);
       padding: 24px;
-      box-shadow: var(--shadow-lg);
-      border: 1px solid var(--border);
+      box-shadow:
+        0 20px 50px rgba(90, 70, 40, 0.10),
+        0 2px 8px rgba(90, 70, 40, 0.05),
+        inset 0 1px 0 rgba(255, 255, 255, 0.8);
+      border: 1px solid rgba(255, 255, 255, 0.7);
+    }
+    /* Fallback for browsers without backdrop-filter (older Android WebView,
+       some corporate IE-descendants). Bumps the white opacity so text and
+       form fields stay readable when there's no blur happening. */
+    @supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+      .search {
+        background: rgba(255, 255, 255, 0.92);
+      }
+    }
+    /* ─────────────────────────────────────────────────────────────
+       Home search card — inner field styling for the glass card.
+       Scoped under .search so the results-page summary bar
+       (.summary-bar .sf) and edit-search modal — which reuse
+       .from-to-pill / .field input / .tp-trigger — keep their
+       existing opaque, bordered look. Three things happening:
+         1. Solid white backgrounds drop to rgba white so inner
+            fields don't punch bright rectangles through the frost.
+         2. Outer borders removed so fields don't outline as boxes.
+            The internal From/To divider is kept and sharpened just
+            enough to still read over glass, so the pill visibly
+            splits into two fields — swap button position unchanged.
+         3. Placeholder text is normalised to one contrast value
+            across text inputs and native date inputs (the two had
+            drifted apart because the date-input mask is browser-
+            rendered).
+       ───────────────────────────────────────────────────────────── */
+    .search .from-to-pill,
+    .search .field input,
+    .search .field select,
+    .search .tp-trigger {
+      background: rgba(255, 255, 255, 0.5);
+      border: none;
+    }
+    /* Sharpen the From/To divider so it survives over glass —
+       var(--border) (#E5E9EF) all but disappears against a
+       translucent field on warm sand. rgba ink at 12% stays
+       "the tiniest bit" without becoming a hard line. */
+    .search .from-to-pill .ft-field + .ft-field {
+      border-left-color: rgba(15, 25, 35, 0.12);
+    }
+    /* Uniform placeholder contrast. Text inputs get an explicit
+       rgba(ink, 0.4); the date-input's native mm/dd/yyyy mask
+       inherits from the input's color property at ~40-50% opacity
+       in Chrome/Safari, so setting the input's color to a slightly
+       muted tone brings the two visually in line without touching
+       ::-webkit-datetime-edit internals (which are inconsistent
+       across browser versions). */
+    .search .from-to-pill .ft-field input::placeholder,
+    .search .field input::placeholder {
+      color: rgba(15, 25, 35, 0.4);
+      font-weight: 400;
+    }
+    /* Focus washes bumped in opacity so they still read as "this is
+       the active field" against the glass — the underlying rules use
+       solid var(--brand-soft) which would look like a punched-through
+       blue rectangle on the frosted card. */
+    .search .from-to-pill .ft-field:focus-within {
+      background: rgba(232, 243, 255, 0.75);
+    }
+    .search .field input:focus,
+    .search .field select:focus {
+      background: rgba(232, 243, 255, 0.85);
+    }
+    .search .tp-trigger.open {
+      background: rgba(232, 243, 255, 0.85);
+    }
+    /* Matching fallback — when there's no backdrop-filter, the card
+       itself is near-opaque, so inner fields should be too. */
+    @supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+      .search .from-to-pill,
+      .search .field input,
+      .search .field select,
+      .search .tp-trigger {
+        background: rgba(255, 255, 255, 0.92);
+      }
     }
     .search-tabs {
       display: flex;
