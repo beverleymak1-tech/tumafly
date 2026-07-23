@@ -8426,6 +8426,30 @@ const TUMAFLY_WHATSAPP_WAME = '254113165503';
   // (which still works fine).
   let activePendingBookingId = null;
   let activeGuestToken = null;
+  // Session 28d — Parent-tab BroadcastChannel defense.
+  //
+  // When a sibling tab commits to Pay (top of startCardPayment) it posts an
+  // 'offer-consumed' message on the OFFER_CONSUMPTION_CHANNEL BroadcastChannel.
+  // Every other tab in the same origin receives it and marks the pair
+  // (offer_id + cabin) as consumed. On next activation, tabs whose active
+  // selection matches a consumed pair get preempted: siblings on
+  // #booking/#payment see a modal → 5s dwell → window.close(); a parent on
+  // #results silently reruns runSearch(lastSearchParams) with the same
+  // "Comparing fares…" modal + shimmer as F5-on-results, and shows a toast.
+  //
+  // _thisTabCommittedPay locks a tab that has itself clicked Pay so an
+  // incoming preemption message from a slower-clicking sibling can't yank
+  // this tab out from under a legitimate in-flight payment.
+  //
+  // Neither guarantee is perfect against millisecond-simultaneous cross-tab
+  // Pay-clicks; the residual double-charge case is caught by the backend
+  // async-decoupling refund path (Session 28a-c).
+  const OFFER_CONSUMPTION_CHANNEL = 'tumafly-offer-consumption';
+  let _consumedOfferCabinPairs = new Set();      // "off_XXX:economy"
+  let _resultsStale = false;                     // true after any consumption message
+  let _resultsRefreshInFlight = false;           // guards _refreshParentResultsIfStale
+  let _offerConsumptionChannel = null;           // BroadcastChannel instance
+  let _thisTabCommittedPay = false;              // this tab clicked Pay — ignore incoming preemption
   // Session 28 — hoisted from ~L20443 so restoreFromUrl's #itinerary
   // branch (fires during module-eval at ~L11432) can set the target
   // PNR before onSignedIn's post-auth restore branch reads it. The
@@ -9942,6 +9966,10 @@ const TUMAFLY_WHATSAPP_WAME = '254113165503';
       } catch (e) { console.warn('[restoreBooking] prefill failed:', e); }
     })();
     readGuestPrefill();
+    // Session 28d — cross-tab recovery from a sibling that was preempted.
+    // Ordered after profile + guest_prefill so those win on fields they own;
+    // this only fills what remains empty.
+    try { readSiblingRecovery(); } catch (_) {}
     (async () => {
       try {
         await fetchSavedTravelers();
@@ -11624,6 +11652,12 @@ const TUMAFLY_WHATSAPP_WAME = '254113165503';
     // session is over. Without this, a subsequent #payment refresh would
     // resurrect the dead offer.
     try { clearPaymentReturn(); } catch (_) {}
+    // Session 28d — full reset also re-arms the BroadcastChannel defense.
+    // "Book another trip" from a confirmed state must not carry a stale
+    // consumed set or a set commit-flag into the fresh selection.
+    _thisTabCommittedPay = false;
+    try { _consumedOfferCabinPairs.clear(); } catch (_) {}
+    _resultsStale = false;
     showView('home');
   }
 
@@ -14348,6 +14382,133 @@ const TUMAFLY_WHATSAPP_WAME = '254113165503';
     }
   }
 
+  // ── Session 28d — cross-tab sibling recovery ──────────────────────
+  //
+  // Written by _preemptChildTab immediately before window.close(). Restores
+  // typed contact + traveler data (names/gender/nationality only — DOB and
+  // passport intentionally excluded per KE DPA / GDPR, same whitelist as
+  // stashGuestPrefill) when the user picks another cabin from #results and
+  // a fresh child tab boots into #booking.
+  //
+  // localStorage (cross-tab) rather than sessionStorage (tab-scoped), because
+  // the whole point is to survive the tab close. TTL 4h so a stale stash from
+  // yesterday's abandoned session can't leak into a fresh booking. Consume-
+  // once semantics on read — if the user backs out without paying we prefer
+  // "user re-types" over "stale data lingering".
+  //
+  // Applies to both guests AND signed-in users (unlike readGuestPrefill,
+  // which is gated on !currentUser). A signed-in user booking for a friend
+  // as a non-saved traveler should still recover that friend's typed name.
+  const SIBLING_RECOVERY_KEY = 'tumafly:sibling_recovery';
+  const SIBLING_RECOVERY_TTL_MS = 4 * 60 * 60 * 1000;   // 4h
+
+  function _stashSiblingRecovery() {
+    try {
+      const contactEmailEl = document.getElementById('contact-email');
+      const contactPhoneEl = document.getElementById('contact-phone');
+      const phoneCC = countryPickerState.contact?.iso || 'KE';
+      const travelers = (travelerStates || []).map(t => {
+        const d = t?.data || {};
+        // Explicit whitelist — never a spread. Mirrors stashGuestPrefill
+        // L14260-14264. Excludes born_on + passport.
+        return {
+          title:       d.title       || 'mr',
+          given_name:  d.given_name  || '',
+          middle_name: d.middle_name || '',
+          family_name: d.family_name || '',
+          gender:      d.gender      || '',
+          nationality: d.nationality || '',
+        };
+      });
+      const payload = {
+        contact: {
+          email:        (contactData && contactData.email) || contactEmailEl?.value.trim() || '',
+          phone_number: (contactData && contactData.phone_number) || contactPhoneEl?.value.trim() || '',
+          phone_iso:    phoneCC,
+        },
+        travelers,
+        stashed_at: Date.now(),
+      };
+      // Only write if there's anything to recover — avoids polluting the key
+      // with empty payloads that would just be discarded on read.
+      const hasContact = payload.contact.email || payload.contact.phone_number;
+      const hasNames = travelers.some(t => t.given_name || t.family_name);
+      if (!hasContact && !hasNames) return;
+      localStorage.setItem(SIBLING_RECOVERY_KEY, JSON.stringify(payload));
+    } catch (_) { /* localStorage disabled / quota — quiet no-op */ }
+  }
+
+  function readSiblingRecovery() {
+    try {
+      const raw = localStorage.getItem(SIBLING_RECOVERY_KEY);
+      if (!raw) return;
+      const data = JSON.parse(raw);
+      if (!data || typeof data.stashed_at !== 'number') {
+        localStorage.removeItem(SIBLING_RECOVERY_KEY);
+        return;
+      }
+      if (Date.now() - data.stashed_at > SIBLING_RECOVERY_TTL_MS) {
+        localStorage.removeItem(SIBLING_RECOVERY_KEY);
+        return;
+      }
+      // Consume-once: clear on read so a re-search or navigation doesn't
+      // resurrect the same stash. If the user cancels back without paying,
+      // re-typing is cheaper than sticky stale prefill.
+      localStorage.removeItem(SIBLING_RECOVERY_KEY);
+
+      // Contact — only fill empty fields (never clobber user input).
+      const emailEl = document.getElementById('contact-email');
+      const phoneEl = document.getElementById('contact-phone');
+      if (emailEl && !emailEl.value && data.contact?.email) {
+        emailEl.value = data.contact.email;
+      }
+      if (phoneEl && !phoneEl.value && data.contact?.phone_number) {
+        // Same longest-prefix dial-code match as readGuestPrefill L14300-14314.
+        const source = data.contact.phone_number;
+        const e164 = source.startsWith('+')
+          ? source
+          : '+' + source.replace(/\D/g, '');
+        const matched = [...PHONE_COUNTRIES]
+          .sort((a, b) => b[2].length - a[2].length)
+          .find(c => e164.startsWith(c[2]));
+        if (matched) {
+          countryPickerState['contact'] = { iso: matched[0], name: matched[1], dial: matched[2] };
+          applyCountrySelection('contact', countryPickerState['contact']);
+          phoneEl.value = e164.slice(matched[2].length);
+        } else {
+          phoneEl.value = e164.replace(/\D/g, '');
+        }
+      }
+
+      // Travelers — fill up to min(cached, current). Non-clobbering: skip
+      // any traveler slot that already has typed data (given/family/DOB) or
+      // that is already marked saved.
+      const cachedCount = Array.isArray(data.travelers) ? data.travelers.length : 0;
+      const N = Math.min(cachedCount, (travelerStates || []).length);
+      let anyFilled = false;
+      for (let i = 0; i < N; i++) {
+        const ts = travelerStates[i];
+        if (!ts || ts.saved) continue;
+        const cur = ts.data || {};
+        if (cur.given_name || cur.family_name || cur.born_on) continue;
+        const fp = data.travelers[i] || {};
+        ts.data = {
+          ...cur,
+          title:       fp.title       || cur.title || 'mr',
+          given_name:  fp.given_name  || '',
+          middle_name: fp.middle_name || '',
+          family_name: fp.family_name || '',
+          gender:      fp.gender      || '',
+          nationality: fp.nationality || '',
+        };
+        anyFilled = true;
+      }
+      if (anyFilled && typeof renderPassengerForms === 'function') renderPassengerForms();
+    } catch (e) {
+      console.warn('[sibling_recovery] read failed:', e);
+    }
+  }
+
   function proceedToBooking() {
     // Reset any expired-fare state from a prior offer. proceedToBooking is
     // called when the user picks a fresh flight from results, so we know the
@@ -14427,6 +14588,9 @@ const TUMAFLY_WHATSAPP_WAME = '254113165503';
     // D5: Guest fallback — if no signed-in user, pre-fill from localStorage
     // (last booking's contact + first traveler). Quiet no-op for fresh devices.
     readGuestPrefill();
+    // Session 28d — cross-tab sibling recovery. Consume-once; runs for both
+    // guest and signed-in users. Non-clobbering: only fills empty fields.
+    try { readSiblingRecovery(); } catch (_) {}
     // Fetch the user's saved_travelers (if signed in) so the per-card "Use a
     // saved traveler" picker can render. When the list lands, re-render the
     // forms — picker is hidden when the user has none.
@@ -17532,6 +17696,46 @@ const TUMAFLY_WHATSAPP_WAME = '254113165503';
     // other entrypoint (goToPayment, restore auto-fire, resetPaymentPane)
     // from stacking a duplicate initialize-payment mid-flight.
     if (_paystackInitInFlight) return;
+    // Session 28d — parent-tab BroadcastChannel defense.
+    //
+    // Pay-click is the consumption signal. Two things happen here BEFORE
+    // any network work:
+    //
+    //   1. If our current (offer_id + cabin) has already been consumed by
+    //      a sibling tab that clicked Pay first, we preempt this tab
+    //      instead of proceeding to initialize-payment. Guards the
+    //      (rare) case where a sibling's BC message arrived between the
+    //      Card-row tap and this function running.
+    //
+    //   2. Otherwise, we post 'offer-consumed' on the BroadcastChannel so
+    //      every sibling gets preempted on its next activation. We use
+    //      the module channel instance (spec guarantees no self-receive)
+    //      and set _thisTabCommittedPay so any incoming preemption from
+    //      a slower-clicking sibling is ignored — we've locked in.
+    //
+    // Neither guarantee is perfect against millisecond-simultaneous
+    // cross-tab Pay-clicks; that residual double-charge case is caught by
+    // the async-decoupling refund path (Session 28a-c).
+    try {
+      const _active28d = selectedInbound || selectedOutbound;
+      const _pair28d = (_active28d?.cabinPricing?.offer_id && _active28d?.cabin)
+        ? _active28d.cabinPricing.offer_id + ':' + _active28d.cabin
+        : null;
+      if (_pair28d && _consumedOfferCabinPairs.has(_pair28d)) {
+        _preemptChildTab();
+        return;
+      }
+      if (_pair28d && _offerConsumptionChannel) {
+        try {
+          _offerConsumptionChannel.postMessage({
+            type: 'offer-consumed',
+            offer_id: _active28d.cabinPricing.offer_id,
+            cabin: _active28d.cabin,
+          });
+        } catch (_) {}
+      }
+      _thisTabCommittedPay = true;
+    } catch (_) { /* selection missing — let the existing code path handle it */ }
     _paystackInitInFlight = true;
     clearAlert('payment-alert');
     const btn = document.getElementById('card-start-btn');
@@ -19099,6 +19303,14 @@ const TUMAFLY_WHATSAPP_WAME = '254113165503';
     // Reset the Paystack access code so a fresh booking in the same
     // tab doesn't accidentally reuse a stale modal handle.
     try { _paystackAccessCode = null; } catch (_) {}
+    // Session 28d — re-arm the BroadcastChannel defense for the next booking
+    // in this tab. Consumed-set intentionally NOT cleared here — a paired
+    // "offer-consumed" that arrived just before terminal may still refer to
+    // an offer the user might click again from #results; letting the set
+    // survive across the transition keeps the guard honest until they pick
+    // a fresh offer (which is a fresh offer_id, hence fresh pair, hence
+    // guaranteed no false-positive block).
+    _thisTabCommittedPay = false;
   }
 
   function _phaseCopyFor(elapsedSeconds) {
@@ -19652,6 +19864,222 @@ const TUMAFLY_WHATSAPP_WAME = '254113165503';
         if (typeof loadItinerary === 'function') loadItinerary(_pnr);
       })
       .catch(e => console.warn('[itinerary] visibility restore-load failed:', e));
+  });
+
+  // ═══════════════════════════════════════════════════════════════════════
+  // Session 28d — Parent-tab BroadcastChannel defense
+  //
+  // Failure mode addressed: when a customer opens N tabs of the same fare
+  // (e.g., commitOfferInNewTab spawns a child, customer clicks the same
+  // cabin in the parent again), only one can win at Duffel. Previously
+  // the second (offer_id, cabin) submission at process-duffel-booking
+  // returned 502 airline_unknown and the async decoupling refunded the
+  // loser — customer got charged twice with the second refunded in 3-5
+  // business days.
+  //
+  // Design (see TumaFly_Handoff_Session28f_Closeout §7 → 28d recommendation):
+  //   - Consumption fires at Pay-click (top of startCardPayment above),
+  //     posted via _offerConsumptionChannel.
+  //   - Every OTHER tab (guarded by _thisTabCommittedPay) receives it.
+  //   - On activation (visibilitychange → visible), tabs whose active
+  //     selection matches a consumed pair get preempted per view:
+  //       #booking / #payment  →  modal + 5s dwell + window.close()
+  //       #results             →  runSearch(lastSearchParams) + toast
+  //
+  // Cross-tab typed-data recovery:
+  //   - _preemptChildTab calls _stashSiblingRecovery before close so the
+  //     customer's typed non-PII (contact + names/gender/nationality) is
+  //     preserved for the next fresh #booking entry.
+  //
+  // Residual gaps (documented, not fixed here):
+  //   - Millisecond-simultaneous Pay-clicks in two tabs both slip past the
+  //     pre-guard → both charge, backend refunds the loser via 28a-c.
+  //   - Sibling tab reloaded after a Pay elsewhere but before its own
+  //     activation loses in-memory _consumedOfferCabinPairs → on reload
+  //     it re-enters #booking with a stale offer, submits, backend refunds.
+  // ═══════════════════════════════════════════════════════════════════════
+  try {
+    _offerConsumptionChannel = new BroadcastChannel(OFFER_CONSUMPTION_CHANNEL);
+    _offerConsumptionChannel.onmessage = (ev) => {
+      const msg = ev?.data;
+      if (!msg || msg.type !== 'offer-consumed') return;
+      if (typeof msg.offer_id !== 'string' || !/^off_[A-Za-z0-9]+$/.test(msg.offer_id)) return;
+      if (typeof msg.cabin !== 'string' || !msg.cabin) return;
+      // This tab already committed to its own Pay — a slower sibling's
+      // BC message cannot yank us out of an in-flight payment.
+      if (_thisTabCommittedPay) return;
+      const pair = msg.offer_id + ':' + msg.cabin;
+      if (_consumedOfferCabinPairs.has(pair)) return;  // idempotent
+      _consumedOfferCabinPairs.add(pair);
+      _resultsStale = true;
+      _handleConsumptionIfRelevant(pair);
+    };
+  } catch (_) { /* BroadcastChannel unavailable (very old browser) */ }
+
+  function _handleConsumptionIfRelevant(pair) {
+    // Deferred handling: if we're backgrounded, let the visibilitychange
+    // backstop below fire when the user returns to this tab. This is the
+    // canonical case — sibling tab paid while this one was hidden.
+    if (document.visibilityState !== 'visible') return;
+    const view = document.body.getAttribute('data-view');
+    if (view === 'booking' || view === 'payment') {
+      const active = selectedInbound || selectedOutbound;
+      const activePair = (active?.cabinPricing?.offer_id && active?.cabin)
+        ? active.cabinPricing.offer_id + ':' + active.cabin
+        : null;
+      if (activePair === pair) _preemptChildTab();
+    } else if (view === 'results') {
+      _refreshParentResultsIfStale();
+    }
+    // Other views (#home, #my-trips, #profile, #itinerary, #success) — no
+    // action. #success is deliberately excluded: the tab that landed there
+    // is a payment winner, not a sibling to preempt.
+  }
+
+  // Sibling on #booking or #payment whose active offer_id + cabin was just
+  // consumed. Modal + 5s dwell + close tab. Non-PII form data is stashed to
+  // localStorage first so the next fresh #booking entry can restore it.
+  //
+  // Modal reuses the .search-loading-backdrop / .search-loading-card
+  // mechanic (same shell as showSearchLoading, showSearchExpiredModal,
+  // _showPriceDriftModal — consistency by design).
+  function _preemptChildTab() {
+    if (document.getElementById('fare-consumed-modal')) return;
+    // Kill any open Paystack modal — customer must not complete a charge
+    // on an offer that's now consumed elsewhere.
+    try { _cancelPaystackModalOnFareExpiry(); } catch (_) {}
+    // Cancel any in-flight payment surface.
+    try { _paystackAccessCode = null; } catch (_) {}
+    try { _paystackOpenOnReady = false; } catch (_) {}
+    try { _paystackInitInFlight = false; } catch (_) {}
+    // Stash typed non-PII (names, contact) BEFORE wiping shadows. The
+    // helper writes contact + all-N travelers with an explicit whitelist
+    // that excludes born_on and passport.
+    try { _stashSiblingRecovery(); } catch (_) {}
+    // Wipe transient shadows so a subsequent boot in this tab doesn't
+    // silently resurrect stale intent. Session 28c helper.
+    try { _wipeTerminalStash(); } catch (_) {}
+
+    const modal = document.createElement('div');
+    modal.id = 'fare-consumed-modal';
+    modal.className = 'search-loading-backdrop';
+    modal.setAttribute('role', 'alert');
+    modal.setAttribute('aria-live', 'assertive');
+    modal.innerHTML = `
+      <div class="search-loading-card" style="max-width:400px;text-align:center;">
+        <div style="display:flex;justify-content:center;margin-bottom:14px;">
+          <div style="width:48px;height:48px;border-radius:50%;background:var(--brand-soft,#e8f3ff);display:flex;align-items:center;justify-content:center;">
+            <svg width="26" height="26" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+              <path d="M12 6v6l4 2" stroke="var(--brand,#3D95F5)" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+              <circle cx="12" cy="12" r="9" stroke="var(--brand,#3D95F5)" stroke-width="1.8"/>
+            </svg>
+          </div>
+        </div>
+        <div style="font-size:18px;font-weight:600;color:var(--ink,#0F1923);margin-bottom:8px;">
+          This fare is no longer available
+        </div>
+        <div style="font-size:14px;color:var(--text-2,#4A5568);line-height:1.5;">
+          It was just booked in another tab. Refreshing your search…
+        </div>
+      </div>
+    `;
+    document.body.appendChild(modal);
+    // 5s dwell — long enough to read + register what happened, short
+    // enough to not feel stuck. No dismiss button (this is honest work,
+    // not a gate). Then attempt window.close.
+    setTimeout(() => {
+      let closed = false;
+      try { window.close(); closed = true; } catch (_) {}
+      // Browsers refuse window.close() on tabs the script didn't open
+      // (e.g., user typed the URL, opener-less popup, some mobile).
+      // Fallback: strip the modal, silently re-run the last search, and
+      // land the user on #results — per Session 28d design (fallback = #results).
+      setTimeout(() => {
+        if (closed) return;
+        if (!document.getElementById('fare-consumed-modal')) return;
+        try { document.getElementById('fare-consumed-modal').remove(); } catch (_) {}
+        try {
+          _resultsStale = true;   // ensure the refresh helper runs
+          _refreshParentResultsIfStale({ userInitiated: true });
+        } catch (_) {
+          // Ultimate fallback if refresh helper throws — clean bounce home.
+          try { showView('home'); } catch (__) {}
+        }
+      }, 500);
+    }, 5000);
+  }
+
+  // Parent on #results (or a child that failed to close). Silent re-run
+  // of the last search, showing the same "Comparing fares…" modal +
+  // skeleton shimmer as F5-on-results. On success paints a top-of-results
+  // toast attributing the refresh to a sibling consumption.
+  async function _refreshParentResultsIfStale(opts = {}) {
+    if (!_resultsStale) return;
+    if (!lastSearchParams) return;
+    if (_resultsRefreshInFlight) return;
+    _resultsRefreshInFlight = true;
+    try {
+      await runSearch({
+        origin: lastSearchParams.origin,
+        destination: lastSearchParams.destination,
+        date: lastSearchParams.date,
+        returnDate: lastSearchParams.returnDate,
+        // No fromButton, no alertContainer → runSearch shows its own
+        // "Comparing fares…" modal + progress bar (showSearchLoading),
+        // and renderResults paints the skeleton shimmer. Same UX shape
+        // as F5-on-#results.
+      });
+      // Fresh offer_ids replace consumed ones — the guard's set is stale
+      // by construction. Clear both.
+      _consumedOfferCabinPairs.clear();
+      _resultsStale = false;
+      // Ensure we're actually visible on #results — if a child fell back
+      // here from a close-refused window.close(), we may still be on
+      // #booking or #payment when runSearch resolved.
+      try {
+        if (document.body.getAttribute('data-view') !== 'results') {
+          showView('results');
+        }
+      } catch (_) {}
+      // Toast: honest attribution. Uses the existing #results-alert
+      // container with the standard 'info' alert style. Auto-clears
+      // after 8s so it doesn't linger across filter interactions.
+      try {
+        if (typeof showAlert === 'function') {
+          showAlert('results-alert',
+            'Prices refreshed — the fare you had open is no longer available.',
+            'info');
+          setTimeout(() => {
+            try { clearAlert('results-alert'); } catch (_) {}
+          }, 8000);
+        }
+      } catch (_) {}
+    } catch (_) {
+      // Leave stale=true; next activation (or click) retries.
+    } finally {
+      _resultsRefreshInFlight = false;
+    }
+  }
+
+  // Backstop: on activation with a stale consumed set, preempt or refresh
+  // depending on view. Separate from the itinerary visibilitychange above.
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState !== 'visible') return;
+    if (_thisTabCommittedPay) return;
+    if (!_resultsStale) return;
+    const view = document.body.getAttribute('data-view');
+    if (view === 'booking' || view === 'payment') {
+      const active = selectedInbound || selectedOutbound;
+      const activePair = (active?.cabinPricing?.offer_id && active?.cabin)
+        ? active.cabinPricing.offer_id + ':' + active.cabin
+        : null;
+      if (activePair && _consumedOfferCabinPairs.has(activePair)) {
+        _preemptChildTab();
+      }
+    } else if (view === 'results') {
+      _refreshParentResultsIfStale();
+    }
+    // #home / #my-trips / #profile / #itinerary / #success — no action.
   });
 
   // Set to true between OTP verification and profile completion. When true,
