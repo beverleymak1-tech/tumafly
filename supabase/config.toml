@@ -495,3 +495,6 @@ verify_jwt = false
 
 [functions.mint-guest-token]
 verify_jwt = false
+
+[functions.check-offer-freshness]
+verify_jwt = false

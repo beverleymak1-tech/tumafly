@@ -12,8 +12,8 @@ const CORS_HEADERS = {
 };
 
 // ── Support contact (mirrors send-confirmation) ──────────────────────────
-const SUPPORT_WHATSAPP = "+254 798 836 069";
-const SUPPORT_WHATSAPP_LINK = "https://wa.me/254798836069";
+const SUPPORT_WHATSAPP = "+254 113 165 503";
+const SUPPORT_WHATSAPP_LINK = "https://wa.me/254113165503";
 const SUPPORT_EMAIL    = "support@tumafly.com";
 const SUPPORT_HOURS    = "Mon–Sun, 8am–8pm EAT";
 

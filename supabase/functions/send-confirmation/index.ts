@@ -10,7 +10,7 @@ const CORS_HEADERS = {
 // ── Support contact ──────────────────────────────────────────────────────
 // EDIT THESE before going live. Falsy values are silently omitted from the
 // email so it never displays placeholders to customers.
-const SUPPORT_WHATSAPP = "+254 798 836 069";                // codified TumaFly ops number (Session 24)
+const SUPPORT_WHATSAPP = "+254 113 165 503";                // codified TumaFly ops number (Session 24)
 const SUPPORT_EMAIL    = "support@tumafly.com";              // issues/help; hello@ reserved for inquiries
 const SUPPORT_HOURS    = "Mon–Sun, 8am–8pm EAT";
 
