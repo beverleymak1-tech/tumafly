@@ -2767,6 +2767,23 @@
       line-height: 1.3;
     }
 
+    /* Session 28h — Amber "Expires in Xm" badge on cabin buttons whose
+       offer.expires_at is within 5 min. Signals informed consent BEFORE
+       the customer clicks into a short-runway booking. Sits inside the
+       .fc-cabin button as a small trailing chip. */
+    .fc-cabin-expires-soon {
+      display: inline-block;
+      margin-top: 4px;
+      padding: 2px 6px;
+      background: #fef3c7;
+      color: #92400e;
+      border-radius: 3px;
+      font-size: 10px;
+      font-weight: 600;
+      line-height: 1.2;
+      white-space: nowrap;
+    }
+
     .fc-expand {
       margin-top: 10px;
       text-align: right;
@@ -8621,6 +8638,19 @@ const TUMAFLY_WHATSAPP_WAME = '254113165503';
   let _consumedOfferCabinPairs = new Set();      // "off_XXX:economy"
   let _resultsStale = false;                     // true after any consumption message
   let _resultsRefreshInFlight = false;           // guards _refreshParentResultsIfStale
+
+  // Session 28h — page-level results TTL floor. N=20 min from search start.
+  // Distinct from _resultsStale (BroadcastChannel consumption). This floor
+  // fires the sticky "This search has expired" modal regardless of per-cabin
+  // state — it's a hard timeout that supersedes individual cabin expiries.
+  // Chosen at 20 min to give ~5 min headroom under typical Duffel direct-API
+  // TTL (25 min).
+  const RESULTS_PAGE_TTL_MS = 20 * 60 * 1000;
+  let _resultsPageExpiresAtMs = null;
+  let _resultsPageExpiryTimerId = null;
+  // Per-cabin re-render timers scheduled per unique offer.expires_at (and
+  // 5 min prior for the amber badge). Reset on every fresh runSearch.
+  let _cabinRerenderTimerIds = [];
   let _offerConsumptionChannel = null;           // BroadcastChannel instance
   let _thisTabCommittedPay = false;              // this tab clicked Pay — ignore incoming preemption
   // Handle for the background-close setTimeout armed when a sibling
@@ -8894,6 +8924,14 @@ const TUMAFLY_WHATSAPP_WAME = '254113165503';
       try {
         if (typeof clearAlert === 'function') clearAlert('results-alert');
       } catch (_) {}
+      // Session 28h — page-level TTL floor check on entry. The setTimeout
+      // may have fired silently while on a non-results view; this is the
+      // backstop for that case.
+      try { _checkResultsPageStale(); } catch (_) {}
+    } else {
+      // Session 28h — dismiss any sticky modal on transition away from
+      // #results; its fixed backdrop would otherwise cover the destination view.
+      try { _dismissResultsStickyModal(); } catch (_) {}
     }
 
     if (!opts.fromPopState) {
@@ -9067,7 +9105,22 @@ const TUMAFLY_WHATSAPP_WAME = '254113165503';
       document.getElementById('booking-fare-timer')?.classList.add('hidden');
       document.getElementById('payment-fare-timer')?.classList.add('hidden');
       disablePaymentActions();
-      showSearchExpiredModal();
+      // Session 28h — booking view gets specific copy explaining the
+      // ticket is no longer available (informed-consent language for the
+      // customer who was mid-typing). Payment view keeps the default copy.
+      // Session 28h.2 — onFinish is _fareTimerExpiryFinish, which decides:
+      // spawned child → close self + notify parent to refresh. Solo/parent →
+      // fall back to rerunSearchFromExpiry. Applies to both booking + payment
+      // views since both express the same "this offer is gone" state.
+      if (activeId === 'booking-fare-timer') {
+        showSearchExpiredModal({
+          title: 'This ticket is no longer available',
+          subtitle: "Prices and availability can change quickly - this offer has expired and we can no longer guarantee the price. Please wait while we refresh your search",
+          onFinish: _fareTimerExpiryFinish,
+        });
+      } else {
+        showSearchExpiredModal({ onFinish: _fareTimerExpiryFinish });
+      }
       // Stop the interval — nothing more to tick.
       if (fareTimerHandle) {
         clearInterval(fareTimerHandle);
@@ -12958,6 +13011,55 @@ const TUMAFLY_WHATSAPP_WAME = '254113165503';
       rebuildAirlinesList();
       recomputeRangeBounds();
 
+      // Session 28h — page-level TTL floor. Schedule the sticky modal to
+      // fire at RESULTS_PAGE_TTL_MS after this fresh search. Cancels any
+      // prior timer from a previous search + dismisses any lingering sticky.
+      try {
+        _resultsPageExpiresAtMs = Date.now() + RESULTS_PAGE_TTL_MS;
+        if (_resultsPageExpiryTimerId !== null) {
+          try { clearTimeout(_resultsPageExpiryTimerId); } catch (_) {}
+          _resultsPageExpiryTimerId = null;
+        }
+        _dismissResultsStickyModal();
+        _resultsPageExpiryTimerId = setTimeout(() => {
+          _resultsPageExpiryTimerId = null;
+          _checkResultsPageStale();
+        }, RESULTS_PAGE_TTL_MS);
+      } catch (_) { /* non-critical — visibility + showView backstops cover */ }
+
+      // Session 28h — schedule renderResults() at each unique offer expiry
+      // moment (and 5 min prior) so:
+      //   - Cabins entering the amber "Expires in Xm" window get the badge
+      //   - Cabins reaching expiry get greyed as "Expired"
+      // Complements the 20-min page-level TTL floor (hard stop above).
+      // Timers cancelled on next fresh search. No-op if user has left
+      // #results by then — natural re-render happens on showView('results').
+      try {
+        if (_cabinRerenderTimerIds.length) {
+          _cabinRerenderTimerIds.forEach(id => { try { clearTimeout(id); } catch (_) {} });
+        }
+        _cabinRerenderTimerIds = [];
+        const _now = Date.now();
+        const _uniqueMoments = new Set();
+        allOffers.forEach(o => {
+          if (!o.expires_at) return;
+          const expMs = new Date(o.expires_at).getTime();
+          if (isNaN(expMs)) return;
+          const badgeMs = expMs - 5 * 60 * 1000;
+          if (badgeMs > _now) _uniqueMoments.add(badgeMs);
+          if (expMs > _now) _uniqueMoments.add(expMs);
+        });
+        _uniqueMoments.forEach(momentMs => {
+          const delay = Math.max(0, momentMs - _now);
+          const id = setTimeout(() => {
+            if (document.body.getAttribute('data-view') === 'results') {
+              try { renderResults(); } catch (_) {}
+            }
+          }, delay);
+          _cabinRerenderTimerIds.push(id);
+        });
+      } catch (_) { /* non-critical */ }
+
       syncResultsSummaryBar(origin, destination, date, returnDate);
       // Keep the home-form sessionStorage shadow in sync with the committed
       // search. Edit-search bar / results travelers picker / fare-timer
@@ -13997,6 +14099,18 @@ const TUMAFLY_WHATSAPP_WAME = '254113165503';
     return formatDuration(slice.duration);
   }
 
+  // Session 28h — returns amber chip markup when offer TTL < 5 min, else ''.
+  // Used inside cabin buttons on the results list to signal informed consent
+  // BEFORE the customer clicks into a short-runway booking. Complements the
+  // hard-grey "Expired" state (offer past its expires_at, no longer clickable).
+  function _renderCabinExpiryBadge(expiresAtMs) {
+    if (!expiresAtMs) return '';
+    const remainingMs = expiresAtMs - Date.now();
+    if (remainingMs <= 0 || remainingMs > 5 * 60 * 1000) return '';
+    const remainingMin = Math.max(1, Math.ceil(remainingMs / 60000));
+    return `<span class="fc-cabin-expires-soon">Expires in ${remainingMin}m</span>`;
+  }
+
   function renderFlightList(offers, containerId, kind, opts = {}) {
     const container = document.getElementById(containerId);
     if (!container) return;
@@ -14043,13 +14157,26 @@ const TUMAFLY_WHATSAPP_WAME = '254113165503';
       // Duffel offer_ids tie to a full paired itinerary at a single cabin class.
       const lockedCabin = (kind === 'inbound') ? selectedOutbound?.cabin : null;
       const isRoundTrip = tripType === 'round';
+      // Session 28h — offer.expires_at is Duffel's raw ISO passed through
+      // untouched (search-flights L334). Expired offers render as "Expired"
+      // using the existing fc-cabin-unavailable pattern. Cabins with <5 min
+      // TTL get an amber "Expires in Xm" chip inside the button (see
+      // _renderCabinExpiryBadge above). Both are informed-consent signals
+      // before the customer commits to a short-runway booking.
+      const expiresAtMs = offer.expires_at ? new Date(offer.expires_at).getTime() : null;
+      const isExpired = expiresAtMs !== null && !isNaN(expiresAtMs) && Date.now() >= expiresAtMs;
+      const _expBadge = _renderCabinExpiryBadge(expiresAtMs);
       const cabinCells = CABIN_KEYS.map(c => {
         const price = cabinPriceOf(offer, c);
         const isLocked = lockedCabin && c !== lockedCabin;
-        if (price == null || isLocked) {
+        if (price == null || isLocked || isExpired) {
+          let unavailableText;
+          if (isLocked) unavailableText = 'Not for<br>this trip';
+          else if (isExpired) unavailableText = 'Expired';
+          else unavailableText = 'Unavailable';
           return `<button class="fc-cabin" disabled>
                     <span class="fc-cabin-name">${CABIN_LABELS[c]}</span>
-                    <span class="fc-cabin-unavailable">${isLocked ? 'Not for<br>this trip' : 'Unavailable'}</span>
+                    <span class="fc-cabin-unavailable">${unavailableText}</span>
                   </button>`;
         }
         const perPax = price / passengerCount;
@@ -14067,6 +14194,7 @@ const TUMAFLY_WHATSAPP_WAME = '254113165503';
                     <span class="fc-cabin-from">from</span>
                     <span class="fc-cabin-price">+${formatPrice(diffPerPax)}</span>
                     <span class="fc-cabin-trip">vs cheapest pair</span>
+                    ${_expBadge}
                   </button>`;
         }
 
@@ -14076,6 +14204,7 @@ const TUMAFLY_WHATSAPP_WAME = '254113165503';
                   <span class="fc-cabin-from">from</span>
                   <span class="fc-cabin-price">${formatPrice(perPax)}</span>
                   <span class="fc-cabin-trip">${tripLabel}</span>
+                  ${_expBadge}
                 </button>`;
       }).join('');
 
@@ -17570,7 +17699,15 @@ const TUMAFLY_WHATSAPP_WAME = '254113165503';
     };
   }
 
-  function showSearchExpiredModal() {
+  function showSearchExpiredModal(opts = {}) {
+    const {
+      title = 'Search results have expired',
+      subtitle = "Prices and availability can change quickly. We're refreshing your search…",
+      autoDismissMs = 6000,       // 0 → sticky, no auto-dismiss
+      buttonLabel = null,          // if set, adds a primary button
+      onFinish = rerunSearchFromExpiry,
+    } = opts;
+
     // Kill any open Paystack modal — the fare is dead, so we don't want
     // the customer completing a charge on an expired offer.
     try { _cancelPaystackModalOnFareExpiry(); } catch (_) {}
@@ -17579,8 +17716,21 @@ const TUMAFLY_WHATSAPP_WAME = '254113165503';
     const modal = document.createElement('div');
     modal.id = 'search-expired-modal';
     modal.className = 'search-loading-backdrop';
-    modal.setAttribute('role', 'alert');
-    modal.setAttribute('aria-live', 'assertive');
+    // Timed variant → alert + assertive live region (announces on appear).
+    // Sticky variant → alertdialog + aria-modal (focus-trapped, requires ack).
+    if (autoDismissMs > 0) {
+      modal.setAttribute('role', 'alert');
+      modal.setAttribute('aria-live', 'assertive');
+    } else {
+      modal.setAttribute('role', 'alertdialog');
+      modal.setAttribute('aria-modal', 'true');
+      modal.setAttribute('aria-labelledby', 'search-expired-modal-title');
+    }
+
+    const buttonHtml = buttonLabel
+      ? `<button type="button" id="search-expired-modal-btn" class="btn btn-primary" style="min-width:160px;margin-top:20px;">${buttonLabel}</button>`
+      : '';
+
     modal.innerHTML = `
       <div class="search-loading-card" style="max-width:400px;text-align:center;">
         <div style="display:flex;justify-content:center;margin-bottom:14px;">
@@ -17591,25 +17741,36 @@ const TUMAFLY_WHATSAPP_WAME = '254113165503';
             </svg>
           </div>
         </div>
-        <div style="font-size:18px;font-weight:600;color:var(--ink,#0F1923);margin-bottom:8px;">
-          Search results have expired
+        <div id="search-expired-modal-title" style="font-size:18px;font-weight:600;color:var(--ink,#0F1923);margin-bottom:8px;">
+          ${title}
         </div>
         <div style="font-size:14px;color:var(--text-2,#4A5568);line-height:1.5;">
-          Prices and availability can change quickly. We're refreshing your search…
+          ${subtitle}
         </div>
+        ${buttonHtml}
       </div>
     `;
     document.body.appendChild(modal);
 
-    // Auto-advance after a beat so the user has time to read the notice
-    // without needing to click. 6s is long enough for a full read + a
-    // moment to process — the modal is doing real work explaining a
-    // fare-expired situation, and users need time to absorb it before
-    // being auto-redirected. Drift modal uses the same 6s cadence.
-    setTimeout(() => {
-      modal.remove();
-      rerunSearchFromExpiry();
-    }, 6000);
+    if (buttonLabel) {
+      const btn = document.getElementById('search-expired-modal-btn');
+      if (btn) {
+        btn.addEventListener('click', () => {
+          modal.remove();
+          try { onFinish(); } catch (_) {
+            try { location.reload(); } catch (__) {}
+          }
+        });
+        try { btn.focus(); } catch (_) {}
+      }
+    }
+
+    if (autoDismissMs > 0) {
+      setTimeout(() => {
+        modal.remove();
+        try { onFinish(); } catch (_) {}
+      }, autoDismissMs);
+    }
   }
 
   // Step 2b price-drift notification modal. Shown when create-payment returns
@@ -17859,7 +18020,7 @@ const TUMAFLY_WHATSAPP_WAME = '254113165503';
     });
   }
 
-  function selectPayTab(tab) {
+  async function selectPayTab(tab) {
     // M-Pesa disabled at launch — Card is the only interactive row.
     if (tab !== 'card') return;
 
@@ -17869,6 +18030,41 @@ const TUMAFLY_WHATSAPP_WAME = '254113165503';
     // always completes before the view switches; restore path may still
     // be in flight when the user taps), open the modal now.
     if (_paystackAccessCode) {
+      // Session 28h — before opening Paystack modal with a cached access_code,
+      // do a lightweight freshness check on the Duffel offer. Defends against
+      // offer-death in the window between initialize-payment completing and
+      // this tap (inventory sold elsewhere, schedule change, fare withdrawn).
+      // On 410 we bounce cleanly BEFORE Paystack fires — customer is never
+      // charged, no refund path required. On any other outcome (200 or
+      // infrastructure error) we fall through to opening the modal since
+      // downstream defenses (fare timer + async refund) still apply.
+      const _freshOfferId = (selectedInbound || selectedOutbound)?.cabinPricing?.offer_id;
+      if (_freshOfferId) {
+        try {
+          const freshRes = await fetch(`${SUPABASE_URL}/functions/v1/check-offer-freshness`, {
+            method: 'POST',
+            headers: { 'Authorization': `Bearer ${SUPABASE_ANON_KEY}`, 'Content-Type': 'application/json' },
+            body: JSON.stringify({ offer_id: _freshOfferId }),
+          });
+          if (freshRes.status === 410) {
+            // Clear cached access_code so a subsequent Continue-click gets
+            // a fresh initialize-payment cycle rather than reusing this
+            // now-invalid one. Then reuse the search-expired flow (timed
+            // variant — auto-bounces to fresh results).
+            _paystackAccessCode = null;
+            showSearchExpiredModal();
+            return;
+          }
+          if (!freshRes.ok) {
+            // 5xx or non-410 4xx — infra/unexpected. Fall through. Fare
+            // timer + async refund path still protect the customer.
+            console.warn('[selectPayTab] check-offer-freshness non-2xx (non-410), falling through:', freshRes.status);
+          }
+        } catch (err) {
+          // Network / abort. Fall through — same defense-in-depth as above.
+          console.warn('[selectPayTab] check-offer-freshness threw, falling through:', err);
+        }
+      }
       _openPaystackModal();
       return;
     }
@@ -20147,6 +20343,16 @@ const TUMAFLY_WHATSAPP_WAME = '254113165503';
         }, 5000);
         return;
       }
+      // Session 28h.2 — a spawned child tab's fare timer expired and the
+      // child is closing itself. Parent (and any surviving siblings)
+      // should treat results as stale and refresh when appropriate.
+      // No specific pair carried — this is a general "some child died"
+      // signal, not a preemption trigger for booking/payment views.
+      if (msg.type === 'fare-timer-expired') {
+        _resultsStale = true;
+        _handleConsumptionIfRelevant(null);
+        return;
+      }
       if (msg.type !== 'offer-consumed') return;
       if (typeof msg.offer_id !== 'string' || !/^off_[A-Za-z0-9]+$/.test(msg.offer_id)) return;
       if (typeof msg.cabin !== 'string' || !msg.cabin) return;
@@ -20313,6 +20519,72 @@ const TUMAFLY_WHATSAPP_WAME = '254113165503';
     }, 100);
   }
 
+  // Session 28h.2 — post-modal-dwell finish handler for fare-timer expiry
+  // on #booking / #payment. Design (per session decision):
+  //   - If this tab is a spawned child (has a live window.opener), close
+  //     self + notify parent to refresh its #results via BroadcastChannel.
+  //   - If backgrounded when the modal dwell ends, DEFER the close until
+  //     the tab becomes visible again — keeps the window.opener.focus()
+  //     call adjacent to a fresh user gesture (browser policy) and avoids
+  //     silent-disappearance from the tab bar while user is elsewhere.
+  //   - If no live parent (solo tab, or parent was closed), fall back to
+  //     rerunSearchFromExpiry — refresh in place, don't strand the user.
+  // Modal copy stays the same either way; "why" is carried by the modal.
+  function _fareTimerExpiryFinish() {
+    var isChild = false;
+    try { isChild = !!(window.opener && !window.opener.closed); } catch (_) { isChild = false; }
+    if (!isChild) {
+      rerunSearchFromExpiry();
+      return;
+    }
+    var doCloseAndRefreshParent = function () {
+      try {
+        if (_offerConsumptionChannel) {
+          _offerConsumptionChannel.postMessage({ type: 'fare-timer-expired' });
+        }
+      } catch (_) {}
+      try { window.opener && window.opener.focus && window.opener.focus(); } catch (_) {}
+      try { window.close(); } catch (_) {
+        // Browser refused close (usually because the tab wasn't opened by
+        // script the browser trusts to close). Fall back to local refresh
+        // so the user isn't stranded on a dead offer.
+        rerunSearchFromExpiry();
+      }
+    };
+    if (document.visibilityState === 'visible') {
+      doCloseAndRefreshParent();
+      return;
+    }
+    // Deferred: wait for return-to-visible before firing.
+    var visListener = function () {
+      if (document.visibilityState !== 'visible') return;
+      document.removeEventListener('visibilitychange', visListener);
+      doCloseAndRefreshParent();
+    };
+    document.addEventListener('visibilitychange', visListener);
+  }
+
+  // Session 28h — page-level TTL floor check. Fires the sticky modal via
+  // showSearchExpiredModal's sticky variant when Date.now() >= floor.
+  function _checkResultsPageStale() {
+    if (document.body.getAttribute('data-view') !== 'results') return;
+    if (_resultsPageExpiresAtMs === null) return;
+    if (Date.now() < _resultsPageExpiresAtMs) return;
+    showSearchExpiredModal({
+      title: 'This search has expired',
+      subtitle: 'Please submit a new search',
+      autoDismissMs: 0,
+      buttonLabel: 'Relaunch this search',
+    });
+  }
+
+  function _dismissResultsStickyModal() {
+    // Same DOM id as the timed variant — clear so a fresh search isn't
+    // blocked by a lingering sticky from a previous cycle.
+    const el = document.getElementById('search-expired-modal');
+    if (el && el.parentNode) el.parentNode.removeChild(el);
+  }
+
   // Parent on #results (or a child that failed to close). Silent re-run
   // of the last search, showing the same "Comparing fares…" modal +
   // skeleton shimmer as F5-on-results. On success paints a top-of-results
@@ -20370,6 +20642,11 @@ const TUMAFLY_WHATSAPP_WAME = '254113165503';
   document.addEventListener('visibilitychange', () => {
     if (document.visibilityState !== 'visible') return;
     if (_thisTabCommittedPay) return;
+    // Session 28h — page-level TTL floor backstop. Check first, independent
+    // of _resultsStale (BroadcastChannel-driven) — different concern.
+    // Covers the case where the user backgrounded the tab and the setTimeout
+    // was throttled; on return we recheck and fire the sticky if due.
+    try { _checkResultsPageStale(); } catch (_) {}
     if (!_resultsStale) return;
     const view = document.body.getAttribute('data-view');
     if (view === 'booking' || view === 'payment') {
