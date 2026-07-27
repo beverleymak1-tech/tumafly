@@ -1522,6 +1522,17 @@
     .search .field input[type="date"].tf-date-empty ~ .tf-date-ph {
       display: block;
     }
+    /* Suppress the browser's native mm/dd/yyyy mask on empty date inputs.
+       Chrome and Safari desktop render the native mask in the input's
+       `color` property — setting that to transparent while .tf-date-empty
+       is present hides the native mask entirely, leaving only our own
+       .tf-date-ph span visible (no more doubled/misaligned placeholder).
+       When the user picks a date, .tf-date-empty is removed and the
+       input's color falls back to the base .field input rule (var(--ink)),
+       so entered dates render normally. */
+    .search .field input[type="date"].tf-date-empty {
+      color: transparent;
+    }
     /* Focus washes bumped in opacity so they still read as "this is
        the active field" against the glass — the underlying rules use
        solid var(--brand-soft) which would look like a punched-through
@@ -4776,9 +4787,13 @@
       /* Enlarged from 56px to hold the MP4 loading animation. Video
          needs more real estate than a vector spinner to read clearly.
          The card is max-width 360px with 28-32px side padding, so
-         128px leaves a comfortable margin on both sides. */
-      width: 128px;
-      height: 128px;
+         180px is the largest square that still leaves breathing room
+         on both sides. If the video's aspect ratio isn't square,
+         object-fit: contain (below) letterboxes it inside this box,
+         so bumping this dimension is the knob that makes the visible
+         animation bigger. */
+      width: 180px;
+      height: 180px;
       position: relative;
       overflow: hidden;
       border-radius: 16px;
