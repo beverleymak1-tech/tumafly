@@ -8651,6 +8651,15 @@ const TUMAFLY_WHATSAPP_WAME = '254113165503';
   // Per-cabin re-render timers scheduled per unique offer.expires_at (and
   // 5 min prior for the amber badge). Reset on every fresh runSearch.
   let _cabinRerenderTimerIds = [];
+
+  // Session 28h.3 — spawned-child tracking. Suppress parent's page-level
+  // TTL sticky modal while any child tab spawned from this parent is
+  // still open. Pushed in commitOfferInNewTab. Membership checked lazily
+  // via _hasActiveSpawnedChildren (which also compacts the array by
+  // filtering out closed refs, so it doesn't grow unbounded). Rationale:
+  // user is committed to a specific offer via child; parent's "search
+  // expired" prompt is the wrong signal during that flow.
+  let _spawnedChildren = [];
   let _offerConsumptionChannel = null;           // BroadcastChannel instance
   let _thisTabCommittedPay = false;              // this tab clicked Pay — ignore incoming preemption
   // Handle for the background-close setTimeout armed when a sibling
@@ -14172,7 +14181,7 @@ const TUMAFLY_WHATSAPP_WAME = '254113165503';
         if (price == null || isLocked || isExpired) {
           let unavailableText;
           if (isLocked) unavailableText = 'Not for<br>this trip';
-          else if (isExpired) unavailableText = 'Expired';
+          else if (isExpired) unavailableText = 'No longer available';
           else unavailableText = 'Unavailable';
           return `<button class="fc-cabin" disabled>
                     <span class="fc-cabin-name">${CABIN_LABELS[c]}</span>
@@ -14398,6 +14407,13 @@ const TUMAFLY_WHATSAPP_WAME = '254113165503';
     var url = window.location.pathname + '#booking?offer=' + encodeURIComponent(offerId);
     var child = null;
     try { child = window.open(url, '_blank'); } catch (_) { child = null; }
+
+    // Session 28h.3 — track for parent-sticky suppression. Held only as
+    // long as the child window is alive; _hasActiveSpawnedChildren
+    // filters out closed refs on each check.
+    if (child) {
+      try { _spawnedChildren.push(child); } catch (_) {}
+    }
 
     // Whether or not the child opened, the OPENER tab must not carry the
     // new-tab flag — it stays on #results and never enters #booking via
@@ -17732,7 +17748,7 @@ const TUMAFLY_WHATSAPP_WAME = '254113165503';
       : '';
 
     modal.innerHTML = `
-      <div class="search-loading-card" style="max-width:400px;text-align:center;">
+      <div class="search-loading-card" style="text-align:center;">
         <div style="display:flex;justify-content:center;margin-bottom:14px;">
           <div style="width:48px;height:48px;border-radius:50%;background:var(--brand-soft,#e8f3ff);display:flex;align-items:center;justify-content:center;">
             <svg class="tf-expired-hourglass" width="26" height="26" viewBox="0 0 24 24" fill="none" aria-hidden="true">
@@ -19880,10 +19896,26 @@ const TUMAFLY_WHATSAPP_WAME = '254113165503';
       // verify-payment which isn't guaranteed for every state, (b)
       // creates a mismatch risk if the number differs from the email.
       // Simpler + safer to keep the copy amount-agnostic.
+      //
+      // Session 28h.3 — copy revised (Option 1). "3-5 business days"
+      // language was moved off-screen into the refund email itself.
+      // Rationale: on a customer-facing outcome screen, a delay-window
+      // phrase adds stress in the moment; in an email it's a factual
+      // detail among other actionable content. Screen now points to
+      // the email as the definitive place for full details.
       const mref = payload?.merchantRef
                 || payload?.booking?.merchant_ref
                 || payload?.pending?.merchant_ref
                 || '';
+      const custEmail = payload?.contact?.email
+                     || payload?.pending?.contact?.email
+                     || payload?.booking?.contact?.email
+                     || payload?.customer_email
+                     || payload?.pending?.customer_email
+                     || '';
+      const emailLine = custEmail
+        ? `A confirmation email has been sent to ${escapeHtml(custEmail)} with the full details.`
+        : 'A confirmation email with the full details has been sent to the address you provided.';
       const waHref = whatsappLink(
         'Hi TumaFly, my booking (ref ' + mref + ') is being refunded and I have a question. Please help.'
       );
@@ -19897,8 +19929,7 @@ const TUMAFLY_WHATSAPP_WAME = '254113165503';
         <div class="success-title">We couldn't complete your booking.</div>
         <p style="color:var(--text-2);max-width:48ch;margin:8px auto 0;">
           Your payment went through but the airline couldn't issue the
-          ticket. We've automatically initiated your refund — it should
-          appear in your account within 3–5 business days.
+          ticket. We've automatically initiated your refund. ${emailLine}
         </p>
         <p style="color:var(--text-2);max-width:48ch;margin:12px auto 0;font-size:13px;">
           If you have questions, message us on WhatsApp or email
@@ -20570,12 +20601,31 @@ const TUMAFLY_WHATSAPP_WAME = '254113165503';
     if (document.body.getAttribute('data-view') !== 'results') return;
     if (_resultsPageExpiresAtMs === null) return;
     if (Date.now() < _resultsPageExpiresAtMs) return;
+    // Session 28h.3 — suppress sticky while any spawned child is still
+    // active. User is committed to a specific offer via child; parent's
+    // "search expired" is the wrong prompt during that flow. When the
+    // child eventually closes (any reason), the visibilitychange handler
+    // on parent re-runs this check and fires the sticky if TTL is still
+    // past. Per-cabin badges + grey-out already keep parent's visual
+    // state honest even while sticky is deferred.
+    if (_hasActiveSpawnedChildren()) return;
     showSearchExpiredModal({
       title: 'This search has expired',
       subtitle: 'Please submit a new search',
       autoDismissMs: 0,
       buttonLabel: 'Relaunch this search',
     });
+  }
+
+  // Session 28h.3 — checks and compacts _spawnedChildren. Same-origin
+  // same-window-family child references expose .closed reliably; a child
+  // that navigated cross-origin still reports .closed correctly per HTML
+  // spec. try/catch guards against any exotic browser behavior.
+  function _hasActiveSpawnedChildren() {
+    _spawnedChildren = _spawnedChildren.filter(function (c) {
+      try { return c && !c.closed; } catch (_) { return false; }
+    });
+    return _spawnedChildren.length > 0;
   }
 
   function _dismissResultsStickyModal() {
