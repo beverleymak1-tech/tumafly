@@ -100,7 +100,7 @@ Deno.serve(async (req) => {
     const userPendings = await adminClient
       .from("pending_bookings")
       .select(`
-        pesapal_order_id,
+        merchant_ref,
         total_kes,
         base_amount_kes,
         service_fee_kes,
@@ -141,7 +141,7 @@ Deno.serve(async (req) => {
     // Frontend My Trips card expects: { offer: { slices: [...] }, totalKes,
     // pnr, merchantReference, status }
     // Frontend itinerary detail view (loadItinerary) ALSO reads: passengerEmail,
-    // pesapalOrderId, baseAmountKes/serviceFeeKes/processingFeeKes, paymentMethod,
+    // merchantRef, baseAmountKes/serviceFeeKes/processingFeeKes, paymentMethod,
     // returnAirline/returnFlightNumber.
     const trips = (rows ?? []).map((b) => {
       const matchedPending = matchPendingForBooking(b.created_at);
@@ -187,12 +187,12 @@ Deno.serve(async (req) => {
         changesAllowed:     b.changes_allowed ?? null,
         passengerDetails:   b.passenger_details ?? null,
         // Itinerary view fields (only populated when pending match found)
-        pesapalOrderId:     matchedPending?.pesapal_order_id ?? null,
+        merchantRef:        matchedPending?.merchant_ref ?? null,
         baseAmountKes:      matchedPending?.base_amount_kes ?? null,
         serviceFeeKes:      matchedPending?.service_fee_kes ?? null,
         processingFeeKes:   matchedPending?.processing_fee_kes ?? null,
         paymentMethod:      matchedPending?.payment_method ?? null,
-        // H-redo: Last 4 of the masked Pesapal account (card number or M-Pesa
+        // H-redo: Last 4 of the masked payment account (card number or M-Pesa
         // phone). Frontend renders inline next to the payment method, e.g.
         // "Visa ****1234". Replaces the old separate "Billing name" line.
         paymentAccountLast4: b.payment_account_last4 ?? null,

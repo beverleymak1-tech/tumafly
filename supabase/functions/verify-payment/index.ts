@@ -139,11 +139,11 @@ serve(async (req) => {
   }
 
   try {
-    // 1. Look up pending_bookings by merchant_ref (stored in pesapal_order_id column)
+    // 1. Look up pending_bookings by merchant_ref
     const { data: pending, error: pendingErr } = await supabase
       .from("pending_bookings")
       .select("id, status, duffel_order_id, booking_reference, contact, total_kes")
-      .eq("pesapal_order_id", reference)
+      .eq("merchant_ref", reference)
       .maybeSingle();
 
     if (pendingErr) {

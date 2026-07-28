@@ -1,7 +1,14 @@
 // ============================================================================
 // paystack-webhook — Paystack IPN handler
 // ============================================================================
-// Mirrors pesapal-webhook line-by-line. Preserves:
+// Receives Paystack's server-to-server events (HMAC-SHA512-verified). Handles:
+//   - charge.success  — payment captured; advance pending_booking to 'paid',
+//                       claim to 'duffel_pending', hand off to process-duffel-booking
+//   - refund.pending  — refund accepted for processing; advance to 'refund_pending'
+//   - refund.processed — refund settled; advance to 'refunded'
+//   - refund.failed   — refund rejected; alert founder + mark 'refund_failed'
+//
+// Preserves:
 //   - Duffel mode/key mismatch guard + alertFounder pattern
 //   - Idempotency: bail on status='booked' or status='booking'
 //   - Amount sanity check
@@ -11,19 +18,13 @@
 //   - EdgeRuntime.waitUntil(sendEmailPromise) for confirmation email
 //   - Alert catalog integration (PAID_NO_OFFER, PAID_NO_TICKET, BOOKED_NO_DB_RECORD, etc.)
 //
-// Processor-specific bits swapped:
-//   - HMAC-SHA512 signature verification of raw body (Paystack pattern)
+// Paystack specifics:
+//   - HMAC-SHA512 signature verification of raw body
 //   - Event parsing: charge.success from JSON body (not query params)
-//   - Reference lookup: data.reference == our merchant_ref (stored in pesapal_order_id column)
+//   - Reference lookup: data.reference == our merchant_ref
 //   - Amount in kobo/cents (KES × 100)
 //   - Paystack verify endpoint call as belt-and-braces
 //   - Response: plain 200 OK (Paystack retries on non-2xx)
-//
-// Column reuse notes:
-//   - pesapal_order_id: stores merchant_ref for BOTH processors (rename in future migration)
-//   - pesapal_tracking_id: stores Paystack transaction id (data.id) for Paystack rows
-//   - pesapal_confirmation_code: stores Paystack authorization_code (card token for
-//     future recurring/tokenization) for Paystack rows
 //
 // Paystack webhook URL to register in dashboard:
 //   https://{PROJECT_REF}.supabase.co/functions/v1/paystack-webhook
@@ -33,6 +34,12 @@
 //   - refund.pending            — refund accepted for processing
 //   - refund.processed          — refund settled (final state)
 //   - refund.failed             — refund rejected (final state)
+//
+// Session 28e-10.7: pending_bookings columns renamed
+//   pesapal_order_id → merchant_ref
+//   pesapal_tracking_id → processor_transaction_id
+// (Paystack authorization_code is written to bookings.processor_authorization_code
+// by process-duffel-booking — see that EF.)
 // ============================================================================
 
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
@@ -88,7 +95,7 @@ async function verifyPaystackSignature(rawBody: string, signature: string, secre
 }
 
 // Small helper: normalize payment_method from Paystack's channel string to
-// match what we stored for Pesapal ("card", "mobile_money", "bank", etc.)
+// the canonical values our DB uses ("card", "mpesa", "bank", etc.)
 function normalizePaystackChannel(channel: string | null | undefined): string {
   if (!channel) return "unknown";
   const c = String(channel).toLowerCase();
@@ -275,12 +282,11 @@ serve(async (req) => {
   }
 
   try {
-    // 1. Find pending booking. merchant_ref is stored in pesapal_order_id
-    //    column (both processors reuse it — rename in future migration).
+    // 1. Find pending booking by merchant_ref (Paystack echoes it back as data.reference).
     const { data: pending, error: pendingErr } = await supabase
       .from("pending_bookings")
       .select("*")
-      .eq("pesapal_order_id", reference)
+      .eq("merchant_ref", reference)
       .maybeSingle();
 
     if (pendingErr || !pending) {
@@ -368,7 +374,7 @@ serve(async (req) => {
       .update({
         status: "paid",
         payment_method: channel,
-        pesapal_tracking_id: paystackTxId, // reused column — stores Paystack tx id
+        processor_transaction_id: paystackTxId,
       })
       .eq("id", pending.id);
 

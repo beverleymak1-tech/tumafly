@@ -73,7 +73,7 @@ serve(async (req) => {
   try {
     // Accept three lookup modes:
     //   - merchant_ref (TF-...) → polling during checkout (status of pending payment)
-    //   - tracking_id (Pesapal UUID) → same as merchant_ref but via Pesapal's id
+    //   - tracking_id (processor's own transaction id) → same as merchant_ref but via the processor's id
     //   - PNR (e.g. LPAPZU) + last_name → find-booking view (lookup a confirmed booking)
     //
     // We detect which mode by:
@@ -174,8 +174,8 @@ serve(async (req) => {
     const query = supabase.from("pending_bookings").select("*");
     const { data: pending, error } = await (
       merchantRef
-        ? query.eq("pesapal_order_id", merchantRef)
-        : query.eq("pesapal_tracking_id", trackingId)
+        ? query.eq("merchant_ref", merchantRef)
+        : query.eq("processor_transaction_id", trackingId)
     ).maybeSingle();
 
     if (error || !pending) {
@@ -195,7 +195,7 @@ serve(async (req) => {
       message: mapped.message,
       final: mapped.final,
       raw_status: pending.status,
-      merchant_ref: pending.pesapal_order_id,
+      merchant_ref: pending.merchant_ref,
       breakdown: {
         base_kes: pending.base_amount_kes,
         service_fee_kes: pending.service_fee_kes,

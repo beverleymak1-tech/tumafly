@@ -153,12 +153,12 @@ serve(async (req) => {
     }
 
     if (pending.status !== "duffel_pending") {
-      console.log(`[process-duffel-booking] Entry guard: status is ${pending.status}, not duffel_pending — no-op bail (${pending.pesapal_order_id})`);
+      console.log(`[process-duffel-booking] Entry guard: status is ${pending.status}, not duffel_pending — no-op bail (${pending.merchant_ref})`);
       return new Response("ok", { status: 200, headers: CORS_HEADERS });
     }
 
-    const reference = pending.pesapal_order_id;    // merchant_ref (TF-…)
-    const paystackTxId = pending.pesapal_tracking_id; // Paystack tx id
+    const reference = pending.merchant_ref;              // TF-… format
+    const paystackTxId = pending.processor_transaction_id;
 
     // 5. Fetch full Paystack transaction — needed for authorization_code
     //    and payment_account_last4 columns on bookings. Same verify call
@@ -485,8 +485,8 @@ serve(async (req) => {
         processing_fee_kes: pending.processing_fee_kes,
         payment_method: paystackChannel,
         payment_account_last4: paymentAccountLast4,
-        pesapal_tracking_id: paystackTxId,
-        pesapal_confirmation_code: authorizationCode,
+        processor_transaction_id: paystackTxId,
+        processor_authorization_code: authorizationCode,
         passenger_name: order.passengers.map((p: any) => `${p.given_name} ${p.family_name}`).join(", "),
         passenger_email: pending.contact.email,
         passenger_phone: pending.contact.phone_number || null,

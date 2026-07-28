@@ -1,26 +1,27 @@
 // ============================================================================
-// initialize-payment — Paystack equivalent of create-payment
+// initialize-payment — Paystack transaction initialization
 // ============================================================================
-// Mirrors create-payment (Pesapal) structurally so both can be reviewed
-// side-by-side. Preserves:
+// Called by the frontend at Continue-to-Payment click. Validates the offer,
+// seat + baggage selections server-side; inserts a pending_bookings row;
+// calls Paystack's POST /transaction/initialize to mint an access_code; and
+// returns { access_code, merchant_ref, breakdown } to the frontend. The
+// frontend's Card row tap consumes the access_code to open the Paystack
+// InlineJS modal.
+//
+// Preserves:
 //   - Duffel mode/key mismatch guard + alertFounder pattern
 //   - Email + E.164 phone validation
 //   - Turnstile bot protection
 //   - Offer re-fetch + price drift check
 //   - Seat + baggage validation with sandbox soft-skip
-//   - pending_bookings schema (merchant_ref stored in pesapal_order_id column
-//     until we rename it in a future migration — both processors use it)
 //
-// Only Pesapal-specific bits are replaced:
-//   - Env vars: PAYSTACK_API_KEY / PAYSTACK_MODE instead of PESAPAL_*
-//   - Fee model: 1.95% + KES 30 flat instead of Pesapal's 3.5%
-//   - Order call: Paystack POST /transaction/initialize instead of
-//     Pesapal SubmitOrderRequest
-//   - Response: returns { access_code } for InlineJS resumeTransaction
-//     instead of { redirect_url } for iframe embed
+// Downstream: paystack-webhook receives Paystack's server-to-server
+// confirmation (HMAC-SHA512-verified), advances the pending_bookings row,
+// and hands off to process-duffel-booking for order creation.
 //
-// The paystack-webhook EF (separate file) handles the downstream chain
-// (Duffel order + eTicket email) — same as pesapal-webhook does today.
+// Session 28e-10.7: pending_bookings columns renamed from pesapal_order_id
+// and pesapal_tracking_id to merchant_ref and processor_transaction_id
+// respectively. See migration TumaFly_Session28e_10_7_rename_pesapal_columns.
 // ============================================================================
 
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
@@ -45,7 +46,7 @@ const FRONTEND_URL = Deno.env.get("FRONTEND_URL")!;
 const TURNSTILE_SECRET = Deno.env.get("TURNSTILE_SECRET") || "";
 const TURNSTILE_SITEVERIFY_URL = "https://challenges.cloudflare.com/turnstile/v0/siteverify";
 
-// TumaFly's flat service fee, in KES (your margin — unchanged from Pesapal EF)
+// TumaFly's flat service fee, in KES (your margin)
 const TUMAFLY_SERVICE_FEE_KES = 1500;
 
 // ── Paystack fee model (Kenya cards) ──────────────────────────────────────
@@ -546,7 +547,6 @@ serve(async (req) => {
 
     // 4. Insert pending_booking BEFORE Paystack call
     // merchant_ref is our reference — Paystack echoes it back on webhook.
-    // Reusing the pesapal_order_id column for now (rename in future migration).
     const merchantRef = `TF-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 
     const contactWithSeats = { ...contact, seats: validatedSeats, baggages: validatedBaggages };
@@ -564,7 +564,7 @@ serve(async (req) => {
       .from("pending_bookings")
       .insert({
         user_id: userId,
-        pesapal_order_id: merchantRef, // reused column — same value across both processors
+        merchant_ref: merchantRef,
         duffel_offer_id: offer_id,
         passengers,
         contact: contactWithSeats,

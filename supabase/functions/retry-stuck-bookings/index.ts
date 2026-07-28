@@ -168,7 +168,7 @@ async function nudgePaidToDuffelPending(supabase: any, row: any): Promise<any> {
   if (!claimed || claimed.length === 0) {
     return { outcome: "skipped_paid_no_longer_stuck" };
   }
-  console.log(`[retry] paid → duffel_pending: ${row.pesapal_order_id}`);
+  console.log(`[retry] paid → duffel_pending: ${row.merchant_ref}`);
   return { outcome: "nudged_paid_to_duffel_pending" };
 }
 
@@ -177,7 +177,7 @@ async function nudgeProcessDuffelBooking(row: any): Promise<any> {
   if (!PROCESS_DUFFEL_BOOKING_WEBHOOK_SECRET) {
     await alertFounder("UNHANDLED_ERROR", {
       function: "retry-stuck-bookings",
-      merchant_ref: row.pesapal_order_id,
+      merchant_ref: row.merchant_ref,
       message: "PROCESS_DUFFEL_BOOKING_WEBHOOK_SECRET not set — cannot nudge",
     });
     return { outcome: "config_error_no_secret" };
@@ -191,7 +191,7 @@ async function nudgeProcessDuffelBooking(row: any): Promise<any> {
       },
       body: JSON.stringify({ record: { id: row.id } }),
     });
-    console.log(`[retry] nudged process-duffel-booking for ${row.pesapal_order_id} → ${nudgeRes.status}`);
+    console.log(`[retry] nudged process-duffel-booking for ${row.merchant_ref} → ${nudgeRes.status}`);
     return { outcome: "nudged_process_duffel_booking", http_status: nudgeRes.status };
   } catch (err) {
     return { outcome: "nudge_threw", error: (err as Error).message };
@@ -213,7 +213,7 @@ async function forceFailDuffelPending(supabase: any, row: any): Promise<any> {
       orderExistsAtDuffel = true;
     }
   } catch (err) {
-    console.warn(`[retry] Duffel GET (idempotency lookup) threw for ${row.pesapal_order_id}:`, err);
+    console.warn(`[retry] Duffel GET (idempotency lookup) threw for ${row.merchant_ref}:`, err);
     // Fall through as if not found. Next sweep will retry.
   }
 
@@ -223,7 +223,7 @@ async function forceFailDuffelPending(supabase: any, row: any): Promise<any> {
     // refund a customer who actually got their booking created.
     await alertFounder("PAID_NO_TICKET", {
       severity: "CRITICAL",
-      merchant_ref: row.pesapal_order_id,
+      merchant_ref: row.merchant_ref,
       pending_booking_id: row.id,
       duffel_offer_id: row.duffel_offer_id,
       amount_paid_kes: row.total_kes,
@@ -248,7 +248,7 @@ async function forceFailDuffelPending(supabase: any, row: any): Promise<any> {
     return { outcome: "skipped_duffel_pending_transitioned" };
   }
   await alertFounder("PAID_NO_TICKET", {
-    merchant_ref: row.pesapal_order_id,
+    merchant_ref: row.merchant_ref,
     pending_booking_id: row.id,
     duffel_offer_id: row.duffel_offer_id,
     amount_paid_kes: row.total_kes,
@@ -262,8 +262,8 @@ async function forceFailDuffelPending(supabase: any, row: any): Promise<any> {
     supabase,
     "paid_booking_failed",
     row,
-    row.pesapal_tracking_id,
-    row.pesapal_order_id,
+    row.processor_transaction_id,
+    row.merchant_ref,
   );
   return { outcome: "duffel_pending_force_failed_and_refund_initiated" };
 }
@@ -276,7 +276,7 @@ async function handlePnrIssued(supabase: any, row: any, ageSec: number): Promise
     // If it does, we can't do anything useful. Alert and skip.
     await alertFounder("UNHANDLED_ERROR", {
       function: "retry-stuck-bookings",
-      merchant_ref: row.pesapal_order_id,
+      merchant_ref: row.merchant_ref,
       pending_booking_id: row.id,
       message: "pnr_issued row has no duffel_order_id — cannot reconcile",
       severity: "HIGH",
@@ -310,7 +310,7 @@ async function handlePnrIssued(supabase: any, row: any, ageSec: number): Promise
       return { outcome: "skipped_pnr_issued_transitioned" };
     }
     await alertFounder("PAID_NO_TICKET", {
-      merchant_ref: row.pesapal_order_id,
+      merchant_ref: row.merchant_ref,
       pending_booking_id: row.id,
       duffel_order_id: row.duffel_order_id,
       amount_paid_kes: row.total_kes,
@@ -325,8 +325,8 @@ async function handlePnrIssued(supabase: any, row: any, ageSec: number): Promise
       supabase,
       "paid_booking_failed",
       row,
-      row.pesapal_tracking_id,
-      row.pesapal_order_id,
+      row.processor_transaction_id,
+      row.merchant_ref,
     );
     return { outcome: "pnr_issued_force_failed_cancelled_and_refunded" };
   }
@@ -368,7 +368,7 @@ async function handlePnrIssued(supabase: any, row: any, ageSec: number): Promise
   const email = await fireSendConfirmation(supabase, row, order);
   if (!email.ok) {
     await alertFounder("CONFIRMATION_EMAIL_FAILED", {
-      merchant_ref: row.pesapal_order_id,
+      merchant_ref: row.merchant_ref,
       pending_booking_id: row.id,
       customer_email: row.contact?.email,
       http_status: email.http_status,
@@ -378,7 +378,7 @@ async function handlePnrIssued(supabase: any, row: any, ageSec: number): Promise
     });
     return { outcome: "pnr_issued_transitioned_email_failed" };
   }
-  console.log(`[retry] pnr_issued → booked + email sent: ${row.pesapal_order_id}`);
+  console.log(`[retry] pnr_issued → booked + email sent: ${row.merchant_ref}`);
   return { outcome: "pnr_issued_transitioned_and_email_sent" };
 }
 
@@ -387,7 +387,7 @@ async function retryConfirmationEmail(supabase: any, row: any): Promise<any> {
   if (!row.duffel_order_id) {
     await alertFounder("UNHANDLED_ERROR", {
       function: "retry-stuck-bookings",
-      merchant_ref: row.pesapal_order_id,
+      merchant_ref: row.merchant_ref,
       pending_booking_id: row.id,
       message: "booked row with NULL confirmation_email_sent_at has no duffel_order_id",
       severity: "HIGH",
@@ -413,7 +413,7 @@ async function retryConfirmationEmail(supabase: any, row: any): Promise<any> {
   const email = await fireSendConfirmation(supabase, row, order);
   if (!email.ok) {
     await alertFounder("CONFIRMATION_EMAIL_FAILED", {
-      merchant_ref: row.pesapal_order_id,
+      merchant_ref: row.merchant_ref,
       pending_booking_id: row.id,
       customer_email: row.contact?.email,
       http_status: email.http_status,
@@ -423,7 +423,7 @@ async function retryConfirmationEmail(supabase: any, row: any): Promise<any> {
     });
     return { outcome: "booked_email_retry_failed" };
   }
-  console.log(`[retry] Confirmation email retry succeeded: ${row.pesapal_order_id}`);
+  console.log(`[retry] Confirmation email retry succeeded: ${row.merchant_ref}`);
   return { outcome: "booked_email_retry_succeeded" };
 }
 
@@ -452,7 +452,7 @@ async function processRow(supabase: any, row: any): Promise<any> {
     await alertFounder("UNHANDLED_ERROR", {
       function: "retry-stuck-bookings",
       pending_booking_id: row.id,
-      merchant_ref: row.pesapal_order_id,
+      merchant_ref: row.merchant_ref,
       status: row.status,
       age_sec: Math.round(ageSec),
       error: (err as Error).message,
@@ -537,7 +537,7 @@ serve(async (req) => {
     const results: any[] = [];
     for (const row of allRows) {
       const result = await processRow(supabase, row);
-      results.push({ id: row.id, ref: row.pesapal_order_id, from_status: row.status, ...result });
+      results.push({ id: row.id, ref: row.merchant_ref, from_status: row.status, ...result });
     }
 
     return new Response(

@@ -233,7 +233,7 @@ async function handleOrderCreated(supabase: any, event: any): Promise<Response> 
       const email = await fireSendConfirmation(supabase, pending, order);
       if (!email.ok) {
         await alertFounder("CONFIRMATION_EMAIL_FAILED", {
-          merchant_ref: pending.pesapal_order_id,
+          merchant_ref: pending.merchant_ref,
           pending_booking_id: pending.id,
           customer_email: pending.contact?.email,
           http_status: email.http_status,
@@ -242,7 +242,7 @@ async function handleOrderCreated(supabase: any, event: any): Promise<Response> 
           source: "duffel-webhook (booked no-email replay)",
         });
       } else {
-        console.log(`[duffel-webhook] Replayed → email sent for ${pending.pesapal_order_id}`);
+        console.log(`[duffel-webhook] Replayed → email sent for ${pending.merchant_ref}`);
       }
     }
     return new Response("ok", { status: 200, headers: CORS_HEADERS });
@@ -252,7 +252,7 @@ async function handleOrderCreated(supabase: any, event: any): Promise<Response> 
   if (pending.status === "pnr_issued") {
     if (!documentsPopulated(order)) {
       // Duffel event fired but documents still empty. Weird but harmless.
-      console.log(`[duffel-webhook] order.created replay w/o documents for pnr_issued ${pending.pesapal_order_id}`);
+      console.log(`[duffel-webhook] order.created replay w/o documents for pnr_issued ${pending.merchant_ref}`);
       return new Response("ok", { status: 200, headers: CORS_HEADERS });
     }
     const { data: claimed } = await supabase
@@ -267,7 +267,7 @@ async function handleOrderCreated(supabase: any, event: any): Promise<Response> 
     const email = await fireSendConfirmation(supabase, pending, order);
     if (!email.ok) {
       await alertFounder("CONFIRMATION_EMAIL_FAILED", {
-        merchant_ref: pending.pesapal_order_id,
+        merchant_ref: pending.merchant_ref,
         pending_booking_id: pending.id,
         customer_email: pending.contact?.email,
         http_status: email.http_status,
@@ -276,7 +276,7 @@ async function handleOrderCreated(supabase: any, event: any): Promise<Response> 
         source: "duffel-webhook (pnr_issued → booked)",
       });
     } else {
-      console.log(`[duffel-webhook] pnr_issued → booked + email sent for ${pending.pesapal_order_id}`);
+      console.log(`[duffel-webhook] pnr_issued → booked + email sent for ${pending.merchant_ref}`);
     }
     return new Response("ok", { status: 200, headers: CORS_HEADERS });
   }
@@ -302,14 +302,14 @@ async function handleOrderCreated(supabase: any, event: any): Promise<Response> 
     // process-duffel-booking's side). Rather than plumbing that through,
     // fall through to: leave at duffel_pending and let retry-stuck-
     // bookings pick it up on next 60s tick.
-    console.log(`[duffel-webhook] order.created received for duffel_pending row ${pending.pesapal_order_id}; retry-stuck-bookings will complete via nudge`);
+    console.log(`[duffel-webhook] order.created received for duffel_pending row ${pending.merchant_ref}; retry-stuck-bookings will complete via nudge`);
     return new Response("ok", { status: 200, headers: CORS_HEADERS });
   }
 
   // Any other state (paid, pending, etc.) — unexpected but not disaster.
   await alertFounder("UNHANDLED_ERROR", {
     function: "duffel-webhook",
-    merchant_ref: pending.pesapal_order_id,
+    merchant_ref: pending.merchant_ref,
     pending_booking_id: pending.id,
     current_status: pending.status,
     duffel_order_id: order.id,
@@ -365,7 +365,7 @@ async function handleOrderCreationFailed(supabase: any, event: any): Promise<Res
     return new Response("ok", { status: 200, headers: CORS_HEADERS });
   }
   await alertFounder("PAID_NO_TICKET", {
-    merchant_ref: pending.pesapal_order_id,
+    merchant_ref: pending.merchant_ref,
     pending_booking_id: pending.id,
     duffel_order_id: orderId,
     amount_paid_kes: pending.total_kes,
@@ -379,8 +379,8 @@ async function handleOrderCreationFailed(supabase: any, event: any): Promise<Res
     supabase,
     "paid_booking_failed",
     pending,
-    pending.pesapal_tracking_id,
-    pending.pesapal_order_id,
+    pending.processor_transaction_id,
+    pending.merchant_ref,
   );
   return new Response("ok", { status: 200, headers: CORS_HEADERS });
 }

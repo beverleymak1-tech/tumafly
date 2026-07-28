@@ -3,7 +3,7 @@
 // Returns Duffel baggage services for a given offer, grouped by passenger.
 // Parallel architecture to get-seat-maps:
 //   - Same DUFFEL_MODE / DUFFEL_API_KEY mismatch guard pattern as
-//     create-payment, pesapal-webhook, mpesa-callback.
+//     initialize-payment, mpesa-callback.
 //   - Soft-skip in sandbox when no baggage services exposed.
 //   - Returns normalised options per-passenger, sorted by price ascending.
 //
@@ -21,7 +21,7 @@
 //
 // cost_kes is populated when convertible (currency is KES, or we can derive
 // USD→KES from offer pricing); otherwise null and frontend converts via its
-// own rateInfo. Authoritative re-validation happens in create-payment.
+// own rateInfo. Authoritative re-validation happens in initialize-payment.
 
 import { serve } from 'https://deno.land/std@0.208.0/http/server.ts';
 
@@ -78,8 +78,8 @@ async function alertFounder(alertType: string, context: Record<string, unknown>)
 }
 
 // ── FX: convert any Duffel currency to KES ─────────────────────────────────
-// Mirrors the toKES helper in create-payment so prices the user sees on the
-// baggage modal match what create-payment will re-cost server-side at booking.
+// Mirrors the toKES helper in initialize-payment so prices the user sees on the
+// baggage modal match what initialize-payment will re-cost server-side at booking.
 // Fetches live rates lazily, caches per-invocation, falls back to a static
 // table on network failure.
 const FALLBACK_RATES: Record<string, number> = {
@@ -226,7 +226,7 @@ serve(async (req: Request) => {
       const maxQ = Number(svc.maximum_quantity ?? meta.maximum_quantity ?? 1) || 1;
 
       // Derive cost_kes via authoritative server-side FX so the frontend
-      // doesn't need a per-currency rate. Mirrors create-payment's toKES so
+      // doesn't need a per-currency rate. Mirrors initialize-payment's toKES so
       // displayed prices match what gets charged. Live-rate fetched lazily
       // per currency (cached within this invocation); fallback table covers
       // network failure.

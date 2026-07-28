@@ -32,10 +32,10 @@ type AlertType =
   | "PAYSTACK_MISSING_REFERENCE"           // charge.success with no reference
   | "PAYSTACK_OR_DUFFEL_MODE_KEY_MISMATCH" // mode/key mismatch in paystack-webhook
   | "PAYSTACK_MODE_KEY_MISMATCH"           // mode/key mismatch in verify-payment
-  // Pre-Paystack plumbing (mpesa-callback, pesapal-webhook, create-payment)
+  // Duffel-touching EFs outside the main Paystack path (mpesa-callback, get-baggage-options)
   // Session 28b audit: was raised for months, never in the whitelist —
   // silently dropped on every fire. Adding now to close the visibility gap.
-  | "DUFFEL_MODE_KEY_MISMATCH"             // mode/key mismatch in mpesa/pesapal/create-payment
+  | "DUFFEL_MODE_KEY_MISMATCH"             // mode/key mismatch in mpesa-callback or get-baggage-options
   // Async Duffel decoupling (Session 28b commit #7b-ii)
   | "PROCESS_DUFFEL_PENDING_NOT_FOUND"     // DB webhook fired for a pending row that no longer exists
   | "PROCESS_DUFFEL_PAYSTACK_VERIFY_MISMATCH" // Paystack verify disagreed post-payment (soft-degrade)
@@ -62,8 +62,8 @@ const ALERT_CONFIG: Record<AlertType, { severity: string; subject: string; actio
   },
   AMOUNT_MISMATCH: {
     severity: "⚠️ HIGH",
-    subject: "Pesapal amount does not match expected total",
-    action: "Investigate. May indicate tampering or Pesapal bug. Contact customer to confirm.",
+    subject: "Payment amount does not match expected total",
+    action: "Investigate. May indicate tampering or a processor bug. Contact customer to confirm.",
   },
   PAYMENT_FAILED: {
     severity: "ℹ️ INFO",
@@ -132,11 +132,11 @@ const ALERT_CONFIG: Record<AlertType, { severity: string; subject: string; actio
           subject: "Environment key/mode mismatch in verify-payment",
           action: "PAYSTACK_MODE doesn't match the PAYSTACK_API_KEY prefix. All verify-payment requests refused with 503. Fix env vars in Supabase dashboard.",
         },
-        // ── Pre-Paystack plumbing (Session 28b audit gap-fill) ──────────────────
+        // ── Duffel-touching EFs outside the main Paystack path (Session 28b audit gap-fill) ──
         DUFFEL_MODE_KEY_MISMATCH: {
           severity: "🚨 CRITICAL",
-          subject: "Environment key/mode mismatch in mpesa/pesapal/create-payment",
-          action: "DUFFEL_MODE doesn't match the DUFFEL_API_KEY prefix in one of the pre-Paystack EFs (mpesa-callback, pesapal-webhook, create-payment, get-baggage-options). All calls to that EF refused with 503. Fix env vars in Supabase dashboard.",
+          subject: "Environment key/mode mismatch in mpesa-callback or get-baggage-options",
+          action: "DUFFEL_MODE doesn't match the DUFFEL_API_KEY prefix in one of the Duffel-touching EFs (mpesa-callback, get-baggage-options). All calls to that EF refused with 503. Fix env vars in Supabase dashboard.",
         },
         // ── Async Duffel decoupling (Session 28b commit #7b-ii) ─────────────────
         PROCESS_DUFFEL_PENDING_NOT_FOUND: {
