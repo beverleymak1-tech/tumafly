@@ -13,7 +13,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
-  <!-- Cloudflare Turnstile — bot-protection for /search-flights and /create-payment.
+  <!-- Cloudflare Turnstile — bot-protection for /search-flights and /initialize-payment.
        Widgets render invisibly into hidden containers at the bottom of the body.
        NB: use just `defer` (not `async defer`) so this script runs AFTER the body
        script defines window.onTurnstileLoad. The stub immediately below catches
@@ -41,9 +41,9 @@
             #success?ref=...). HTML default body data-view="home" paints
             momentarily before restoreFromUrl() swaps to the target.
 
-         2. Pesapal's post-payment top-level redirect to /?OrderMerchantReference=...
-            which is a full page reload — same paint-then-swap pattern,
-            visible to the customer ~10-15s after they pay.
+         2. Paystack's post-payment callback_url redirect to /?ref=TF-...
+            (used for edge cases / F5 recovery on #success) — full page reload,
+            same paint-then-swap pattern.
 
        Approach: read URL state synchronously, determine target view, inject
        a <style> rule that hides every #view-* except the target. Higher
@@ -114,7 +114,7 @@
       } catch (e) {
         // Defensive — never block page render on this guard.
         // If anything throws, fall through to the existing body-side
-        // pre-render logic (Pesapal block + restoreFromUrl).
+        // pre-render logic (post-pay stash block + restoreFromUrl).
       }
     })();
   </script>
@@ -5072,9 +5072,9 @@
       background: var(--bg);
       border: 1px solid var(--border);
       border-radius: var(--radius);
-      /* Tall enough that Pesapal's payment form fits without inner scrolling
-         on most viewports. The min() ensures we don't push the iframe taller
-         than the viewport on mobile. Earlier 580px was too short. */
+      /* Sized for the Paystack modal launcher + explanatory copy. Height held
+         intentionally tall so the CTA sits comfortably above the fold. min()
+         caps it below the mobile viewport height. */
       height: min(820px, calc(100vh - 80px));
       min-height: 580px;
       display: grid;
@@ -5083,17 +5083,6 @@
       font-size: 14px;
       padding: 20px;
       text-align: center;
-    }
-    /* When the iframe is mounted, drop the padding so the iframe fills the
-       wrap edge-to-edge. The loading-state placeholder uses the padding. */
-    .pay-iframe-wrap:has(iframe) {
-      padding: 0;
-    }
-    .pay-iframe-wrap iframe {
-      width: 100%;
-      height: 100%;
-      border: none;
-      border-radius: var(--radius);
     }
 
     .compliance {
@@ -7499,9 +7488,7 @@
             <!-- Batch 3 · #10 — M-Pesa stays disabled at launch. New hint
                  line under the meta gives users a persistent reason for
                  the "Coming soon" badge without needing a tap-response
-                 toast. Wired to Daraja directly post-launch (Pesapal's
-                 built-in M-Pesa will be disabled on our merchant account
-                 once we go live).
+                 toast. Wired to Daraja directly post-launch.
                  Step 4 redesign: wrapped in .pay-tab-item so both cards
                  share the same structural template inside the unified
                  accordion container. Pane is unused (M-Pesa disabled)
@@ -8268,7 +8255,7 @@
   // Returns null if email is valid, or a human-readable error string.
   // Single-line address only. Catches typos like missing @, missing TLD,
   // spaces, trailing dots, doubled @, and other obvious garbage.
-  // Mirrors the server-side validator in create-payment EF.
+  // Mirrors the server-side validator in initialize-payment EF.
   function validateEmail(email) {
     if (!email || typeof email !== 'string') return 'Invalid email address.';
     const trimmed = email.trim();
@@ -8537,7 +8524,7 @@ const TUMAFLY_WHATSAPP_WAME = '254113165503';
   // the key details in one glance without asking clarifying questions.
   function buildCancelMessage(trip, reasonLabel) {
     const pnr    = trip?.pnr || trip?.merchantReference || '';
-    const tfRef  = trip?.pesapalOrderId || '';
+    const tfRef  = trip?.merchantRef || '';
     const slices = trip?.offer?.slices || [];
     const out    = slices[0];
     const ret    = slices[1];
@@ -8581,7 +8568,7 @@ const TUMAFLY_WHATSAPP_WAME = '254113165503';
   // Batch 1 · #11b — Client-side fallback KES-per-vendor-currency table
   // for penalty fees where Duffel returned a currency other than KES/USD.
   //
-  // MIRRORS the FALLBACK_RATES table in supabase/functions/create-payment/index.ts
+  // MIRRORS the FALLBACK_RATES table in supabase/functions/initialize-payment/index.ts
   // — if you touch one, touch the other. Values are approximate spot rates,
   // fine for display of "change fees from KES X" where an exact figure isn't
   // legally binding (Duffel confirms the real fee at ticket-change time).
@@ -8759,7 +8746,7 @@ const TUMAFLY_WHATSAPP_WAME = '254113165503';
   // side-card strikethrough stays (they've seen it, the fact remains).
   let _inboundDriftState = null;
   // Step 2b service-id-error escalation counter. Increments each time
-  // create-payment returns a 409 for a stale seat/baggage service_id
+  // initialize-payment returns a 409 for a stale seat/baggage service_id
   // (see EF lines ~467/540 for the two error paths). First strike: we
   // clear the affected selections, toast the user, and let them re-pick
   // + re-Continue. Second strike on the same booking session: the offer's
@@ -9043,7 +9030,7 @@ const TUMAFLY_WHATSAPP_WAME = '254113165503';
   // ============================================================
   // Duffel offers expire 10-20 min after creation. Show a live countdown on the
   // booking and payment views so users see how long they have, and force a re-search
-  // if the offer dies mid-checkout. Backend safety still applies: create-payment.ts
+  // if the offer dies mid-checkout. Backend safety still applies: initialize-payment.ts
   // 410s if the offer has under 60s left at payment-start time, so the timer's job
   // is purely UX — preventing the customer from being surprised.
 
@@ -9284,16 +9271,16 @@ const TUMAFLY_WHATSAPP_WAME = '254113165503';
     if (view === 'payment') {
       // Step 4 — Path A3-safe: refresh on #payment stays on payment view.
       // Contact + traveler names rehydrated from the booking shadow, card
-      // iframe wiped to a fresh "Pay with card" button, accordion
-      // collapsed. A get-offer round-trip in the background reconstructs
-      // selectedOutbound/selectedInbound so a Pay-with-card tap fires a
-      // fresh startCardPayment cycle with a NEW merchant_ref (the abandoned
-      // pre-refresh Pesapal session times out on their side).
+      // "Pay with card" button restored, accordion collapsed. A get-offer
+      // round-trip in the background reconstructs selectedOutbound/
+      // selectedInbound so a Pay-with-card tap fires a fresh
+      // startCardPayment cycle with a NEW merchant_ref (the abandoned
+      // pre-refresh initialize-payment session times out on the processor side).
       //
       // Explicitly avoided (session 16 regression sources):
       //   - No URL params on #payment itself (nothing to persist there)
-      //   - No touch of the Pesapal iframe from the previous attempt
-      //     (we wipe it and replace with a Pay-with-card button)
+      //   - No touch of the Paystack modal state from the previous attempt
+      //     (we wipe any leftover payload and restore a Pay-with-card button)
       //   - No popstate intercepts anywhere
       //   - No extension of BOOKING_PASSENGER_SHADOW_KEY to hold
       //     seats/baggage/tracking_ids
@@ -9358,7 +9345,7 @@ const TUMAFLY_WHATSAPP_WAME = '254113165503';
       // interpret it as a second charge risk). Cleanest UX: bounce to home.
       // If the user needs to see their booking again, My Trips is the door.
       //
-      // The two shadows are already wiped at the Pesapal callback that
+      // The two shadows are already wiped at the Paystack callback that
       // brought the user here, but clear them defensively — a stray
       // #success URL (bookmark, back button chain) shouldn't leak old data.
       try { sessionStorage.removeItem(BOOKING_PASSENGER_SHADOW_KEY); } catch (_) {}
@@ -9821,12 +9808,12 @@ const TUMAFLY_WHATSAPP_WAME = '254113165503';
   let _paymentViewIsRestored = false;
   let _paymentRestoreLaunched = false;
 
-  // ─── Path 1 + Option B — auto-fire create-payment on #payment F5 ─────
+  // ─── Path 1 + Option B — auto-fire initialize-payment on #payment F5 ─────
   //
   // On refresh, restorePaymentView paints shimmer on the trip + price
   // panels. Without auto-fire, the user waits until they tap Card before
-  // create-payment runs, meaning the price panel would flash from client
-  // estimate → server breakdown as create-payment resolves.
+  // initialize-payment runs, meaning the price panel would flash from client
+  // estimate → server breakdown as initialize-payment resolves.
   //
   // With auto-fire, we silently run _payFromRestore in the background right
   // after restore hydration completes. The iframe loads invisibly (accordion
@@ -9836,9 +9823,9 @@ const TUMAFLY_WHATSAPP_WAME = '254113165503';
   //   _paymentPriceShimmerLocked: renderPaymentSummary treats client-estimate
   //     calls (no breakdown arg) as a no-op while true. Set at restore start,
   //     cleared when renderPaymentSummary(breakdown) fires from the
-  //     create-payment success path, OR when the safety timeout expires.
+  //     initialize-payment success path, OR when the safety timeout expires.
   //   _restoreCreatePaymentInFlight: prevents rapid F5s from stacking
-  //     multiple concurrent auto-fires (each mints its own Pesapal session
+  //     multiple concurrent auto-fires (each mints its own Paystack access_code
   //     + pending_bookings row).
   let _paymentPriceShimmerLocked = false;
   let _restoreCreatePaymentInFlight = false;
@@ -9950,7 +9937,7 @@ const TUMAFLY_WHATSAPP_WAME = '254113165503';
 
     // ── PHASE 2: fetch offer (network) ──────────────────────────────────
     //
-    // Turnstile token — same pattern as create-payment (booking view already
+    // Turnstile token — same pattern as initialize-payment (booking view already
     // hosts the payment widget). 15s max wait; empty token → EF 403s and we
     // land in the generic error path.
     let token = '';
@@ -10271,11 +10258,12 @@ const TUMAFLY_WHATSAPP_WAME = '254113165503';
   //   - Payment view's trip panel + price panel + fare timer
   //
   // What we intentionally DO NOT do:
-  //   - Resume the pre-refresh Pesapal iframe. It's wiped and replaced with a
-  //     fresh "Pay with card" button. The abandoned merchant_ref/tracking_id
-  //     times out on Pesapal's side without ever firing an IPN (user never
-  //     completed card entry). A subsequent Pay-with-card tap fires a NEW
-  //     startCardPayment cycle that mints a new tracking pair.
+  //   - Resume the pre-refresh Paystack modal state. Any leftover payload is
+  //     wiped and replaced with a fresh "Pay with card" button. The abandoned
+  //     merchant_ref/access_code times out on the processor side without ever
+  //     firing a webhook (user never completed card entry). A subsequent
+  //     Pay-with-card tap fires a NEW startCardPayment cycle that mints a
+  //     new payload.
   //   - Add popstate hooks.
   //   - Add URL params to #payment.
   //   - Pre-consume Turnstile tokens the Pay-with-card tap will need. The
@@ -10413,7 +10401,7 @@ const TUMAFLY_WHATSAPP_WAME = '254113165503';
       // Path 1 + Option B: hold the price shimmer until the server
       // breakdown arrives. Set BEFORE renderPaymentSummary is called so
       // its client-estimate paint becomes a no-op. Cleared inside
-      // renderPaymentSummary when a breakdown is passed (create-payment
+      // renderPaymentSummary when a breakdown is passed (initialize-payment
       // success), or by the safety timeout below if something goes wrong.
       _paymentPriceShimmerLocked = true;
 
@@ -10421,7 +10409,7 @@ const TUMAFLY_WHATSAPP_WAME = '254113165503';
       // #payment-price-slot, #payment-price-inline). restoreBooking populated
       // the BOOKING view's slots. Populate ours now — selectedOutbound is
       // hydrated so this reads correctly. lastPaymentBreakdown is null (we
-      // don't have a create-payment response) so the price panel WOULD show
+      // don't have a initialize-payment response) so the price panel WOULD show
       // the pre-payment estimate, except the shimmer lock above holds the
       // shimmer in place. The trip panel still renders normally.
       try { renderPaymentSummary(); } catch (e) { console.warn('[restorePaymentView] renderPaymentSummary failed:', e); }
@@ -10433,8 +10421,8 @@ const TUMAFLY_WHATSAPP_WAME = '254113165503';
       // _paymentRestoreLaunched guard prevents re-firing).
       //
       // In-flight guard: rapid F5 (< 30s apart) would otherwise stack
-      // concurrent create-payment calls, each generating orphan Pesapal
-      // sessions + pending_bookings rows.
+      // concurrent initialize-payment calls, each generating orphan Paystack
+      // access_codes + pending_bookings rows.
       if (!_restoreCreatePaymentInFlight) {
         _restoreCreatePaymentInFlight = true;
         // Mark launched so selectPayTab's tap-Card handler doesn't re-fire
@@ -10452,7 +10440,7 @@ const TUMAFLY_WHATSAPP_WAME = '254113165503';
         })();
 
         // Safety timeout — if breakdown never arrives (network wedge,
-        // create-payment error we didn't hook, user navigates away and
+        // initialize-payment error we didn't hook, user navigates away and
         // back), release the lock after 30s and reveal the client
         // estimate so the user isn't stuck on infinite shimmer. On the
         // happy path breakdown arrives in 8-16s and this is a no-op.
@@ -10952,11 +10940,11 @@ const TUMAFLY_WHATSAPP_WAME = '254113165503';
   //   - Non-sensitive shadow: restored to DOM + memory on #booking F5
   //   - Secure shadow: restored to MEMORY ONLY. DOM inputs on #booking
   //     stay blank; user must re-type to Save. On #payment F5, memory
-  //     hydration lets goToPayment fire a valid create-payment payload
+  //     hydration lets goToPayment fire a valid initialize-payment payload
   //     without ever surfacing the fields to the user.
   //
   // Same write cadence + same clear points as BOOKING_PASSENGER_SHADOW_KEY.
-  // Cleared alongside it on Pesapal-callback success and resetAndGoHome.
+  // Cleared alongside it on Paystack-callback success and resetAndGoHome.
   //
   // Shape stored:
   //   { travelers: [{born_on, passport: {country, number, expires}}, ...] }
@@ -11169,10 +11157,10 @@ const TUMAFLY_WHATSAPP_WAME = '254113165503';
   // BOOKING_EXTRAS_SHADOW_KEY, written alongside this one in goToPayment
   // and restored by restorePaymentView. That separation preserves the
   // Session 16 guardrail (never extend BOOKING_PASSENGER_SHADOW_KEY with
-  // seat/baggage service_ids) while letting the sidecard + create-payment
+  // seat/baggage service_ids) while letting the sidecard + initialize-payment
   // reflect the user's ancillary picks after F5.
   //
-  // Written ONCE per Continue click, cleared on Pesapal callback success
+  // Written ONCE per Continue click, cleared on Paystack callback success
   // and on resetAndGoHome. TTL of 20 min is an outer bound; the fare
   // check (fare_expires_at_ms > now) fires first for any fare that
   // already elapsed.
@@ -15004,7 +14992,7 @@ const TUMAFLY_WHATSAPP_WAME = '254113165503';
       for (let paxIdx = 0; paxIdx < passengerCount; paxIdx++) {
         // Skip unsaved/cleared traveler slots — a generic "Passenger N"
         // row with no name would be misleading and any pick would be
-        // orphaned at Pesapal submission.
+        // orphaned at Paystack submission.
         if (!travelerStates[paxIdx]?.saved) continue;
         const sel = selectedSeats[paxIdx]?.[leg.segment_id] || null;
         const paxName = travelerStates[paxIdx]?.data?.given_name
@@ -15474,7 +15462,7 @@ const TUMAFLY_WHATSAPP_WAME = '254113165503';
   //   user taps "Add bags" → openBaggageModal() → renderBaggageModal()
   //     • per-passenger tabs, stepper-driven cards
   //     • Done commits draft to selectedBaggages
-  //   selectedBaggages flows into create-payment via collectBaggageSelections()
+  //   selectedBaggages flows into initialize-payment via collectBaggageSelections()
   //
   // Selection shape: { [paxIdx]: { [service_id]: quantity } }
   //   - quantity is bounded by option.max_quantity (returned by the EF)
@@ -15486,7 +15474,7 @@ const TUMAFLY_WHATSAPP_WAME = '254113165503';
   }
 
   // Convert a baggage option's cost to KES. EF now always returns cost_kes
-  // (converted server-side via the same toKES helper create-payment uses), so
+  // (converted server-side via the same toKES helper initialize-payment uses), so
   // we just trust it. Currency toggle is handled downstream via formatKes.
   function bagOptionCostKes(opt) {
     return Number(opt.cost_kes) || 0;
@@ -15539,7 +15527,7 @@ const TUMAFLY_WHATSAPP_WAME = '254113165503';
     return n;
   }
 
-  // Returns array sent to create-payment for server-side re-validation
+  // Returns array sent to initialize-payment for server-side re-validation
   function collectBaggageSelections() {
     const out = [];
     for (const paxIdx of Object.keys(selectedBaggages)) {
@@ -17158,7 +17146,7 @@ const TUMAFLY_WHATSAPP_WAME = '254113165503';
     // that offer — NOT a single-leg price. Summing them double-counts.
     //
     // When the user picks return, selectedInbound points to the FINAL offer chosen
-    // for the pair (whose offer_id is what gets sent to create-payment). If they
+    // for the pair (whose offer_id is what gets sent to initialize-payment). If they
     // picked the default/cheapest return, selectedInbound.offer === selectedOutbound.offer.
     // If they picked a non-default return, selectedInbound.offer is a different
     // offer (same outbound segment, different return) and is the one we book.
@@ -17168,7 +17156,7 @@ const TUMAFLY_WHATSAPP_WAME = '254113165503';
     const finalSelection = selectedInbound || selectedOutbound;
     const baseKes = finalSelection?.cabinPricing?.price_kes || 0;
     // Seat selection fees roll into the base (treated as part of the flight price
-    // for fee/tax purposes — Pesapal gross-up applies on the full subtotal).
+    // for fee/tax purposes — Paystack gross-up applies on the full subtotal).
     const seatsKes = seatTotalCostKes();
     const baggageKes = baggageTotalCostKes();
     const subtotal = baseKes + seatsKes + baggageKes + TUMAFLY_SERVICE_FEE_KES;
@@ -17192,7 +17180,7 @@ const TUMAFLY_WHATSAPP_WAME = '254113165503';
     if (!slot) return;
 
     // Booking page: estimate client-side using same formula as backend.
-    // Payment page: pass `breakdown` from the create-payment server response (authoritative).
+    // Payment page: pass `breakdown` from the initialize-payment server response (authoritative).
     // Once we're on the payment page (opts.isPayment), the panel title becomes
     // "Price details" regardless of whether the server breakdown has arrived yet —
     // the user has committed to the booking, so calling it an "estimate" is wrong.
@@ -17652,7 +17640,7 @@ const TUMAFLY_WHATSAPP_WAME = '254113165503';
   // submit a doomed form. Refresh CTA re-runs the search with the same
   // criteria and lands them on fresh results.
   // Modal shown when the current Duffel offer is no longer valid — either
-  // fare-timer hit zero, or a get-offer / create-payment call came back 410.
+  // fare-timer hit zero, or a get-offer / initialize-payment call came back 410.
   // As of Step 2b there's NO button: user reads the notice, we auto-refresh
   // their search after ~1.5s. Rationale: the user has already lost their fare
   // (nothing they can do to save it), so an "OK" button just adds a click
@@ -17789,7 +17777,7 @@ const TUMAFLY_WHATSAPP_WAME = '254113165503';
     }
   }
 
-  // Step 2b price-drift notification modal. Shown when create-payment returns
+  // Step 2b price-drift notification modal. Shown when initialize-payment returns
   // 409 PRICE_DRIFT — the base fare has shifted more than 1% between the
   // user's last view and the moment of Continue-to-payment click.
   //
@@ -17964,7 +17952,7 @@ const TUMAFLY_WHATSAPP_WAME = '254113165503';
 
     // Step 4 (Path A1): stash the offer_id so a #payment refresh can bounce
     // the user back to booking view with everything preserved. Single call
-    // site, single write per Continue-click. Cleared on Pesapal callback
+    // site, single write per Continue-click. Cleared on Paystack callback
     // success + on resetAndGoHome.
     try { stashPaymentReturn(); } catch (_) {}
     // Extras shadow — one-time snapshot of seats + baggage tied to this
@@ -18015,10 +18003,10 @@ const TUMAFLY_WHATSAPP_WAME = '254113165503';
     // on the booking view where the user left off, avoiding the confusing
     // "wait, I was going to pay and now there's a modal on the payment
     // view" experience. On the success path, startCardPayment calls
-    // showView('payment') just before rendering the Pesapal iframe.
+    // showView('payment') just before opening the Paystack modal.
     //
     // Disable Continue button + show inline spinner so user knows something
-    // is happening during the ~6-8s Turnstile + create-payment round-trip.
+    // is happening during the ~6-8s Turnstile + initialize-payment round-trip.
     // Both the desktop button and mobile sticky-bar button need disabling
     // so a user tapping around during the wait doesn't fire duplicate calls.
     const _btns = [
@@ -18026,7 +18014,7 @@ const TUMAFLY_WHATSAPP_WAME = '254113165503';
       document.getElementById('continue-to-pay-btn-mobile'),
     ].filter(Boolean);
     _btns.forEach(b => { b.classList.add('btn-loading'); b.disabled = true; });
-    // Auto-load Pesapal iframe — no "Pay with card" click required.
+    // Auto-launch Paystack modal — no "Pay with card" click required.
     // startCardPayment will re-enable the buttons and switch views as needed.
     startCardPayment().finally(() => {
       // Always re-enable Continue buttons, even if we ended up switching
@@ -18197,7 +18185,7 @@ const TUMAFLY_WHATSAPP_WAME = '254113165503';
         renderBookingSummary();
         // Show the modal. Return the retry promise from the callback so
         // _showPriceDriftModal's internal await sees the ACTUAL completion
-        // time (Turnstile + create-payment + showView 'payment'). Without
+        // time (Turnstile + initialize-payment + showView 'payment'). Without
         // returning it, the callback resolves immediately and the modal
         // dismisses at the 6s min-dwell mark even if the retry is still
         // in flight — user then sees booking view for a few seconds before
@@ -18264,7 +18252,7 @@ const TUMAFLY_WHATSAPP_WAME = '254113165503';
         showAlert('booking-alert',
           (data.error || 'Some selections are no longer available.') + alertSuffix);
         // Reset iframe wrap so the next Continue-click doesn't see stale
-        // pesapal iframe HTML lying around.
+        // payment payload lying around.
         const wrap = document.getElementById('card-iframe-wrap');
         if (wrap) wrap.innerHTML = '';
         return;
@@ -18359,8 +18347,9 @@ const TUMAFLY_WHATSAPP_WAME = '254113165503';
   //
   // On onSuccess we can't fully trust the browser — verify-payment does a
   // server-side Paystack lookup before committing state. We navigate straight
-  // to #success and start the post-redirect poll, reusing the machinery
-  // originally built for Pesapal's browser-redirect flow.
+  // to #success and start the post-payment poll flow (originally the
+  // post-redirect handler for Pesapal-era browser callbacks, retained
+  // now as the shared confirmation-poll machinery for Paystack).
 
   async function _openPaystackModal() {
     if (typeof PaystackPop === 'undefined') {
@@ -18598,7 +18587,7 @@ const TUMAFLY_WHATSAPP_WAME = '254113165503';
 
   function startPolling() {
     pollStartedAt = Date.now();
-    // Don't show any "waiting" UI here — the Pesapal iframe is fully in charge
+    // Don't show any "waiting" UI here — the Paystack modal is fully in charge
     // of telling the user what to do (enter card, click pay, etc.). Earlier
     // users reported the "Waiting for payment confirmation…" spinner was
     // confusing — they thought they'd already clicked pay and the spinner
@@ -18624,7 +18613,7 @@ const TUMAFLY_WHATSAPP_WAME = '254113165503';
   async function pollOnce() {
     if (!activeMerchantRef) return;
     // Previously: a 5-minute "Still waiting…" amber alert. Removed —
-    // it caused user confusion and the Pesapal iframe already explains
+    // it caused user confusion and the Paystack modal already explains
     // the in-progress state. Polling continues silently until the
     // server returns confirmed / failed / needs_support. If the user
     // closes the tab before confirmation, the webhook still resolves
@@ -18641,10 +18630,9 @@ const TUMAFLY_WHATSAPP_WAME = '254113165503';
       if (data.state === 'confirmed' && data.booking) {
         const ref = data.booking.booking_reference || activeMerchantRef;
         document.getElementById('success-ref').textContent = ref;
-        // Stash for the inevitable Pesapal top-level redirect that follows.
-        // Pesapal redirects the browser to /?OrderMerchantReference=... a few
-        // seconds after payment confirms. That redirect blows away our JS
-        // state. Without this stash, the fresh post-redirect page wouldn't
+        // Stash for F5-recovery on #success. The user could refresh the
+        // page while on the success view (or land here via a bookmarked
+        // /?ref=TF-... URL). Without this stash, the fresh page wouldn't
         // know we'd already confirmed — and would render a "Confirming…"
         // spinner state that wipes the hero. With it, the boot block reads
         // the stash and renders the PNR directly. No spinner, no flash.
@@ -19643,20 +19631,26 @@ const TUMAFLY_WHATSAPP_WAME = '254113165503';
     else turnstilePaymentToken = '';
   }
 
-  // ── Pesapal callback handler — post-redirect flow ──────────────────────
+  // ── Post-payment poll flow ─────────────────────────────────────────────
   //
-  // After successful payment Pesapal does a top-level browser redirect to
-  // our callback_url with ?OrderMerchantReference=TF-... appended. At the
-  // moment of redirect the booking row is NOT guaranteed to be committed
-  // yet — Pesapal's IPN to pesapal-webhook (which creates the Duffel order
-  // + updates bookings) often hasn't completed. A single fetch races that
-  // work and frequently comes back with no PNR, leaving the user stuck on
-  // a merchant_ref forever.
+  // After Paystack's InlineJS onSuccess fires we can't yet render a PNR — the
+  // paystack-webhook (which advances pending_bookings → duffel_pending and
+  // hands off to process-duffel-booking for the Duffel order + email) usually
+  // hasn't completed. A single fetch races that work and frequently comes back
+  // with no PNR, leaving the user stuck on a merchant_ref forever.
+  //
+  // This module is also entered on Paystack's callback_url redirect for legacy
+  // rows or edge cases (?ref=TF-... at page load).
   //
   // Architecture: poll payment-status every 2s until a terminal state
   // (confirmed / failed / needs_support) or a 60s soft-timeout. During
   // polling the user sees a "Confirming your payment…" spinner. Terminal
   // states render their own UI (PNR / failure / "we'll email you").
+  //
+  // Session 28c #12 layered Realtime on top: _openRealtimeChannel() opens a
+  // best-effort WebSocket subscription so a webhook-driven UPDATE can short-
+  // circuit the timer. The 2s polling loop remains as fallback for any tab
+  // where Realtime never opens (older tab, storage disabled, etc.).
 
   const POST_REDIRECT_POLL_INTERVAL_MS = 2000;
   const POST_REDIRECT_POLL_TIMEOUT_MS  = 60 * 1000;
@@ -20206,7 +20200,7 @@ const TUMAFLY_WHATSAPP_WAME = '254113165503';
 
   // Returns the user's JWT if signed in, otherwise the anon key. Used as the
   // Authorization bearer when calling EFs that need to know who the user is
-  // (e.g. create-payment, to stash user_id on pending_bookings). The EF
+  // (e.g. initialize-payment, to stash user_id on pending_bookings). The EF
   // accepts either — it tries auth.getUser(jwt) and falls back to guest if
   // the token doesn't resolve to a user.
   async function getAuthBearer() {
@@ -22389,7 +22383,7 @@ const TUMAFLY_WHATSAPP_WAME = '254113165503';
     // Header info row
     const email  = trip.passengerEmail || '';
     const pnrRef = trip.pnr || trip.merchantReference || '';
-    const tfRef  = trip.pesapalOrderId || '';
+    const tfRef  = trip.merchantRef || '';
 
     // Payment summary numbers — render KES if we have the pending match,
     // fall back to source currency otherwise.
@@ -22409,12 +22403,16 @@ const TUMAFLY_WHATSAPP_WAME = '254113165503';
       : (trip.totalAmount ? `${trip.totalCurrency} ${Number(trip.totalAmount).toLocaleString()}` : '—');
 
     const _pmLower = (trip.paymentMethod || '').toLowerCase();
-    // Legacy Pesapal bookings stay labeled "Card"; new Paystack bookings
-    // also render as "Card". M-Pesa gets its own label. Payment processor
-    // is intentionally not surfaced to customers here.
-    const paymentMethodPretty = (_pmLower === 'pesapal' || _pmLower === 'paystack' || _pmLower === 'card')
-      ? 'Card'
-      : _pmLower.includes('mpesa') ? 'M-Pesa'
+    // Show the specific card brand when we have it (e.g. "Visa ****1234"
+    // reads better than "Card ****1234" — user instantly recognises the
+    // card). Falls back to generic "Card" when the processor only reports
+    // the channel and not the brand. M-Pesa gets its own label. Payment
+    // processor is intentionally not surfaced to customers here.
+    const _cardBrands = ['visa', 'mastercard', 'amex', 'discover', 'verve'];
+    const paymentMethodPretty =
+        _cardBrands.includes(_pmLower)                     ? (_pmLower.charAt(0).toUpperCase() + _pmLower.slice(1))
+      : (_pmLower === 'paystack' || _pmLower === 'card')   ? 'Card'
+      : _pmLower.includes('mpesa')                         ? 'M-Pesa'
       : (trip.paymentMethod ? trip.paymentMethod : '—');
 
     const purchaseDate = trip.createdAt
@@ -22686,10 +22684,10 @@ const TUMAFLY_WHATSAPP_WAME = '254113165503';
               <span class="value">${(() => {
                 // Append the last-4 of the payment account inline so users
                 // can confirm WHICH card/account was used (e.g., "Visa ****1234"
-                // or "M-Pesa ****8881"). Pulled from Pesapal's masked
-                // payment_account at webhook time. Replaces the old Billing
-                // name row, which was always passenger 0's name (not actually
-                // queryable as "the person who paid" from Pesapal).
+                // or "M-Pesa ****8881"). Pulled from the payment processor's
+                // masked payment_account at webhook time. Replaces the old
+                // Billing name row, which was always passenger 0's name
+                // (not actually queryable as "the person who paid").
                 const last4 = trip.paymentAccountLast4;
                 return last4 ? `${paymentMethodPretty} ****${escapeHtml(last4)}` : paymentMethodPretty;
               })()}</span>
