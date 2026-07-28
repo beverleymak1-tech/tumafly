@@ -19733,7 +19733,21 @@ const TUMAFLY_WHATSAPP_WAME = '254113165503';
     // survive across the transition keeps the guard honest until they pick
     // a fresh offer (which is a fresh offer_id, hence fresh pair, hence
     // guaranteed no false-positive block).
-    _thisTabCommittedPay = false;
+    //
+    // Session 28h.4 — _thisTabCommittedPay intentionally NOT reset here.
+    // If we're in a terminal state (confirmed / refunding / failed), the
+    // tab is holding a message the user needs to see; a slower sibling's
+    // preempt-modal-shown must not schedule a bg-close on us (see L20348
+    // guard — the design intent explicitly documented there was being
+    // undone by this reset). The legitimate re-arm point is
+    // resetAndGoHome() at L11900, which the "Book another trip" button
+    // calls — that's where the flag correctly flips back to false for a
+    // fresh booking in this tab.
+    //
+    // Regression signature (Test 5 in Session 28d Polish): tab that paid
+    // successfully closes ~5s after a sibling's preempt-modal-shown,
+    // rather than staying open on State 1. If you find yourself adding
+    // `_thisTabCommittedPay = false;` back here, re-read L20344-20348.
   }
 
   function _phaseCopyFor(elapsedSeconds) {
