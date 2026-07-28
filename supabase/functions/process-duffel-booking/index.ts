@@ -81,10 +81,20 @@ function classifyDuffelError(errorData: any): "offer_dead" | "book_failed" {
 }
 
 // ── Paystack helpers (kept in sync with paystack-webhook) ─────────────────
-function normalizePaystackChannel(channel: string | null | undefined): string {
+// See paystack-webhook for full comment on card_type brand extraction.
+function normalizePaystackChannel(
+  channel: string | null | undefined,
+  authorization?: any,
+): string {
   if (!channel) return "unknown";
   const c = String(channel).toLowerCase();
-  if (c === "card") return "card";
+  if (c === "card") {
+    const brand = authorization?.card_type;
+    if (typeof brand === "string" && brand.length > 0) {
+      return brand.toLowerCase();
+    }
+    return "card";
+  }
   if (c === "mobile_money" || c === "mpesa") return "mpesa";
   if (c === "bank" || c === "bank_transfer") return "bank";
   if (c === "ussd") return "ussd";
@@ -180,7 +190,7 @@ serve(async (req) => {
         const vd = verifyData.data;
         authorizationCode = vd.authorization?.authorization_code || null;
         const cardLast4 = extractLast4FromAuth(vd.authorization);
-        paystackChannel = normalizePaystackChannel(vd.channel || pending.payment_method);
+        paystackChannel = normalizePaystackChannel(vd.channel || pending.payment_method, vd.authorization);
         const mpesaMobile = paystackChannel === "mpesa"
           ? (vd.customer?.phone || vd.authorization?.mobile_money?.phone || null)
           : null;

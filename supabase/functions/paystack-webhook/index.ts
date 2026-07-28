@@ -95,11 +95,26 @@ async function verifyPaystackSignature(rawBody: string, signature: string, secre
 }
 
 // Small helper: normalize payment_method from Paystack's channel string to
-// the canonical values our DB uses ("card", "mpesa", "bank", etc.)
-function normalizePaystackChannel(channel: string | null | undefined): string {
+// the canonical values our DB uses. For card channels, prefers the specific
+// brand from authorization.card_type ("visa", "mastercard", "amex", etc.)
+// so my-trips can render "Visa ****1234" rather than a generic "Card ****1234".
+// Falls back to "card" if brand can't be determined.
+function normalizePaystackChannel(
+  channel: string | null | undefined,
+  authorization?: any,
+): string {
   if (!channel) return "unknown";
   const c = String(channel).toLowerCase();
-  if (c === "card") return "card";
+  if (c === "card") {
+    // Paystack authorization.card_type values: "visa" | "mastercard" |
+    // "verve" | "amex" | "discover" (plus rarer variants). We store the
+    // brand lowercased; frontend title-cases for display.
+    const brand = authorization?.card_type;
+    if (typeof brand === "string" && brand.length > 0) {
+      return brand.toLowerCase();
+    }
+    return "card";
+  }
   if (c === "mobile_money" || c === "mpesa") return "mpesa";
   if (c === "bank" || c === "bank_transfer") return "bank";
   if (c === "ussd") return "ussd";
@@ -268,7 +283,7 @@ serve(async (req) => {
   const data = event.data || {};
   const reference = data.reference || "";
   const paystackTxId = String(data.id || "");
-  const channel = normalizePaystackChannel(data.channel);
+  const channel = normalizePaystackChannel(data.channel, data.authorization);
   const paystackAmountKobo = Number(data.amount) || 0;
   const paidAmountKes = paystackAmountKobo / 100;
 
