@@ -1,0 +1,36 @@
+-- Session 28e commit #10.8 — backfill REPLICA IDENTITY FULL migration
+--
+-- Codifies the REPLICA IDENTITY FULL setting on the three tables that
+-- participate in the supabase_realtime publication. Ad-hoc SQL applied
+-- this during Session 28c commit #10d POC debugging (see 28c Closeout
+-- §7 and 28c Addendum §4.2 item 10.8); this migration encodes it so
+-- re-provisions (fresh clones, staging spin-ups, backup restores) do
+-- not silently lose the setting.
+--
+-- Why FULL matters here. Postgres controls the pre-image (old row)
+-- data written to the WAL for UPDATE/DELETE events via REPLICA IDENTITY.
+-- Default logs only the primary key of the old row; FULL logs the whole
+-- old row. Supabase Realtime evaluates its per-subscriber RLS against
+-- the old-row image on UPDATE; without FULL, guest RLS evaluation can
+-- silently drop pushes (WAL still advances, `pg_replication_slots.
+-- confirmed_flush_lsn` still climbs, subscribers still show SUBSCRIBED
+-- — but no rows are delivered). This exact failure mode was the second
+-- of two landmines during the Session 28c #10d debug loop; the first
+-- was the realtime.apply_rls uuid-cast bug (fixed in migration
+-- 20260721100000_guard_own_policies_from_guest_jwt.sql).
+--
+-- Companion to 20260720170000_enable_realtime_replication.sql, which
+-- adds the same three tables to the publication. This migration
+-- sequences after it in filename order so a `db reset` runs the
+-- publication ADD first, then the identity setting.
+--
+-- public.refunds is intentionally excluded — not in the supabase_realtime
+-- publication, no client subscribes to it, and the refunding UI state is
+-- derived from bookings.state transitions instead. Verified frontend has
+-- zero postgres_changes subscriptions on refunds (Session 28e-10.8).
+--
+-- Idempotent: ALTER TABLE ... REPLICA IDENTITY FULL is a no-op when the
+-- table is already at FULL. Safe to re-run.
+ALTER TABLE public.pending_bookings       REPLICA IDENTITY FULL;
+ALTER TABLE public.bookings               REPLICA IDENTITY FULL;
+ALTER TABLE public.booking_status_history REPLICA IDENTITY FULL;
