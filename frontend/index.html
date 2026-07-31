@@ -20316,6 +20316,30 @@ const TUMAFLY_WHATSAPP_WAME = '254113165503';
   // ── Auth state ───────────────────────────────────────────────
   let currentUser = null;  // supabase User object or null
   let authCallback = null; // fn to call after successful sign-in (post-booking nudge)
+
+  // Session 28e-10.3: idempotency guard for onSignedIn.
+  //
+  // Two Supabase mechanisms answer the same "give me the current session on
+  // boot" question and both fire on every page load with a live session:
+  //
+  //   1. sb.auth.getSession() → onSignedIn(session.user)   (see boot below)
+  //   2. sb.auth.onAuthStateChange fires INITIAL_SESSION → onSignedIn again
+  //
+  // On top of that, TOKEN_REFRESHED fires roughly every 50 min and re-invokes
+  // onAuthStateChange → onSignedIn. Downstream flows (profile-completion
+  // callback, itinerary auth-restore) may also re-call onSignedIn directly.
+  // Session 28h.4 diagnostic testing observed 2–9 fires per page load.
+  //
+  // Every fire re-runs the full downstream battery (nav update, saved-travelers
+  // fetch, profile load, my-trips fetch, itinerary restore). All idempotent
+  // but wasteful — duplicate Supabase reads, duplicate EF invocations,
+  // duplicate DOM re-renders, and pollution of the console diagnostic.
+  //
+  // Guard by user.id: first call records the id; subsequent calls with the
+  // same id short-circuit. onSignedOut clears the flag so a different-user
+  // sign-in (or the same user re-signing in after signing out) still runs
+  // the full battery.
+  let _onSignedInFiredForSessionId = null;
   let pendingPhone = '';   // E.164 phone during OTP flow
 
   // Initialise on load — restore session if browser has one
@@ -20813,6 +20837,14 @@ const TUMAFLY_WHATSAPP_WAME = '254113165503';
   let _pendingProfileCapture = false;
 
   function onSignedIn(user) {
+    // Session 28e-10.3: idempotency guard. See _onSignedInFiredForSessionId
+    // declaration for the rationale. Guest → signed-in → signed-out → same
+    // user signed-in again still runs the full battery because onSignedOut
+    // clears the flag.
+    if (_onSignedInFiredForSessionId === user.id) {
+      return;
+    }
+    _onSignedInFiredForSessionId = user.id;
     console.log('[auth] onSignedIn called, current view:', document.body.getAttribute('data-view'));
     currentUser = user;
     // Defer nav update if we're between OTP verify and profile completion —
@@ -20925,6 +20957,11 @@ const TUMAFLY_WHATSAPP_WAME = '254113165503';
   }
 
   function onSignedOut() {
+    // Session 28e-10.3: clear the idempotency flag so a subsequent sign-in
+    // (same or different user) runs the full onSignedIn battery. Any
+    // downstream state that a fresh sign-in needs to re-fetch (nav pill,
+    // saved travelers, profile, my-trips) depends on this.
+    _onSignedInFiredForSessionId = null;
     currentUser = null;
     updateNavForGuest();
     // Sign-out doesn't redirect — the user stays on whatever view they're on.
