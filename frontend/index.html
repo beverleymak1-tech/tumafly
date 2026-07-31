@@ -18159,9 +18159,16 @@ const TUMAFLY_WHATSAPP_WAME = '254113165503';
       // Guarded by _turnstileAutoRetry so a repeated 403 doesn't recurse.
       // First 403 sets the flag on the retry call; retry's 403 skips this
       // branch and lands in the generic error path below.
+      // Session 28e-10.1: release the in-flight guard before recursing.
+      // Without this, the retry hits `if (_paystackInitInFlight) return;`
+      // at the top of startCardPayment and never actually fires the fetch,
+      // leaving the user in a silent broken state. Parent's finally still
+      // sets the flag false at the end; the early clear here just lets the
+      // retry enter.
       if (res.status === 403 && !_turnstileAutoRetry) {
         console.warn('[startCardPayment] 403 verification failed — attempting invisible retry');
         resetTurnstile('payment');
+        _paystackInitInFlight = false;
         // ensureTurnstileToken awaits a fresh token from the reset widget.
         // startCardPayment re-runs the full flow including a fresh
         // ensureTurnstileToken call at its top, so we don't need to
@@ -18305,6 +18312,16 @@ const TUMAFLY_WHATSAPP_WAME = '254113165503';
       // the transaction. The Card row tap is what actually opens the modal
       // (see selectPayTab); no in-pane button anymore.
       _paystackAccessCode = data.access_code || null;
+
+      // Session 28e-10.1: reset Turnstile widget after successful init.
+      // Cloudflare Turnstile tokens are single-use — the backend just
+      // consumed this one during verification. Without a reset,
+      // ensureTurnstileToken's cache would return the same (now-consumed)
+      // token on a subsequent initialize-payment call, yielding a 403
+      // "Verification failed" response. Resetting here clears
+      // turnstilePaymentToken and re-renders the widget so the next
+      // ensureTurnstileToken('payment') call awaits a fresh challenge.
+      resetTurnstile('payment');
 
       // Session 19 ONE-TAP: if the user already tapped Card row before
       // this fetch resolved (restore path), or resetPaymentPane fired
