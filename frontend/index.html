@@ -7970,6 +7970,20 @@
   let _paystackHandle = null;
   // Cached access_code from initialize-payment, consumed by _openPaystackModal.
   let _paystackAccessCode = null;
+
+  // Session 28e-10.1: snapshot of the payload fields that shaped the cached
+  // access_code. The access_code is minted server-side by Paystack against
+  // whatever email/phone/passengers/seats/baggages we sent to initialize-
+  // payment. Popup.resumeTransaction(access_code) then renders the modal
+  // using Paystack's copy of those details — our frontend can update
+  // contactData all it wants, the modal keeps showing whatever was baked
+  // into the access_code. Without this snapshot, goToPayment's fast-path
+  // reuses the cached access_code when the offer_id + fare timer look
+  // fresh, missing edits to any user-editable field between attempts
+  // (Session 27c stale-email bug). Set alongside _paystackAccessCode on
+  // successful init; must be cleared at every _paystackAccessCode = null
+  // site. See _computePaystackPayloadSnap for what's compared.
+  let _paystackAccessCodePayloadSnap = null;
   // One-tap flow (Session 19): if true, startCardPayment auto-opens the
   // Paystack modal on success. Set by selectPayTab when the user tapped
   // Card row BEFORE initialize-payment resolved (restore path); reset on
@@ -17983,7 +17997,17 @@ const TUMAFLY_WHATSAPP_WAME = '254113165503';
     // and let selectPayTab open the modal with the cached access code.
     const _offerNow = (selectedInbound || selectedOutbound)?.cabinPricing?.offer_id;
     const _fareValid = getEffectiveExpiresAtMs() > Date.now();
-    if (_paystackAccessCode && _offerNow && _fareValid && !fareTimerExpired) {
+    // Session 28e-10.1: also require the payload snapshot to match the
+    // current form state. contactData / passengerData were freshly set
+    // above from validated DOM values; seats/baggages come from their
+    // live feeder state. Without this check, editing email/phone/passenger
+    // fields between attempts would reuse a cached access_code whose
+    // server-side Paystack record still holds the OLD values (Session 27c
+    // stale-email bug).
+    const _payloadSnapNow = _computePaystackPayloadSnap();
+    if (_paystackAccessCode && _offerNow && _fareValid && !fareTimerExpired
+        && _paystackAccessCodePayloadSnap !== null
+        && _paystackAccessCodePayloadSnap === _payloadSnapNow) {
       showView('payment');
       return;
     }
@@ -17992,6 +18016,7 @@ const TUMAFLY_WHATSAPP_WAME = '254113165503';
     // the moment the background fetch resolves. The user must reach
     // #payment and tap Card row.
     _paystackAccessCode = null;
+    _paystackAccessCodePayloadSnap = null;
     _paystackOpenOnReady = false;
 
     // Legacy restore-mode flags — no longer read by selectPayTab, but
@@ -18056,6 +18081,7 @@ const TUMAFLY_WHATSAPP_WAME = '254113165503';
             // now-invalid one. Then reuse the search-expired flow (timed
             // variant — auto-bounces to fresh results).
             _paystackAccessCode = null;
+            _paystackAccessCodePayloadSnap = null;
             showSearchExpiredModal();
             return;
           }
@@ -18087,6 +18113,33 @@ const TUMAFLY_WHATSAPP_WAME = '254113165503';
       showAlert('payment-alert', 'Just a moment — preparing your payment…', 'info');
     } else {
       startCardPayment();
+    }
+  }
+
+  // Session 28e-10.1: canonical string form of the payload fields that
+  // initialize-payment sends. Compared in goToPayment's fast-path check
+  // to detect whether a user edit since the last init has invalidated
+  // the cached access_code. Under Option A architecture (single sanctioned
+  // entry to #payment via Continue click → goToPayment), the module-state
+  // values (contactData, passengerData) are freshly written by goToPayment
+  // BEFORE this helper runs, so state-source is trustworthy. Seats and
+  // baggages are drift-free (their feeder state writes immediately on
+  // user click, not batched to Continue).
+  //
+  // Excludes turnstile_token (one-shot per fetch, not part of the semantic
+  // payload). Returns null on stringify throw (e.g. cyclic ref from a
+  // future refactor) so the caller treats it as "unable to snapshot,
+  // force re-init" via the equality check.
+  function _computePaystackPayloadSnap() {
+    try {
+      return JSON.stringify({
+        contact: contactData || null,
+        passengers: passengerData || null,
+        seats: collectSeatSelections(),
+        baggages: collectBaggageSelections(),
+      });
+    } catch (_) {
+      return null;
     }
   }
 
@@ -18273,6 +18326,7 @@ const TUMAFLY_WHATSAPP_WAME = '254113165503';
         // the visible #payment-alert rather than an in-pane button.
         showView('payment');
         _paystackAccessCode = null;
+        _paystackAccessCodePayloadSnap = null;
         _paystackOpenOnReady = false;
         showAlert('payment-alert',
           (data.error || 'Could not start payment.') +
@@ -18312,6 +18366,12 @@ const TUMAFLY_WHATSAPP_WAME = '254113165503';
       // the transaction. The Card row tap is what actually opens the modal
       // (see selectPayTab); no in-pane button anymore.
       _paystackAccessCode = data.access_code || null;
+      // Session 28e-10.1: snapshot the payload that shaped this access_code
+      // so goToPayment's fast-path can detect edits on a subsequent
+      // Continue-click. If access_code came back null (unexpected —
+      // caller already returned above), leave snapshot null so any
+      // future fast-path check misses.
+      _paystackAccessCodePayloadSnap = _paystackAccessCode ? _computePaystackPayloadSnap() : null;
 
       // Session 28e-10.1: reset Turnstile widget after successful init.
       // Cloudflare Turnstile tokens are single-use — the backend just
@@ -18345,6 +18405,7 @@ const TUMAFLY_WHATSAPP_WAME = '254113165503';
       // #payment-alert rather than an in-pane button.
       showView('payment');
       _paystackAccessCode = null;
+      _paystackAccessCodePayloadSnap = null;
       _paystackOpenOnReady = false;
       showAlert('payment-alert',
         'Could not connect. Please check your network and tap Credit or debit card to try again.');
@@ -18442,6 +18503,7 @@ const TUMAFLY_WHATSAPP_WAME = '254113165503';
           // Clear access_code so the next Card row tap fires a fresh
           // initialize-payment rather than reusing a possibly-bad code.
           _paystackAccessCode = null;
+          _paystackAccessCodePayloadSnap = null;
           showAlert('payment-alert',
             'Something went wrong. Tap Credit or debit card to try again.');
         },
@@ -18450,6 +18512,7 @@ const TUMAFLY_WHATSAPP_WAME = '254113165503';
       console.error('[Paystack] popup threw:', e);
       _paystackHandle = null;
       _paystackAccessCode = null;
+      _paystackAccessCodePayloadSnap = null;
       showAlert('payment-alert',
         'We couldn\'t open the payment window. Tap Credit or debit card to try again.');
     }
@@ -18757,6 +18820,7 @@ const TUMAFLY_WHATSAPP_WAME = '254113165503';
     activeGuestToken = null;
     _closeRealtimeChannel();
     _paystackAccessCode = null;
+    _paystackAccessCodePayloadSnap = null;
     document.getElementById('poll-area').classList.add('hidden');
     clearAlert('payment-alert');
     _paystackOpenOnReady = true;
@@ -19737,6 +19801,7 @@ const TUMAFLY_WHATSAPP_WAME = '254113165503';
     // Reset the Paystack access code so a fresh booking in the same
     // tab doesn't accidentally reuse a stale modal handle.
     try { _paystackAccessCode = null; } catch (_) {}
+    try { _paystackAccessCodePayloadSnap = null; } catch (_) {}
     // Session 28d — re-arm the BroadcastChannel defense for the next booking
     // in this tab. Consumed-set intentionally NOT cleared here — a paired
     // "offer-consumed" that arrived just before terminal may still refer to
@@ -20469,6 +20534,7 @@ const TUMAFLY_WHATSAPP_WAME = '254113165503';
     try { _cancelPaystackModalOnFareExpiry(); } catch (_) {}
     // Cancel any in-flight payment surface.
     try { _paystackAccessCode = null; } catch (_) {}
+    try { _paystackAccessCodePayloadSnap = null; } catch (_) {}
     try { _paystackOpenOnReady = false; } catch (_) {}
     try { _paystackInitInFlight = false; } catch (_) {}
     // Stash typed non-PII (names, contact) BEFORE wiping shadows. The
@@ -20558,6 +20624,7 @@ const TUMAFLY_WHATSAPP_WAME = '254113165503';
     if (document.getElementById('fare-consumed-modal')) return;   // safety
     try { _cancelPaystackModalOnFareExpiry(); } catch (_) {}
     try { _paystackAccessCode = null; } catch (_) {}
+    try { _paystackAccessCodePayloadSnap = null; } catch (_) {}
     try { _paystackOpenOnReady = false; } catch (_) {}
     try { _paystackInitInFlight = false; } catch (_) {}
     try { _stashSiblingRecovery(); } catch (_) {}
