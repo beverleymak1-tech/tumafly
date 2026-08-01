@@ -7968,6 +7968,16 @@
   // Handle to the open Paystack popup — enables fare-timer cancellation
   // (see _cancelPaystackModalOnFareExpiry).
   let _paystackHandle = null;
+  // Session 28e-10.9: signal from _cancelPaystackModalOnFareExpiry (and any
+  // future programmatic-close call site) to suppress the "payment didn't
+  // complete" alert in onCancel/onClose. Fare-expired and offer-consumed
+  // flows already surface their own user feedback (fare-expired modal,
+  // fare-consumed modal, tab-preempt close) so a second "payment didn't
+  // complete" alert underneath would be noise. Read + reset inside the
+  // Paystack callbacks; also reset at the top of _openPaystackModal as a
+  // belt-and-suspenders in case cancelTransaction threw without firing
+  // callbacks and left the flag stuck.
+  let _paystackProgrammaticClose = false;
   // Cached access_code from initialize-payment, consumed by _openPaystackModal.
   let _paystackAccessCode = null;
 
@@ -18489,16 +18499,67 @@ const TUMAFLY_WHATSAPP_WAME = '254113165503';
       }
       _thisTabCommittedPay = true;
     } catch (_) { /* selection missing — let the existing code path handle it */ }
+    // Session 28e-10.9: reset the programmatic-close flag on every fresh
+    // open so a stuck true from a prior failed cancelTransaction can't
+    // silently suppress a genuine user close on this open.
+    _paystackProgrammaticClose = false;
+    // Session 28e-10.9: track whether Paystack settled with a success (or
+    // surfaced its own error alert) before the modal closed. Paystack's
+    // onCancel + onClose both fire when the user X's out or backdrops the
+    // modal; without this flag we can't tell "user force-closed after
+    // decline exhaustion" from "onSuccess handled it, close is just the
+    // post-success cleanup." Local to this modal instance — resets on the
+    // next _openPaystackModal call.
+    let closedWithoutSettlement = true;
     try {
       const popup = new PaystackPop();
       _paystackHandle = popup;
       popup.resumeTransaction(_paystackAccessCode, {
         onLoad: () => { /* modal painted — nothing to do */ },
-        onSuccess: (tx) => { _handlePaystackSuccess(tx); },
-        onCancel: () => { _paystackHandle = null; },
-        onClose: () => { _paystackHandle = null; },
+        onSuccess: (tx) => {
+          closedWithoutSettlement = false;
+          _handlePaystackSuccess(tx);
+        },
+        onCancel: () => {
+          _paystackHandle = null;
+          // Programmatic close (fare expired, offer consumed elsewhere,
+          // tab preempted) → suppress the "didn't complete" alert; those
+          // paths already own the user feedback surface.
+          if (_paystackProgrammaticClose) {
+            _paystackProgrammaticClose = false;
+            closedWithoutSettlement = false;
+            return;
+          }
+          // Genuine user close (X button, backdrop, or force-close after
+          // decline exhaustion) without prior success/error → surface
+          // inline feedback so customer knows the attempt aborted and
+          // doesn't (a) assume it succeeded or (b) re-click Continue to
+          // Payment burning a fresh Turnstile token (Session 28c Addendum
+          // §281). Cached access_code is intentionally left in place —
+          // the e650755 snapshot-based fast-path handles re-tap of the
+          // Card row without a fresh init if the payload is unchanged.
+          if (closedWithoutSettlement) {
+            closedWithoutSettlement = false;   // don't double-fire from onClose
+            showAlert('payment-alert',
+              'Your payment didn\'t complete. Please try again or use a different card.');
+          }
+        },
+        onClose: () => {
+          _paystackHandle = null;
+          if (_paystackProgrammaticClose) {
+            _paystackProgrammaticClose = false;
+            closedWithoutSettlement = false;
+            return;
+          }
+          if (closedWithoutSettlement) {
+            closedWithoutSettlement = false;
+            showAlert('payment-alert',
+              'Your payment didn\'t complete. Please try again or use a different card.');
+          }
+        },
         onError: (err) => {
           console.error('[Paystack] SDK error:', err);
+          closedWithoutSettlement = false;   // onError surfaces its own alert
           _paystackHandle = null;
           // Clear access_code so the next Card row tap fires a fresh
           // initialize-payment rather than reusing a possibly-bad code.
@@ -18550,6 +18611,12 @@ const TUMAFLY_WHATSAPP_WAME = '254113165503';
   // can't complete a charge on an expired fare.
   function _cancelPaystackModalOnFareExpiry() {
     if (_paystackHandle && typeof _paystackHandle.cancelTransaction === 'function') {
+      // Session 28e-10.9: signal the onCancel/onClose handlers to skip
+      // the "payment didn't complete" alert. Callers of this helper
+      // (fare-expired, offer-consumed, tab preempted) already own the
+      // user feedback surface — a second inline alert on #payment would
+      // be noise underneath their modal.
+      _paystackProgrammaticClose = true;
       try { _paystackHandle.cancelTransaction(); } catch (_) {}
     }
     _paystackHandle = null;
