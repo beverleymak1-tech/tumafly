@@ -5498,21 +5498,19 @@
       display: block;
       margin-bottom: 12px;
     }
-    .payment-modal-body #payment-trip-slot,
-    .payment-modal-body #payment-price-slot {
-      margin-bottom: 12px;
-    }
-    /* On mobile the sidebar slots (#payment-trip-slot, #payment-price-slot)
-       are redundant with #payment-price-inline. Hide them; the inline
-       renderPricePanel call still fills #payment-price-inline. */
-    .payment-modal-body #payment-trip-slot,
-    .payment-modal-body #payment-price-slot {
+    /* Mobile / narrow-desktop: hide the aside entirely; payment-price-inline
+       covers the recap slot. On wider desktops we opt back in and show the
+       two-column grid. */
+    .payment-modal-aside {
       display: none;
     }
+    .payment-modal-grid {
+      display: block;
+    }
 
-    /* Desktop override — slide in from the right, roughly half viewport
-       width, full height. Rounded on the left edge only. Backdrop covers
-       the left uncovered half. */
+    /* Desktop override — slide in from the right, half viewport width,
+       full height. Rounded on the left edge only. Backdrop covers the
+       left uncovered half. */
     @media (min-width: 900px) {
       #payment-modal {
         top: 0;
@@ -5531,19 +5529,111 @@
       #payment-modal.pm-open {
         transform: translateX(0);
       }
-      /* On desktop the modal is narrow — surface the sidebar-style trip
-         + price slots inside the body (stacked, not aside). Hide the
-         redundant mobile-only inline price. */
-      .payment-modal-body #payment-trip-slot,
-      .payment-modal-body #payment-price-slot {
-        display: block;
-      }
-      .payment-modal-body .payment-price-inline {
-        display: none;
-      }
       /* Drag handle hidden on desktop (it's a mobile affordance) */
       .payment-modal-handle {
         display: none;
+      }
+      /* Desktop-and-up hides the mobile-only inline price. Aside content
+         is what the user sees. */
+      .payment-modal-body .payment-price-inline {
+        display: none;
+      }
+      .payment-modal-aside {
+        display: block;
+      }
+    }
+
+    /* Wider desktop (>=1200px viewport, i.e. modal is >=600px wide) —
+       activate the two-column layout: main col on left (payment options,
+       trust messaging, compliance), aside on right (trip + price recap).
+       Everything is compacted so both columns fit without pushing the
+       payment options below the fold. */
+    @media (min-width: 1200px) {
+      .payment-modal-grid {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) 240px;
+        gap: 14px;
+        align-items: start;
+      }
+      .payment-modal-main,
+      .payment-modal-aside {
+        min-width: 0;
+      }
+
+      /* ── Compact the pay-card and its rows ──────────────────────
+         Half-sheet space is tighter than the old #view-payment
+         two-column layout was, so the pay-card + its M-Pesa/Card rows
+         need to shrink or the "select method" and both rows push
+         everything else below the fold. Descendant selectors on
+         #payment-modal so we only override inside the modal — the same
+         classes elsewhere (e.g. if the pay-card pattern gets reused
+         later) stay full-size. */
+      #payment-modal .pay-card {
+        padding: 16px;
+      }
+      #payment-modal .pay-card h3 {
+        font-size: 15px;
+        margin: 0 0 4px;
+      }
+      #payment-modal .pay-helper-text {
+        font-size: 12px;
+        margin: 0 0 12px;
+      }
+      #payment-modal .pay-tab {
+        padding: 10px 12px;
+        gap: 10px;
+      }
+      #payment-modal .pay-tab-icon {
+        width: 32px;
+        height: 32px;
+        font-size: 15px;
+      }
+      #payment-modal .tab-name {
+        font-size: 13px;
+      }
+      #payment-modal .tab-meta,
+      #payment-modal .tab-hint {
+        font-size: 11px;
+      }
+      #payment-modal .coming-soon {
+        font-size: 10px;
+        padding: 2px 6px;
+      }
+
+      /* ── Compact the aside sidecards ─────────────────────────────
+         Match the pay-card's tighter padding + font sizing so the two
+         columns feel like one thought rather than main vs. sidebar. */
+      #payment-modal .payment-modal-aside .trip-panel,
+      #payment-modal .payment-modal-aside .price-panel {
+        padding: 14px;
+      }
+      #payment-modal .payment-modal-aside .trip-panel h4,
+      #payment-modal .payment-modal-aside .price-panel h4 {
+        font-size: 13px;
+      }
+      #payment-modal .payment-modal-aside .price-panel .line,
+      #payment-modal .payment-modal-aside .price-panel .total,
+      #payment-modal .payment-modal-aside .price-panel .ppp {
+        font-size: 12px;
+      }
+      #payment-modal .payment-modal-aside .leg-card {
+        padding: 10px;
+      }
+
+      /* Trust + compliance smaller — they're supporting copy, not the
+         action, so they can afford to be visually quieter. */
+      #payment-modal .pay-stack-alpha {
+        font-size: 11px;
+        padding: 10px 12px;
+        gap: 8px;
+      }
+      #payment-modal .pay-stack-alpha svg {
+        width: 18px;
+        height: 18px;
+        flex-shrink: 0;
+      }
+      #payment-modal .compliance {
+        font-size: 11px;
       }
     }
 
@@ -7663,75 +7753,91 @@
     </button>
   </div>
   <div class="payment-modal-body">
-    <!-- Mobile-only inline price above the pay card -->
+    <!-- Mobile-only inline price above the pay card (hidden on desktop
+         via CSS — desktop uses the aside instead). -->
     <div class="payment-price-inline" id="payment-price-inline"></div>
 
-    <!-- Desktop-visible trip + price slots (stacked, single-column inside modal) -->
-    <div id="payment-trip-slot"></div>
-    <div id="payment-price-slot"></div>
-
-    <div class="card pay-card">
-      <h3>Pay for your booking</h3>
-      <p class="pay-helper-text">Select your method of payment</p>
-      <div class="pay-tabs">
-        <!-- M-Pesa disabled at launch. Unchanged from #view-payment. -->
-        <div class="pay-tab-item pay-tab-item-mpesa" id="pay-mpesa-item">
-          <button class="pay-tab" disabled id="paytab-mpesa">
-            <div class="pay-tab-icon" style="background:#1a9e4a;color:white;font-weight:600;font-size:11px;">M</div>
-            <div class="pay-tab-body">
-              <span class="tab-name">M-Pesa</span>
-              <span class="tab-meta">Pay from your phone</span>
-              <span class="tab-hint">Direct M-Pesa launching soon</span>
+    <!-- Two-column grid on desktop (>=1200px viewport): payment options
+         on the left, trip + price sidecards on the right. Mirrors the
+         old #view-payment .booking-layout pattern but scaled down for
+         the half-sheet width. On narrower viewports (and on mobile) the
+         .payment-modal-aside is either stacked below main (900-1199px)
+         or hidden entirely (mobile — payment-price-inline covers it).
+         DOM order puts main first so payment options are always at the
+         top of the scroll no matter the layout. -->
+    <div class="payment-modal-grid">
+      <div class="payment-modal-main">
+        <div class="card pay-card">
+          <h3>Pay for your booking</h3>
+          <p class="pay-helper-text">Select your method of payment</p>
+          <div class="pay-tabs">
+            <!-- M-Pesa disabled at launch. Unchanged from #view-payment. -->
+            <div class="pay-tab-item pay-tab-item-mpesa" id="pay-mpesa-item">
+              <button class="pay-tab" disabled id="paytab-mpesa">
+                <div class="pay-tab-icon" style="background:#1a9e4a;color:white;font-weight:600;font-size:11px;">M</div>
+                <div class="pay-tab-body">
+                  <span class="tab-name">M-Pesa</span>
+                  <span class="tab-meta">Pay from your phone</span>
+                  <span class="tab-hint">Direct M-Pesa launching soon</span>
+                </div>
+                <span class="coming-soon">Coming soon</span>
+              </button>
             </div>
-            <span class="coming-soon">Coming soon</span>
-          </button>
-        </div>
-        <!-- Card row — Session 19 one-tap: click opens Paystack modal
-             directly via selectPayTab('card'). Pane retained (unused
-             visually) so the accordion structure matches M-Pesa's for
-             consistent borders/hover/shadow. -->
-        <div class="pay-tab-item" id="pay-card-item">
-          <button class="pay-tab" id="paytab-card" onclick="selectPayTab('card')">
-            <div class="pay-tab-icon">💳</div>
-            <div class="pay-tab-body">
-              <span class="tab-name">Credit or debit card</span>
-              <span class="tab-meta">Visa, Mastercard, Amex</span>
-            </div>
-            <span class="pay-tab-chev" aria-hidden="true">▾</span>
-          </button>
+            <!-- Card row — Session 19 one-tap: click opens Paystack modal
+                 directly via selectPayTab('card'). Pane retained (unused
+                 visually) so the accordion structure matches M-Pesa's for
+                 consistent borders/hover/shadow. Session 28e modal
+                 refactor: chevron removed — it was an accordion-affordance
+                 relic from when the pane opened inline, but under
+                 one-tap the pane never opens so the chevron misled users. -->
+            <div class="pay-tab-item" id="pay-card-item">
+              <button class="pay-tab" id="paytab-card" onclick="selectPayTab('card')">
+                <div class="pay-tab-icon">💳</div>
+                <div class="pay-tab-body">
+                  <span class="tab-name">Credit or debit card</span>
+                  <span class="tab-meta">Visa, Mastercard, Amex</span>
+                </div>
+              </button>
 
-          <div class="pay-tab-pane" id="pay-card-pane">
-            <div class="pay-iframe-wrap" id="card-iframe-wrap">
-              <div>
-                <button class="btn btn-primary btn-lg" id="card-start-btn" onclick="startCardPayment()">Pay with card</button>
-                <div style="font-size:12px;color:var(--text-3);margin-top:14px;">Card details are handled by Paystack. TumaFly never sees your card.</div>
+              <div class="pay-tab-pane" id="pay-card-pane">
+                <div class="pay-iframe-wrap" id="card-iframe-wrap">
+                  <div>
+                    <button class="btn btn-primary btn-lg" id="card-start-btn" onclick="startCardPayment()">Pay with card</button>
+                    <div style="font-size:12px;color:var(--text-3);margin-top:14px;">Card details are handled by Paystack. TumaFly never sees your card.</div>
+                  </div>
+                </div>
               </div>
             </div>
           </div>
+
+          <div id="payment-alert"></div>
+
+          <div id="poll-area" class="hidden"></div>
         </div>
+
+        <!-- Trust messaging — kept from #view-payment. Slightly narrower spacing
+             since it's inside a modal rather than a full view. -->
+        <div class="pay-stack-alpha" style="margin-top:14px;">
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+            <rect x="4" y="10" width="16" height="10" rx="2" stroke="currentColor" stroke-width="1.8"/>
+            <path d="M8 10V7a4 4 0 018 0v3" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
+          </svg>
+          <span>Your payment is 100% safe and secure. We use encryption to protect your data and only work with verified payment gateways. Your trust is a priority for us.</span>
+        </div>
+
+        <p class="compliance" style="margin-top:12px;">
+          By confirming this booking, you confirm that you agree to the
+          <a href="/legal/privacy" target="_blank" rel="noopener">Privacy Notice</a> and
+          <a href="/legal/terms" target="_blank" rel="noopener">Terms of Service</a>,
+          and the policies of this booking.
+        </p>
       </div>
 
-      <div id="payment-alert"></div>
-
-      <div id="poll-area" class="hidden"></div>
+      <aside class="payment-modal-aside">
+        <div id="payment-trip-slot"></div>
+        <div id="payment-price-slot"></div>
+      </aside>
     </div>
-
-    <!-- Trust messaging — kept from #view-payment. Slightly narrower spacing
-         since it's inside a modal rather than a full view. -->
-    <div class="pay-stack-alpha" style="margin-top:14px;">
-      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-        <rect x="4" y="10" width="16" height="10" rx="2" stroke="currentColor" stroke-width="1.8"/>
-        <path d="M8 10V7a4 4 0 018 0v3" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
-      </svg>
-      <span>Your payment is 100% safe and secure. We use encryption to protect your data and only work with verified payment gateways. Your trust is a priority for us.</span>
-    </div>
-
-    <p class="compliance" style="margin-top:12px;">
-      By confirming this booking, you confirm that you agree to the
-      <a href="/legal/privacy" target="_blank" rel="noopener">Privacy Notice</a> and
-      <a href="/legal/terms" target="_blank" rel="noopener">Terms of Service</a>,
-      and the policies of this booking.
-    </p>
   </div>
 </div>
 
