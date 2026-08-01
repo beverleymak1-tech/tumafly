@@ -10371,6 +10371,81 @@ const TUMAFLY_WHATSAPP_WAME = '254113165503';
   // Continue-click starts a new initialize-payment cycle. See handoff
   // Session 28e-10.1-and-10.3 §6 for design rationale.
 
+  // Phase 1 helper: paint the booking fare-timer bar with its static label
+  // + a shimmering placeholder in the countdown slot. Called when we DON'T
+  // have a stashed fare_expires_at_ms — either first-arrival refresh or
+  // shadow was cleared. Once startFareTimer('booking') runs, tickFareTimer
+  // replaces the entire innerHTML with the real countdown, so this shell
+  // dissolves naturally with no extra teardown code.
+  //
+  // We paint the bar VISIBLE (remove .hidden) because the whole point is
+  // that the "Fare expires in …" label is a known-good static string —
+  // making it invisible during the network wait is the very jarring
+  // pop-in-out effect we're trying to avoid.
+  function _paintFareTimerShell() {
+    const bar = document.getElementById('booking-fare-timer');
+    if (!bar) return;
+    bar.classList.remove('hidden', 'warning', 'expired');
+    bar.innerHTML = `
+      <div class="ft-label">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+          <circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="1.7"/>
+          <path d="M12 7v5l3 2" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/>
+        </svg>
+        <span>Fare expires in <span class="ft-time tf-shimmer" style="display:inline-block;width:52px;height:14px;vertical-align:-2px;border-radius:4px;">&nbsp;</span></span>
+      </div>
+    `;
+  }
+
+  // Phase 1 helper: paint shimmer placeholders into the trip panel, price
+  // panel, and saved-traveler dropdown. Called right after the initial
+  // renderPassengerForms so the empty slots aren't just blank white gaps.
+  //
+  // We're careful NOT to clobber #passenger-forms — the traveler card
+  // rendered from shadow lives there and needs to stay. Only the trip
+  // panel, price panel, and saved-traveler slot get replaced with shimmer.
+  function _paintBookingShellShimmers() {
+    // Trip panel — replace with a two-card shimmer placeholder. We don't
+    // know yet whether the trip is round-trip; render two anyway (safe: the
+    // reconcile step will replace with the correct 1 or 2 leg cards).
+    const tripSlot = document.getElementById('booking-trip-slot');
+    if (tripSlot) {
+      tripSlot.innerHTML = `
+        <div class="trip-panel">
+          <div class="leg-card tf-shimmer-card">
+            <div class="tf-shimmer-line tf-shimmer" style="width:40%;height:14px;"></div>
+            <div class="tf-shimmer-line tf-shimmer" style="width:70%;height:20px;margin-top:8px;"></div>
+            <div class="tf-shimmer-line tf-shimmer" style="width:55%;height:12px;margin-top:6px;"></div>
+          </div>
+          <div class="leg-card tf-shimmer-card">
+            <div class="tf-shimmer-line tf-shimmer" style="width:40%;height:14px;"></div>
+            <div class="tf-shimmer-line tf-shimmer" style="width:70%;height:20px;margin-top:8px;"></div>
+            <div class="tf-shimmer-line tf-shimmer" style="width:55%;height:12px;margin-top:6px;"></div>
+          </div>
+        </div>
+      `;
+    }
+    // Price panel — shimmer rows in the same layout as the real panel.
+    const priceSlot = document.getElementById('booking-price-slot');
+    if (priceSlot) {
+      priceSlot.innerHTML = `
+        <div class="price-panel">
+          <h4>Estimated price</h4>
+          <div class="ppp"><span class="tf-shimmer-line tf-shimmer" style="width:100px;height:12px;display:inline-block;"></span></div>
+          <div class="line"><span class="label">Flight</span><span class="value"><span class="tf-shimmer-line tf-shimmer" style="width:80px;height:14px;display:inline-block;"></span></span></div>
+          <div class="line"><span class="label">TumaFly service fee</span><span class="value"><span class="tf-shimmer-line tf-shimmer" style="width:80px;height:14px;display:inline-block;"></span></span></div>
+          <div class="line"><span class="label">Payment processing</span><span class="value"><span class="tf-shimmer-line tf-shimmer" style="width:80px;height:14px;display:inline-block;"></span></span></div>
+          <div class="divider"></div>
+          <div class="total"><span>Total estimate</span><span class="value"><span class="tf-shimmer-line tf-shimmer" style="width:100px;height:16px;display:inline-block;"></span></span></div>
+        </div>
+      `;
+    }
+    // Saved-traveler dropdown — add a shimmer overlay class. The picker
+    // itself lives inside each traveler card. We flag the currently-rendered
+    // cards; renderPassengerForms in Phase 3 will render without the flag
+    // once fetchSavedTravelers resolves.
+    document.querySelectorAll('.saved-trav-picker').forEach(el => el.classList.add('tf-shimmer-picker'));
+  }
 
   // Phase 3 helper: swap shimmer placeholders for real content, expand pax
   // cards if needed, animate the international banner in if the trip crosses
