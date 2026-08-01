@@ -21195,20 +21195,29 @@ const TUMAFLY_WHATSAPP_WAME = '254113165503';
         // incognito).
         //
         // We keep prompt() itself (that's what actually opens the picker)
-        // but drop the notification callback body — the timeout below
-        // handles the no-picker / user-cancelled cases with a single
-        // "__cancelled__" outcome. Trade-off: incognito users who get
-        // silently blocked no longer see showFedcmBlockedModal(). The
-        // auth modal already shows Phone OTP as a peer option, so blocked
-        // users can just use that. Net UX cost is minor; console-noise
-        // reduction is meaningful because these warnings fire on every
-        // sign-in attempt in incognito.
+        // but drop the notification callback body. Blocked-picker is now
+        // detected via TIMING: if 6s elapses with no auth activity, we
+        // treat it as blocked. If the picker opened, the user has already
+        // seen it in the first ~1s and either clicked (auth callback
+        // fires, resolves early) or dismissed. Dismissal within 6s is
+        // rare — most dismissals happen after the user reads the
+        // picker's text. So the 6s heuristic is a reasonable proxy for
+        // "picker never opened → surface the blocked modal so the user
+        // knows to switch to Phone OTP." Users who *do* legitimately
+        // dismiss quickly will see the blocked modal spuriously — small
+        // cost, and Phone OTP is still one tap away from that modal.
         google.accounts.id.prompt();
 
-        // Timeout fallback: 60s should be more than enough for the picker UI.
-        // If no auth callback fires by then, treat as cancelled (user closed
-        // the popup, or FedCM was silently blocked). No distinction between
-        // cancelled and blocked under FedCM — see 10.2 comment above.
+        // Blocked heuristic (6s). Set BEFORE the 60s cancel timeout so a
+        // fast dismissal still falls into the blocked path (surfaces the
+        // helpful modal) rather than the silent-cancel path.
+        setTimeout(() => {
+          settle(reject, new Error('__fedcm_blocked__'));
+        }, 6000);
+
+        // Cancel timeout (60s). Redundant on the blocked path since the
+        // 6s timer would fire first, but kept as an outer bound in case
+        // the blocked timer is cleared by some future refactor.
         setTimeout(() => {
           settle(reject, new Error('__cancelled__'));
         }, 60000);
@@ -21223,9 +21232,15 @@ const TUMAFLY_WHATSAPP_WAME = '254113165503';
       setLoading(false);
       if (e.message === '__cancelled__') {
         // User dismissed or closed the picker — quiet, no error message.
-        // Session 28e-10.2: under FedCM this branch also covers the
-        // silently-blocked case (previously __fedcm_blocked__). See the
-        // comment inside the prompt() call for rationale.
+      } else if (e.message === '__fedcm_blocked__') {
+        // Timing heuristic tripped — 6s elapsed with no auth activity,
+        // suggesting the FedCM picker never opened (third-party cookies
+        // blocked, incognito without an in-context Google session,
+        // browser cooldown from repeated dismissals, etc.). Show the
+        // dedicated modal pointing the user to Phone OTP. Close the auth
+        // modal first so the blocked modal isn't stacking on stale state.
+        closeAuthModal();
+        showFedcmBlockedModal();
       } else {
         const msg = e.message || 'Something went wrong. Please try again.';
         showAuthError('auth-choose-error', msg);
@@ -21451,14 +21466,50 @@ const TUMAFLY_WHATSAPP_WAME = '254113165503';
     document.getElementById('dup-account-ok').addEventListener('click', () => modal.remove());
   }
 
-  // Session 28e-10.2: showFedcmBlockedModal was deleted here. It was the
-  // "Google sign-in unavailable" modal called from the FedCM-blocked catch
-  // branch (also deleted). Under `use_fedcm_for_prompt: true` we can no
-  // longer reliably distinguish blocked-picker from user-dismissed without
-  // calling deprecated PromptMomentNotification methods that emit
-  // [GSI_LOGGER] warnings. The blocked-picker case now falls through to
-  // the silent __cancelled__ branch; blocked users can retry via the Phone
-  // OTP option in the same auth modal.
+  // Modal shown when Google FedCM is blocked by the browser (third-party
+  // sign-in disabled, incognito without an in-context Google session, browser
+  // cooldown, etc.). Triggered by the 28e-10.2 timing heuristic — 6s of no
+  // auth activity after prompt() suggests the picker never opened. We
+  // deliberately do not OAuth-redirect — the redirect flow's state
+  // preservation was removed in earlier cleanup, so a redirect mid-checkout
+  // would clobber the user's selections.
+  function showFedcmBlockedModal() {
+    document.getElementById('fedcm-blocked-modal')?.remove();
+    const modal = document.createElement('div');
+    modal.id = 'fedcm-blocked-modal';
+    modal.className = 'search-loading-backdrop';
+    modal.innerHTML = `
+      <div class="search-loading-card" style="max-width:440px;">
+        <div style="display:flex;justify-content:center;margin-bottom:14px;">
+          <div style="width:48px;height:48px;border-radius:50%;background:var(--warning-soft,#FEF6E7);display:flex;align-items:center;justify-content:center;">
+            <svg width="26" height="26" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+              <path d="M12 8v4M12 16h.01" stroke="var(--warning,#B45309)" stroke-width="2.5" stroke-linecap="round"/>
+              <circle cx="12" cy="12" r="10" stroke="var(--warning,#B45309)" stroke-width="2"/>
+            </svg>
+          </div>
+        </div>
+        <div style="font-size:18px;font-weight:600;color:var(--ink,#0F1923);margin-bottom:12px;text-align:center;">
+          Google sign-in unavailable
+        </div>
+        <div style="font-size:14px;color:var(--text-2,#4A5568);margin-bottom:14px;line-height:1.5;text-align:left;">
+          This browser is blocking third-party sign-in. To continue:
+        </div>
+        <ul style="font-size:14px;color:var(--text-2,#4A5568);margin:0 0 14px;padding-left:20px;line-height:1.6;text-align:left;">
+          <li>Allow it in <strong style="color:var(--ink,#0F1923);">Site settings</strong>, or</li>
+          <li>Try a different browser, or</li>
+          <li>Use phone sign-in if your number is linked to your TumaFly profile</li>
+        </ul>
+        <div style="font-size:13px;color:var(--text-3,#717A86);margin-bottom:20px;line-height:1.5;text-align:left;">
+          Note: in incognito or private mode, you also need to be signed into Google in this window first.
+        </div>
+        <button type="button" id="fedcm-blocked-ok" style="width:100%;padding:12px 16px;border-radius:10px;border:none;background:var(--brand,#3D95F5);color:#fff;font-weight:600;cursor:pointer;font-size:14px;">
+          Got it
+        </button>
+      </div>
+    `;
+    document.body.appendChild(modal);
+    document.getElementById('fedcm-blocked-ok').addEventListener('click', () => modal.remove());
+  }
 
   // Save profile from the post-OTP capture step.
   // Upserts profiles row + updates user_metadata so the nav reflects the name.
