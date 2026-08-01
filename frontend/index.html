@@ -11469,6 +11469,21 @@ const TUMAFLY_WHATSAPP_WAME = '254113165503';
       try { safeHistory('replace', { view: 'home' }, window.location.pathname); } catch (_) {}
       return;
     }
+    // Session 28e-10.6 — belt-and-suspenders sweep when popstate lands on
+    // #home. resetAndGoHome (the "Book another trip" button path) already
+    // wipes payment-flow state before showing home; this branch mirrors
+    // that for browser-back navigation to home, especially from #success
+    // via the State A polling-warn modal Leave button. Without this, a
+    // stale activeMerchantRef / activePendingBookingId / _thisTabCommittedPay
+    // / _consumedOfferCabinPairs / Realtime channel from the previous
+    // payment attempt would leak into the next fresh booking flow.
+    //
+    // Idempotent — setting already-null vars to null is fine; the guarded
+    // clears (_closeRealtimeChannel, _consumedOfferCabinPairs.clear(),
+    // clearTimeout) all no-op cleanly when there's nothing to clear.
+    if (view === 'home') {
+      _wipePaymentFlowState();
+    }
     showView(view, { fromPopState: true });
     // Q3: When the user navigates back to booking (e.g., Account → edit
     // a saved traveler → browser back), refresh _savedTravelers so the
@@ -11549,26 +11564,39 @@ const TUMAFLY_WHATSAPP_WAME = '254113165503';
     }
   }
 
-  function resetAndGoHome() {
-    allOffers = [];
-    selectedOutbound = selectedInbound = selectedOffer = null;
-    passengerData = [];
-    contactData = {};
+  // Session 28e-10.6 — payment-flow state wipe extracted from
+  // resetAndGoHome so the popstate handler can call it too when the user
+  // browser-backs to #home (typically from #success via the State A
+  // polling-warn modal Leave button). resetAndGoHome is the button-driven
+  // primary cleanup path; the popstate branch is the belt-and-suspenders.
+  //
+  // Deliberately does NOT touch allOffers, selectedOutbound, selectedInbound,
+  // passengerData, contactData — those either survive a home-back (search
+  // state) or are handled by the popstate handler's own results/booking
+  // branches. This helper only wipes state that WOULD leak into the next
+  // flow if the user starts a fresh booking after a home-back:
+  //   • activeMerchantRef / activePendingBookingId / activeGuestToken —
+  //     the previous payment attempt's identifiers; carrying them forward
+  //     could cause a fresh booking to mis-report as a re-attempt
+  //   • lastPaymentBreakdown — cached price for the previous offer
+  //   • Realtime channel — subscription to the previous pending_bookings
+  //     row that no longer matters
+  //   • BroadcastChannel defense state (_thisTabCommittedPay,
+  //     _consumedOfferCabinPairs) — sticky-committed flag or consumed
+  //     pairs from the previous attempt would break the 28d 2-tab defense
+  //     for the next attempt
+  //   • Payment/booking-extras shadows — one-line no-op shims after 28e
+  //     modal refactor but still called defensively
+  //   • _resultsStale, _bgCloseTimerId — parent-tab state that should not
+  //     survive a home landing
+  function _wipePaymentFlowState() {
     activeMerchantRef = null;
-    // Session 28c #10-proper — clear the Realtime stash + tear down any
-    // open subscription. Safe to call _closeRealtimeChannel even if it
-    // was never opened (no-op guards inside).
     activePendingBookingId = null;
     activeGuestToken = null;
     _closeRealtimeChannel();
     lastPaymentBreakdown = null;
-    // Step 4 (Path A1): drop the payment-return shadow — this booking
-    // session is over. Without this, a subsequent #payment refresh would
-    // resurrect the dead offer.
     try { clearPaymentReturn(); } catch (_) {}
-    // Session 28d — full reset also re-arms the BroadcastChannel defense.
-    // "Book another trip" from a confirmed state must not carry a stale
-    // consumed set or a set commit-flag into the fresh selection.
+    try { clearBookingExtras(); } catch (_) {}
     _thisTabCommittedPay = false;
     try { _consumedOfferCabinPairs.clear(); } catch (_) {}
     _resultsStale = false;
@@ -11576,6 +11604,14 @@ const TUMAFLY_WHATSAPP_WAME = '254113165503';
       try { clearTimeout(_bgCloseTimerId); } catch (_) {}
       _bgCloseTimerId = null;
     }
+  }
+
+  function resetAndGoHome() {
+    allOffers = [];
+    selectedOutbound = selectedInbound = selectedOffer = null;
+    passengerData = [];
+    contactData = {};
+    _wipePaymentFlowState();
     showView('home');
   }
 
@@ -21147,33 +21183,32 @@ const TUMAFLY_WHATSAPP_WAME = '254113165503';
           },
         });
 
-        // With use_fedcm_for_prompt:true, prompt() returns a PromptMomentNotification
-        // via the callback. When FedCM is blocked by the browser (user dismissed
-        // GSI too many times, third-party cookies disabled, ITP suppression, etc.)
-        // the prompt simply doesn't show — no callback fires. We detect this via
-        // isNotDisplayed/isSkippedMoment and surface a clear message pointing the
-        // user to phone OTP. We deliberately do NOT fall back to OAuth redirect:
-        // the earlier oauth-restore cleanup removed the search/booking state
-        // preservation that flow used to rely on, so a redirect mid-checkout
-        // would lose the user's selections.
-        google.accounts.id.prompt((notification) => {
-          try {
-            const notDisplayed = notification.isNotDisplayed && notification.isNotDisplayed();
-            const skipped = notification.isSkippedMoment && notification.isSkippedMoment();
-            if (notDisplayed || skipped) {
-              const reason = (notDisplayed && notification.getNotDisplayedReason && notification.getNotDisplayedReason())
-                || (skipped && notification.getSkippedReason && notification.getSkippedReason())
-                || 'unknown';
-              console.warn('[gsi] prompt not displayed (reason=', reason, ')');
-              settle(reject, new Error('__fedcm_blocked__'));
-            }
-          } catch (_) {
-            // notification API may not be available in all GSI versions — ignore
-          }
-        });
+        // Session 28e-10.2 — under `use_fedcm_for_prompt: true`, Google's
+        // FedCM migration guide is explicit that PromptMomentNotification
+        // methods (isNotDisplayed, isSkippedMoment, getNotDisplayedReason,
+        // getSkippedReason) are DEPRECATED and emit `[GSI_LOGGER]` warnings
+        // each time they're called. The notification object passed here is
+        // also limited under FedCM — the "reason" values it does return
+        // are unreliable. Google's guidance: rely on the initialize()
+        // callback for auth success and use a plain timeout to detect
+        // "prompt didn't open" (e.g., third-party cookies blocked in
+        // incognito).
+        //
+        // We keep prompt() itself (that's what actually opens the picker)
+        // but drop the notification callback body — the timeout below
+        // handles the no-picker / user-cancelled cases with a single
+        // "__cancelled__" outcome. Trade-off: incognito users who get
+        // silently blocked no longer see showFedcmBlockedModal(). The
+        // auth modal already shows Phone OTP as a peer option, so blocked
+        // users can just use that. Net UX cost is minor; console-noise
+        // reduction is meaningful because these warnings fire on every
+        // sign-in attempt in incognito.
+        google.accounts.id.prompt();
 
         // Timeout fallback: 60s should be more than enough for the picker UI.
-        // If no callback by then, treat as cancelled (user closed the popup).
+        // If no auth callback fires by then, treat as cancelled (user closed
+        // the popup, or FedCM was silently blocked). No distinction between
+        // cancelled and blocked under FedCM — see 10.2 comment above.
         setTimeout(() => {
           settle(reject, new Error('__cancelled__'));
         }, 60000);
@@ -21188,12 +21223,9 @@ const TUMAFLY_WHATSAPP_WAME = '254113165503';
       setLoading(false);
       if (e.message === '__cancelled__') {
         // User dismissed or closed the picker — quiet, no error message.
-      } else if (e.message === '__fedcm_blocked__') {
-        // Browser blocked the FedCM picker. Show a dedicated modal explaining
-        // the situation + workarounds. Close the auth modal first so the
-        // FedCM-blocked modal isn't stacking on top of a stale state.
-        closeAuthModal();
-        showFedcmBlockedModal();
+        // Session 28e-10.2: under FedCM this branch also covers the
+        // silently-blocked case (previously __fedcm_blocked__). See the
+        // comment inside the prompt() call for rationale.
       } else {
         const msg = e.message || 'Something went wrong. Please try again.';
         showAuthError('auth-choose-error', msg);
@@ -21419,48 +21451,14 @@ const TUMAFLY_WHATSAPP_WAME = '254113165503';
     document.getElementById('dup-account-ok').addEventListener('click', () => modal.remove());
   }
 
-  // Modal shown when Google FedCM is blocked by the browser (third-party
-  // sign-in disabled, incognito without an in-context Google session, browser
-  // cooldown, etc.). We deliberately do not OAuth-redirect — the redirect
-  // flow's state preservation was removed in earlier cleanup, so a redirect
-  // mid-checkout would clobber the user's selections.
-  function showFedcmBlockedModal() {
-    document.getElementById('fedcm-blocked-modal')?.remove();
-    const modal = document.createElement('div');
-    modal.id = 'fedcm-blocked-modal';
-    modal.className = 'search-loading-backdrop';
-    modal.innerHTML = `
-      <div class="search-loading-card" style="max-width:440px;">
-        <div style="display:flex;justify-content:center;margin-bottom:14px;">
-          <div style="width:48px;height:48px;border-radius:50%;background:var(--warning-soft,#FEF6E7);display:flex;align-items:center;justify-content:center;">
-            <svg width="26" height="26" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-              <path d="M12 8v4M12 16h.01" stroke="var(--warning,#B45309)" stroke-width="2.5" stroke-linecap="round"/>
-              <circle cx="12" cy="12" r="10" stroke="var(--warning,#B45309)" stroke-width="2"/>
-            </svg>
-          </div>
-        </div>
-        <div style="font-size:18px;font-weight:600;color:var(--ink,#0F1923);margin-bottom:12px;text-align:center;">
-          Google sign-in unavailable
-        </div>
-        <div style="font-size:14px;color:var(--text-2,#4A5568);margin-bottom:14px;line-height:1.5;text-align:left;">
-          This browser is blocking third-party sign-in. To continue:
-        </div>
-        <ul style="font-size:14px;color:var(--text-2,#4A5568);margin:0 0 14px;padding-left:20px;line-height:1.6;text-align:left;">
-          <li>Allow it in <strong style="color:var(--ink,#0F1923);">Site settings</strong>, or</li>
-          <li>Try a different browser, or</li>
-          <li>Use phone sign-in if your number is linked to your TumaFly profile</li>
-        </ul>
-        <div style="font-size:13px;color:var(--text-3,#717A86);margin-bottom:20px;line-height:1.5;text-align:left;">
-          Note: in incognito or private mode, you also need to be signed into Google in this window first.
-        </div>
-        <button type="button" id="fedcm-blocked-ok" style="width:100%;padding:12px 16px;border-radius:10px;border:none;background:var(--brand,#3D95F5);color:#fff;font-weight:600;cursor:pointer;font-size:14px;">
-          Got it
-        </button>
-      </div>
-    `;
-    document.body.appendChild(modal);
-    document.getElementById('fedcm-blocked-ok').addEventListener('click', () => modal.remove());
-  }
+  // Session 28e-10.2: showFedcmBlockedModal was deleted here. It was the
+  // "Google sign-in unavailable" modal called from the FedCM-blocked catch
+  // branch (also deleted). Under `use_fedcm_for_prompt: true` we can no
+  // longer reliably distinguish blocked-picker from user-dismissed without
+  // calling deprecated PromptMomentNotification methods that emit
+  // [GSI_LOGGER] warnings. The blocked-picker case now falls through to
+  // the silent __cancelled__ branch; blocked users can retry via the Phone
+  // OTP option in the same auth modal.
 
   // Save profile from the post-OTP capture step.
   // Upserts profiles row + updates user_metadata so the nav reflects the name.
