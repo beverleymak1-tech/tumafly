@@ -21160,15 +21160,6 @@ const TUMAFLY_WHATSAPP_WAME = '254113165503';
         let settled = false;
         const settle = (fn, val) => { if (!settled) { settled = true; fn(val); } };
 
-        // Session 28e-10.2 revision: track whether the initialize() auth
-        // callback has begun executing. If it has, the picker was clearly
-        // NOT blocked — Google produced a credential — so the blocked-
-        // timer must not fire even if signInWithIdToken takes long. Set
-        // synchronously at the top of the callback before the async
-        // Supabase call, so the guard is in place before any await.
-        let authCallbackFired = false;
-        let blockedTimerId = null;
-
         google.accounts.id.initialize({
           client_id: TUMAFLY_GOOGLE_CLIENT_ID,
           // Hashed nonce goes into the ID token Google issues
@@ -21178,11 +21169,6 @@ const TUMAFLY_WHATSAPP_WAME = '254113165503';
           cancel_on_tap_outside: true,
           itp_support: true,             // ITP-friendly on Safari
           callback: async (response) => {
-            authCallbackFired = true;
-            if (blockedTimerId !== null) {
-              clearTimeout(blockedTimerId);
-              blockedTimerId = null;
-            }
             try {
               const sb = await getSupabase();
               const { error } = await sb.auth.signInWithIdToken({
@@ -21197,38 +21183,43 @@ const TUMAFLY_WHATSAPP_WAME = '254113165503';
           },
         });
 
-        // Session 28e-10.2 — under `use_fedcm_for_prompt: true`, Google's
-        // FedCM migration guide is explicit that PromptMomentNotification
-        // methods (isNotDisplayed, isSkippedMoment, getNotDisplayedReason,
-        // getSkippedReason) are DEPRECATED and emit `[GSI_LOGGER]` warnings
-        // each time they're called. The notification object passed here is
-        // also limited under FedCM — the "reason" values it does return
-        // are unreliable. Google's guidance: rely on the initialize()
-        // callback for auth success and use a plain timeout to detect
-        // "prompt didn't open" (e.g., third-party cookies blocked in
-        // incognito).
+        // Session 28e-10.2 — with `use_fedcm_for_prompt: true`, prompt()
+        // still fires a PromptMomentNotification callback. Under FedCM
+        // the isNotDisplayed / isSkippedMoment methods are deprecated
+        // and Google's GSI library logs a `[GSI_LOGGER]` deprecation
+        // warning each time they're called. That warning is visible in
+        // DevTools console but is NOT user-visible and does NOT affect
+        // functionality. Trade-off accepted: keep the auto-detection
+        // (real user-facing benefit — blocked users see the guidance
+        // modal automatically) at the cost of a console warning per
+        // sign-in attempt. A timing-based alternative would silently
+        // false-fire on users who walked away from an open picker; a
+        // manual "sign-in not working?" link would require users to
+        // discover it. Neither is a clear net win over accepting a
+        // console warning.
         //
-        // Blocked-picker is detected via TIMING: if 15s elapses AND the
-        // auth callback hasn't started executing, we treat it as blocked
-        // and surface showFedcmBlockedModal. First revision used 6s but
-        // that raced against normal-browser sign-in — the picker opens
-        // fast, but users often take 3-8s to pick an account and Google
-        // takes another 1-3s to fire the callback. 15s covers even slow
-        // pickers; the authCallbackFired guard covers slow post-pick
-        // network round-trips (signInWithIdToken to Supabase).
-        google.accounts.id.prompt();
-
-        // Blocked heuristic (15s). Cleared inside the auth callback the
-        // moment it begins executing.
-        blockedTimerId = setTimeout(() => {
-          if (!authCallbackFired) {
-            settle(reject, new Error('__fedcm_blocked__'));
+        // We deliberately do NOT fall back to OAuth redirect: the earlier
+        // oauth-restore cleanup removed the search/booking state
+        // preservation that flow used to rely on, so a redirect
+        // mid-checkout would clobber the user's selections.
+        google.accounts.id.prompt((notification) => {
+          try {
+            const notDisplayed = notification.isNotDisplayed && notification.isNotDisplayed();
+            const skipped = notification.isSkippedMoment && notification.isSkippedMoment();
+            if (notDisplayed || skipped) {
+              const reason = (notDisplayed && notification.getNotDisplayedReason && notification.getNotDisplayedReason())
+                || (skipped && notification.getSkippedReason && notification.getSkippedReason())
+                || 'unknown';
+              console.warn('[gsi] prompt not displayed (reason=', reason, ')');
+              settle(reject, new Error('__fedcm_blocked__'));
+            }
+          } catch (_) {
+            // notification API may not be available in all GSI versions — ignore
           }
-        }, 15000);
+        });
 
-        // Cancel timeout (60s). Outer bound for the case where the auth
-        // callback fires but then hangs (e.g., signInWithIdToken never
-        // resolves due to a network issue).
+        // Timeout fallback: 60s should be more than enough for the picker UI.
+        // If no callback by then, treat as cancelled (user closed the popup).
         setTimeout(() => {
           settle(reject, new Error('__cancelled__'));
         }, 60000);
@@ -21244,12 +21235,9 @@ const TUMAFLY_WHATSAPP_WAME = '254113165503';
       if (e.message === '__cancelled__') {
         // User dismissed or closed the picker — quiet, no error message.
       } else if (e.message === '__fedcm_blocked__') {
-        // Timing heuristic tripped — 6s elapsed with no auth activity,
-        // suggesting the FedCM picker never opened (third-party cookies
-        // blocked, incognito without an in-context Google session,
-        // browser cooldown from repeated dismissals, etc.). Show the
-        // dedicated modal pointing the user to Phone OTP. Close the auth
-        // modal first so the blocked modal isn't stacking on stale state.
+        // Browser blocked the FedCM picker. Show a dedicated modal explaining
+        // the situation + workarounds. Close the auth modal first so the
+        // FedCM-blocked modal isn't stacking on top of a stale state.
         closeAuthModal();
         showFedcmBlockedModal();
       } else {
