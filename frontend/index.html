@@ -20275,27 +20275,33 @@ const TUMAFLY_WHATSAPP_WAME = '254113165503';
     }
   })();
 
-  // Session 28 — visibilitychange safety net for Chrome tab-throttling.
+  // Session 28e-10.4 — visibilitychange safety net for the itinerary view.
   //
-  // Symptom: when the user pastes a URL like #itinerary?ref=<pnr> into a
-  // fresh incognito tab (Chromebook especially), Chrome sometimes treats
-  // the initial load as "not attentively focused" and throttles the
-  // getSession() promise + the loadMyTrips fetch + the .then(loadItinerary)
-  // callback chain. The restoreFromUrl branch runs synchronously so the
-  // "Loading your trip…" shell paints, but the async chain gets suspended
-  // indefinitely. User workaround: tab-switch away and back — that fires
-  // visibilitychange with visibilityState='visible' and Chrome releases
-  // the throttle, cascading every pending promise.
+  // Origin story (Session 27c #1b): users pasting `#itinerary?ref=<pnr>`
+  // into a fresh incognito tab (Chromebook especially) reported the
+  // "Loading your trip…" shell painting and never resolving. Users found
+  // a workaround: tab-switch away and back would unfreeze it. The theory
+  // at the time was Chrome tab-throttling of the async promise chain
+  // (getSession → loadMyTrips → loadItinerary) — visibilitychange with
+  // visibilityState='visible' would release the throttle and cascade
+  // every pending promise.
   //
-  // Fix: when the tab becomes visible AND we're stuck on an itinerary
-  // view for which we already know the target PNR but the trip isn't
-  // in _allTrips, re-kick the load. Same code path as onSignedIn's
-  // itinerary restore branch. Idempotent — if a fast load already
-  // populated _allTrips, the guard skips.
+  // Actual root cause (found in Session 27c #1c): auth-bounce intent-loss
+  // + popstate gap. The itinerary view was losing its "load this PNR
+  // after sign-in" flag during the auth bounce, and popstate wasn't
+  // handling the itinerary case. Both properly fixed in the auth flow
+  // itself; the itinerary hang no longer needs this listener to unstick.
   //
-  // Same pattern likely applies to #profile / #my-trips restores but
-  // symptoms haven't been reported there yet; scoped to itinerary for
-  // now.
+  // Kept as defense-in-depth (Session 28e-10.4 decision). Chrome tab-
+  // throttling is a real browser behavior — it just wasn't the itinerary
+  // hang. If a future async chain does run into throttling here (or on
+  // #profile / #my-trips, though we haven't seen it), the listener still
+  // provides a self-correction on tab focus without user action.
+  //
+  // Cost: one listener registered at module load, fires on every
+  // visibility change but guards early (only kicks a re-load if we're on
+  // #itinerary, have a PNR, are signed in, and the trip isn't already
+  // cached). Idempotent on the happy path.
   document.addEventListener('visibilitychange', () => {
     if (document.visibilityState !== 'visible') return;
     if (document.body.getAttribute('data-view') !== 'itinerary') return;
