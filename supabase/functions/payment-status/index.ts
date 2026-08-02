@@ -71,34 +71,33 @@ serve(async (req) => {
   const supabase = createClient(SUPABASE_URL, SERVICE_ROLE_KEY);
 
   try {
-    // Accept three lookup modes:
-    //   - merchant_ref (TF-...) → polling during checkout (status of pending payment)
-    //   - tracking_id (processor's own transaction id) → same as merchant_ref but via the processor's id
-    //   - PNR (e.g. LPAPZU) + last_name → find-booking view (lookup a confirmed booking)
-    //
-    // We detect which mode by:
-    //   - tracking_id param → mode A
-    //   - ref starts with "TF-" → mode A
-    //   - otherwise treat ref as PNR → mode C
-    let merchantRef = "", trackingId = "", pnr = "", lastName = "";
-    if (req.method === "GET") {
-      const url = new URL(req.url);
-      const refParam = url.searchParams.get("ref") || "";
-      trackingId = url.searchParams.get("tracking_id") || "";
-      lastName = (url.searchParams.get("last_name") || "").trim();
-      if (refParam.startsWith("TF-")) merchantRef = refParam;
-      else if (refParam) pnr = refParam.toUpperCase();
-    } else {
-      const body = await req.json().catch(() => ({}));
-      const refParam = body.ref || body.merchant_ref || "";
-      trackingId = body.tracking_id || "";
-      lastName = (body.last_name || "").trim();
-      if (refParam.startsWith("TF-")) merchantRef = refParam;
-      else if (refParam) pnr = String(refParam).toUpperCase();
-    }
+    // Accept two lookup modes via the `ref` query/body param:
+        //   - Mode A: ref starts with "TF-" → merchant_ref → checkout polling
+        //     (surface for ops diagnostics; no live frontend caller — pollOnce
+        //     hits verify-payment, not payment-status. Retained as an ops probe.)
+        //   - Mode C: any other ref → treat as PNR → find-booking (requires last_name)
+        //
+        // A prior Mode B (tracking_id query param → processor_transaction_id lookup)
+        // was removed as 28e-14. Zero frontend + backend callers confirmed by grep
+        // (Session 29). If a future integration needs processor-id lookup, restore
+        // from the pre-28e-14 EF version.
+        let merchantRef = "", pnr = "", lastName = "";
+        if (req.method === "GET") {
+          const url = new URL(req.url);
+          const refParam = url.searchParams.get("ref") || "";
+          lastName = (url.searchParams.get("last_name") || "").trim();
+          if (refParam.startsWith("TF-")) merchantRef = refParam;
+          else if (refParam) pnr = refParam.toUpperCase();
+        } else {
+          const body = await req.json().catch(() => ({}));
+          const refParam = body.ref || body.merchant_ref || "";
+          lastName = (body.last_name || "").trim();
+          if (refParam.startsWith("TF-")) merchantRef = refParam;
+          else if (refParam) pnr = String(refParam).toUpperCase();
+        }
 
-    if (!merchantRef && !trackingId && !pnr) {
-      return new Response(JSON.stringify({ error: "Missing ref or tracking_id" }), {
+        if (!merchantRef && !pnr) {
+          return new Response(JSON.stringify({ error: "Missing ref" }), {
         status: 400,
         headers: { ...CORS_HEADERS, "Content-Type": "application/json" },
       });
@@ -169,14 +168,13 @@ serve(async (req) => {
       });
     }
 
-    // ── Mode A / B: merchant_ref or tracking_id (checkout polling) ──────
-    // 1. Look up pending_booking
-    const query = supabase.from("pending_bookings").select("*");
-    const { data: pending, error } = await (
-      merchantRef
-        ? query.eq("merchant_ref", merchantRef)
-        : query.eq("processor_transaction_id", trackingId)
-    ).maybeSingle();
+   // ── Mode A: merchant_ref (checkout polling / ops diagnostic) ────────
+       // 1. Look up pending_booking
+       const { data: pending, error } = await supabase
+         .from("pending_bookings")
+         .select("*")
+         .eq("merchant_ref", merchantRef)
+         .maybeSingle();
 
     if (error || !pending) {
       return new Response(JSON.stringify({
