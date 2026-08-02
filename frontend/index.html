@@ -19587,7 +19587,7 @@ const TUMAFLY_WHATSAPP_WAME = '254113165503';
   // This module is also entered on Paystack's callback_url redirect for legacy
   // rows or edge cases (?ref=TF-... at page load).
   //
-  // Architecture: poll payment-status every 2s until a terminal state
+  // Architecture: poll verify-payment every 2s until a terminal state
   // (confirmed / failed / needs_support) or a 60s soft-timeout. During
   // polling the user sees a "Confirming your payment…" spinner. Terminal
   // states render their own UI (PNR / failure / "we'll email you").
