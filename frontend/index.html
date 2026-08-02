@@ -18232,9 +18232,6 @@ const TUMAFLY_WHATSAPP_WAME = '254113165503';
       // Keep the fare timer ticking through this step. If it expires while
       // the Paystack modal is open, _cancelPaystackModalOnFareExpiry closes
       // the modal and the search-expired modal takes over.
-      //
-      // No startPolling() here — polling only starts on the #success view
-      // after Paystack's onSuccess callback fires (see _handlePaystackSuccess).
     } catch (e) {
       // Session 28e modal refactor: open the payment modal so the alert
       // appears in context. The pane no longer opens (one-tap flow), so
@@ -18555,31 +18552,6 @@ const TUMAFLY_WHATSAPP_WAME = '254113165503';
     _realtimeChannel = null;
     _realtimeClient = null;
     _realtimeSubscribed = false;
-  }
-
-  function startPolling() {
-    pollStartedAt = Date.now();
-    // Don't show any "waiting" UI here — the Paystack modal is fully in charge
-    // of telling the user what to do (enter card, click pay, etc.). Earlier
-    // users reported the "Waiting for payment confirmation…" spinner was
-    // confusing — they thought they'd already clicked pay and the spinner
-    // implied processing. We keep the polling running silently in the
-    // background. If the booking confirms, showView('success') fires.
-    // If polling times out, we surface a status message at that point.
-    document.getElementById('poll-area').classList.add('hidden');
-    document.getElementById('poll-area').innerHTML = '';
-
-    // Fire the first poll immediately — this is the initial state fetch,
-    // and if Realtime never opens it becomes the first tick of the classic
-    // polling loop. Independent of Realtime succeeding or failing.
-    pollOnce();
-
-    // Kick off Realtime in the background. If it opens, pollOnce will
-    // start getting poked on every DB transition; the setTimeout fallback
-    // in pollOnce's tail will keep firing at a stretched interval as a
-    // safety net. If it fails, nothing changes — polling proceeds as
-    // before at POLL_INTERVAL_MS.
-    _openRealtimeChannel();
   }
 
   async function pollOnce() {
