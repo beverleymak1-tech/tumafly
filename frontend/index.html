@@ -21160,6 +21160,15 @@ const TUMAFLY_WHATSAPP_WAME = '254113165503';
         let settled = false;
         const settle = (fn, val) => { if (!settled) { settled = true; fn(val); } };
 
+        // Session 28e-10.2 revision: track whether the initialize() auth
+        // callback has begun executing. If it has, the picker was clearly
+        // NOT blocked — Google produced a credential — so the blocked-
+        // timer must not fire even if signInWithIdToken takes long. Set
+        // synchronously at the top of the callback before the async
+        // Supabase call, so the guard is in place before any await.
+        let authCallbackFired = false;
+        let blockedTimerId = null;
+
         google.accounts.id.initialize({
           client_id: TUMAFLY_GOOGLE_CLIENT_ID,
           // Hashed nonce goes into the ID token Google issues
@@ -21169,6 +21178,11 @@ const TUMAFLY_WHATSAPP_WAME = '254113165503';
           cancel_on_tap_outside: true,
           itp_support: true,             // ITP-friendly on Safari
           callback: async (response) => {
+            authCallbackFired = true;
+            if (blockedTimerId !== null) {
+              clearTimeout(blockedTimerId);
+              blockedTimerId = null;
+            }
             try {
               const sb = await getSupabase();
               const { error } = await sb.auth.signInWithIdToken({
@@ -21194,30 +21208,27 @@ const TUMAFLY_WHATSAPP_WAME = '254113165503';
         // "prompt didn't open" (e.g., third-party cookies blocked in
         // incognito).
         //
-        // We keep prompt() itself (that's what actually opens the picker)
-        // but drop the notification callback body. Blocked-picker is now
-        // detected via TIMING: if 6s elapses with no auth activity, we
-        // treat it as blocked. If the picker opened, the user has already
-        // seen it in the first ~1s and either clicked (auth callback
-        // fires, resolves early) or dismissed. Dismissal within 6s is
-        // rare — most dismissals happen after the user reads the
-        // picker's text. So the 6s heuristic is a reasonable proxy for
-        // "picker never opened → surface the blocked modal so the user
-        // knows to switch to Phone OTP." Users who *do* legitimately
-        // dismiss quickly will see the blocked modal spuriously — small
-        // cost, and Phone OTP is still one tap away from that modal.
+        // Blocked-picker is detected via TIMING: if 15s elapses AND the
+        // auth callback hasn't started executing, we treat it as blocked
+        // and surface showFedcmBlockedModal. First revision used 6s but
+        // that raced against normal-browser sign-in — the picker opens
+        // fast, but users often take 3-8s to pick an account and Google
+        // takes another 1-3s to fire the callback. 15s covers even slow
+        // pickers; the authCallbackFired guard covers slow post-pick
+        // network round-trips (signInWithIdToken to Supabase).
         google.accounts.id.prompt();
 
-        // Blocked heuristic (6s). Set BEFORE the 60s cancel timeout so a
-        // fast dismissal still falls into the blocked path (surfaces the
-        // helpful modal) rather than the silent-cancel path.
-        setTimeout(() => {
-          settle(reject, new Error('__fedcm_blocked__'));
-        }, 6000);
+        // Blocked heuristic (15s). Cleared inside the auth callback the
+        // moment it begins executing.
+        blockedTimerId = setTimeout(() => {
+          if (!authCallbackFired) {
+            settle(reject, new Error('__fedcm_blocked__'));
+          }
+        }, 15000);
 
-        // Cancel timeout (60s). Redundant on the blocked path since the
-        // 6s timer would fire first, but kept as an outer bound in case
-        // the blocked timer is cleared by some future refactor.
+        // Cancel timeout (60s). Outer bound for the case where the auth
+        // callback fires but then hangs (e.g., signInWithIdToken never
+        // resolves due to a network issue).
         setTimeout(() => {
           settle(reject, new Error('__cancelled__'));
         }, 60000);
@@ -21492,16 +21503,14 @@ const TUMAFLY_WHATSAPP_WAME = '254113165503';
           Google sign-in unavailable
         </div>
         <div style="font-size:14px;color:var(--text-2,#4A5568);margin-bottom:14px;line-height:1.5;text-align:left;">
-          This browser is blocking third-party sign-in. To continue:
+          This browser may be blocking third-party sign-in, or you may need to sign into Google in this window first. Try one of these:
         </div>
-        <ul style="font-size:14px;color:var(--text-2,#4A5568);margin:0 0 14px;padding-left:20px;line-height:1.6;text-align:left;">
-          <li>Allow it in <strong style="color:var(--ink,#0F1923);">Site settings</strong>, or</li>
-          <li>Try a different browser, or</li>
-          <li>Use phone sign-in if your number is linked to your TumaFly profile</li>
+        <ul style="font-size:14px;color:var(--text-2,#4A5568);margin:0 0 20px;padding-left:20px;line-height:1.6;text-align:left;">
+          <li style="margin-bottom:8px;">Sign into Google in this browser first, then try again <span style="color:var(--text-3,#717A86);">(most common in incognito or private mode)</span></li>
+          <li style="margin-bottom:8px;">Allow third-party sign-in in <strong style="color:var(--ink,#0F1923);">Site settings</strong> <span style="color:var(--text-3,#717A86);">(padlock icon in the address bar)</span></li>
+          <li style="margin-bottom:8px;">Use <strong style="color:var(--ink,#0F1923);">Phone sign-in</strong> if your number is linked to your TumaFly profile</li>
+          <li>Or try a different browser</li>
         </ul>
-        <div style="font-size:13px;color:var(--text-3,#717A86);margin-bottom:20px;line-height:1.5;text-align:left;">
-          Note: in incognito or private mode, you also need to be signed into Google in this window first.
-        </div>
         <button type="button" id="fedcm-blocked-ok" style="width:100%;padding:12px 16px;border-radius:10px;border:none;background:var(--brand,#3D95F5);color:#fff;font-weight:600;cursor:pointer;font-size:14px;">
           Got it
         </button>
