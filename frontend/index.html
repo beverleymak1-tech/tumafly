@@ -14330,6 +14330,52 @@ const TUMAFLY_WHATSAPP_WAME = '254113165503';
   //   - The user has already typed something in the target field
   const GUEST_PREFILL_KEY = 'tumafly:guest_prefill';
 
+  // Session 28e-10.10 — retroactive cleanup of pre-`7a8fd80` guest_prefill
+  // entries. Before commit `7a8fd80` (Session 24), stashGuestPrefill wrote
+  // the entire first-traveler record to localStorage — including born_on
+  // and passport. That commit fixed the write path to whitelist only
+  // low-sensitivity fields (title, given_name, middle_name, family_name,
+  // gender, nationality). Session 24 also added a read-side whitelist so
+  // pre-`7a8fd80` PII in existing entries can't leak back into memory or
+  // an API call. But the raw legacy PII physically remains in localStorage
+  // on any device that booked pre-`7a8fd80` and hasn't rebooked since (a
+  // rebooking overwrites with the trimmed shape).
+  //
+  // This one-time-per-device sweep detects legacy shape by checking for
+  // any of the excluded field names in first_passenger, and wipes the
+  // entry entirely if found. Post-`7a8fd80` entries pass through
+  // untouched — users don't lose their prefill unnecessarily. A version
+  // flag prevents re-running the check on subsequent boots. Runs
+  // synchronously at module load, before any code reads guest_prefill.
+  const PII_NUKE_FLAG_KEY = 'tumafly:pii_nuke_v1';
+  (function _nukeStaleGuestPrefillOnce() {
+    try {
+      if (localStorage.getItem(PII_NUKE_FLAG_KEY)) return;
+      const raw = localStorage.getItem(GUEST_PREFILL_KEY);
+      if (raw) {
+        let hasLegacyPII = false;
+        try {
+          const data = JSON.parse(raw);
+          const fp = data && data.first_passenger;
+          // Legacy shape indicators — any of these being present means the
+          // entry was written before 7a8fd80 (or by hand-editing).
+          hasLegacyPII = !!(fp && (fp.born_on || fp.passport
+            || fp.passport_number || fp.passport_expires_on));
+        } catch (_) {
+          // Corrupt JSON — safe to nuke (a legacy write-error left junk).
+          hasLegacyPII = true;
+        }
+        if (hasLegacyPII) {
+          localStorage.removeItem(GUEST_PREFILL_KEY);
+        }
+      }
+      localStorage.setItem(PII_NUKE_FLAG_KEY, '1');
+    } catch (_) {
+      // localStorage disabled (Safari private, etc.) — silent no-op.
+      // Next boot in a non-private context will run the sweep.
+    }
+  })();
+
   function stashGuestPrefill() {
     if (currentUser) return;
     try {
