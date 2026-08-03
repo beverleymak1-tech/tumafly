@@ -7771,8 +7771,12 @@
           <h3>Pay for your booking</h3>
           <p class="pay-helper-text">Select your method of payment</p>
           <div class="pay-tabs">
-            <!-- M-Pesa disabled at launch. Unchanged from #view-payment. -->
-            <div class="pay-tab-item pay-tab-item-mpesa" id="pay-mpesa-item">
+            <!-- M-Pesa button hidden Session 29 §3.2. Paystack's mobile_money
+                 channel is enabled interim so customers can pay via M-Pesa
+                 inside the Paystack modal. When Daraja goes live, un-hide
+                 this button AND remove mobile_money from initialize-payment's
+                 channels array in the SAME commit (see handoff §2 checklist). -->
+            <div class="pay-tab-item pay-tab-item-mpesa hidden" id="pay-mpesa-item">
               <button class="pay-tab" disabled id="paytab-mpesa">
                 <div class="pay-tab-icon" style="background:#1a9e4a;color:white;font-weight:600;font-size:11px;">M</div>
                 <div class="pay-tab-body">
@@ -7794,8 +7798,8 @@
               <button class="pay-tab" id="paytab-card" onclick="selectPayTab('card')">
                 <div class="pay-tab-icon">💳</div>
                 <div class="pay-tab-body">
-                  <span class="tab-name">Credit or debit card</span>
-                  <span class="tab-meta">Visa, Mastercard, Amex</span>
+                  <span class="tab-name">Card, M-Pesa, or bank transfer</span>
+                  <span class="tab-meta">Pay securely via Paystack</span>
                 </div>
               </button>
 
