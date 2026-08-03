@@ -52,9 +52,10 @@ Deno.serve(async (req) => {
     const { data: rows, error: dbError } = await adminClient
       .from("bookings")
       .select(`
-        id,
-        booking_reference,
-        status,
+          id,
+          pending_booking_id,
+          booking_reference,
+          status,
         origin,
         destination,
         departure_at,
@@ -121,8 +122,42 @@ Deno.serve(async (req) => {
 
     const pendingByTime = (userPendings.data ?? []).slice();   // sorted desc
 
-    // Pair each booking with the nearest pending row that was created BEFORE it
-    // (the pending row exists before the bookings row by definition).
+        // ── 3b. Fetch refunds for these bookings ──────────────────────────────
+        // Session 29 §4.3 — refund details card on #itinerary. Refunds key off
+        // pending_booking_id, which bookings also carry (real FK per Session 28b).
+        // Clean direct join, no time-window matching needed.
+        const bookingPendingIds = (rows ?? [])
+          .map(r => r.pending_booking_id)
+          .filter(Boolean);
+
+        let refundByPendingId: Record<string, any> = {};
+        if (bookingPendingIds.length) {
+          const { data: refundRows, error: refundErr } = await adminClient
+            .from("refunds")
+            .select(`
+              pending_booking_id,
+              merchant_ref,
+              amount_kes,
+              reason,
+              status,
+              refund_type,
+              created_at,
+              updated_at
+            `)
+            .in("pending_booking_id", bookingPendingIds);
+          if (refundErr) {
+            // Non-fatal — log and continue. Trip cards will render without refund
+            // info; itinerary card just falls back to legacy banner.
+            console.error("[get-user-trips] refunds enrichment failed:", refundErr);
+          } else {
+            for (const r of (refundRows ?? [])) {
+              refundByPendingId[r.pending_booking_id] = r;
+            }
+          }
+        }
+
+        // Pair each booking with the nearest pending row that was created BEFORE it
+        // (the pending row exists before the bookings row by definition).
     const matchPendingForBooking = (bookingCreatedAt: string) => {
       const bt = new Date(bookingCreatedAt).getTime();
       let best: any = null;
@@ -197,12 +232,15 @@ Deno.serve(async (req) => {
         // "Visa ****1234". Replaces the old separate "Billing name" line.
         paymentAccountLast4: b.payment_account_last4 ?? null,
         tripType:           b.trip_type ?? "one_way",
-        returnDate:         b.return_date ?? null,
-        returnAirline:      b.return_airline ?? null,
-        returnFlightNumber: b.return_flight_number ?? null,
-        offer: { slices },
-      };
-    });
+                returnDate:         b.return_date ?? null,
+                returnAirline:      b.return_airline ?? null,
+                returnFlightNumber: b.return_flight_number ?? null,
+                // Session 29 §4.3 — refund details for #itinerary card. Null when
+                // no refund row exists for this booking (typical for confirmed trips).
+                refund:             refundByPendingId[b.pending_booking_id] ?? null,
+                offer: { slices },
+              };
+            });
 
     return new Response(JSON.stringify({ trips }), {
       status: 200,
