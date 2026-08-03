@@ -597,7 +597,7 @@ serve(async (req) => {
         currency: "KES",
         reference: merchantRef,
         callback_url: `${FRONTEND_URL}/?ref=${merchantRef}`,
-        channels: ["card"], // cards only for launch — M-Pesa via Daraja later
+        channels: ["mobile_money", "card", "bank"], // Session 29 §3.2 — M-Pesa via Paystack aggregation interim until Daraja direct lands (see handoff §2 M-Pesa reactivation checklist for the coordinated swap)
         metadata: {
           pending_booking_id: pending.id,
           duffel_offer_id: offer_id,
