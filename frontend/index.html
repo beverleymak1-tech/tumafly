@@ -11740,9 +11740,12 @@ const TUMAFLY_WHATSAPP_WAME = '254113165503';
   }
 
   (function initDates() {
-    const tomorrow = new Date();
-    tomorrow.setDate(tomorrow.getDate() + 1);
-    const min = tomorrow.toISOString().split('T')[0];
+    // §40 — allow same-day departures. Previously the picker was anchored
+    // to tomorrow; airline sandboxes vary on how close to takeoff inventory
+    // stays open, and §41 (4-hour lead-time filter in search-flights) is
+    // the server-side guard against showing offers you can't actually book.
+    const today = new Date();
+    const min = today.toISOString().split('T')[0];
 
     // Max bookable: today + 355 days. Most airlines load schedules ~330 days ahead,
     // some up to 360. 355 gives a safe ceiling while still allowing far-out planning.
@@ -11856,11 +11859,13 @@ const TUMAFLY_WHATSAPP_WAME = '254113165503';
   }
 
   function validateDates(date, returnDate) {
+    // §40 — same-day departures are allowed; only past dates are rejected
+    // here. The near-departure guard (§41) lives in search-flights so we
+    // filter at offer source rather than at picker-time (airlines vary).
     const today = new Date(); today.setHours(0,0,0,0);
-    const tomorrow = new Date(today); tomorrow.setDate(tomorrow.getDate() + 1);
     const twoYears = new Date(today); twoYears.setFullYear(twoYears.getFullYear() + 2);
     const dep = new Date(date); dep.setHours(0,0,0,0);
-    if (dep < tomorrow) return 'Departure date must be tomorrow or later.';
+    if (dep < today) return 'Departure date cannot be in the past.';
     if (dep > twoYears) return 'Departure date is more than 2 years away — please check.';
     if (tripType === 'round') {
       if (!returnDate) return 'Please pick a return date.';
