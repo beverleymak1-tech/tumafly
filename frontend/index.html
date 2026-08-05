@@ -12703,7 +12703,14 @@ const TUMAFLY_WHATSAPP_WAME = '254113165503';
       });
       cabinDiagnostics = data.cabin_diagnostics || null;
       if (!allOffers.length) {
-        showAlert(alertContainer, 'No flights found for these dates. Try different dates or airports.', 'info');
+        // §41 — near-departure empty-state. Backend sets filtered_reason
+        // when its 4-hour lead-time filter zeroed an otherwise-non-empty
+        // result set. If some other cause zeroed us (e.g. city-group airport
+        // filter dropped everything), fall through to the generic copy.
+        const emptyMsg = data.filtered_reason === 'departure_too_soon'
+          ? 'No flights available for departures soon. Try a different date.'
+          : 'No flights found for these dates. Try different dates or airports.';
+        showAlert(alertContainer, emptyMsg, 'info');
         return;
       }
       selectedOutbound = selectedInbound = selectedOffer = null;

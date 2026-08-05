@@ -238,8 +238,31 @@ serve(async (req) => {
     };
     const buckets = new Map<string, Bucket>();
 
+    // §41 — near-departure floor. Filter offers whose first segment departs
+    // in less than 4 hours. Airlines vary on how close to takeoff they close
+    // inventory; rather than hide near-departure options at the picker (§40
+    // now allows same-day), we drop them server-side so the results page
+    // never surfaces offers that Duffel's own /air/orders would reject.
+    // Counter feeds filtered_reason: "departure_too_soon" in the response
+    // when the filter zeroes an otherwise-non-empty result set — the
+    // frontend uses that signal to paint a specific empty-state.
+    const MIN_LEAD_MS = 4 * 60 * 60 * 1000;
+    const nowMs = Date.now();
+    let filteredForDepartureTooSoon = 0;
+
     function ingest(offers: any[], cabin: CabinClass) {
       for (const o of offers) {
+        // §41 — drop near-departure offers before they enter a bucket.
+        // This also drops already-departed offers as a natural consequence
+        // (depMs < nowMs satisfies depMs < nowMs + MIN_LEAD_MS).
+        const firstDep = o?.slices?.[0]?.segments?.[0]?.departing_at;
+        if (firstDep) {
+          const depMs = Date.parse(firstDep);
+          if (Number.isFinite(depMs) && depMs < nowMs + MIN_LEAD_MS) {
+            filteredForDepartureTooSoon++;
+            continue;
+          }
+        }
         const key = offerIdentityKey(o);
         const original = parseFloat(o.total_amount);
         const priceKES = fx.toKES(original, o.total_currency);
@@ -398,11 +421,19 @@ serve(async (req) => {
     // Sort by lowest available price ascending (frontend can re-sort)
     offers.sort((a, b) => a.lowest_price_kes - b.lowest_price_kes);
 
+    // §41 — surface the reason when we returned empty. Only "departure_too_soon"
+    // for now; extend as more filter reasons land. null when offers is populated
+    // or when emptiness has no filter-attributable cause (real no-availability).
+    const filteredReason = filteredForDepartureTooSoon > 0 && offers.length === 0
+      ? "departure_too_soon"
+      : null;
+
     return new Response(
       JSON.stringify({
         success: true,
         count: offers.length,
         offers,
+        filtered_reason: filteredReason,
         // Diagnostics — useful when one cabin's Duffel call fails so frontend can show why
         cabin_diagnostics: {
           economy: { ok: !eco.error, count: eco.offers.length },
