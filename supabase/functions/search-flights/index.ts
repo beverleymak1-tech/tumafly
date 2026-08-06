@@ -132,6 +132,42 @@ function offerIdentityKey(offer: any): string {
   ).join(">");
 }
 
+// §41.1 — parse a bare-local ISO timestamp against the origin airport's IANA
+// timezone. Duffel returns segment.departing_at without a TZ suffix (e.g.
+// "2026-08-05T17:00:00"), which Date.parse treats as UTC. Ignoring the origin
+// TZ meant the 4-hour floor was effectively `4h - origin_UTC_offset` and a
+// JNB 17:00 SAST departure (15:00 UTC) slipped past the filter at ~13:00 SAST
+// wall-clock even though it was only ~2h away. This helper reads the IANA
+// zone from segment.origin.time_zone and returns real UTC milliseconds.
+function parseAirportLocalTime(localIso: string, timeZone: string | undefined): number {
+  const bareParse = Date.parse(localIso);
+  if (!timeZone || !Number.isFinite(bareParse)) return bareParse;
+  try {
+    // Treat the local wall-clock as UTC to get a probe moment, then check
+    // how that moment renders in the target timezone. The delta is the
+    // origin-to-UTC offset at that specific instant (handles DST correctly).
+    const probeUtc = Date.parse(localIso + (localIso.endsWith("Z") ? "" : "Z"));
+    if (!Number.isFinite(probeUtc)) return bareParse;
+    const dtf = new Intl.DateTimeFormat("en-US", {
+      timeZone,
+      year: "numeric", month: "2-digit", day: "2-digit",
+      hour: "2-digit", minute: "2-digit", second: "2-digit",
+      hourCycle: "h23",
+    });
+    const parts = dtf.formatToParts(new Date(probeUtc));
+    const m: Record<string, string> = {};
+    for (const p of parts) m[p.type] = p.value;
+    const tzMs = Date.UTC(
+      Number(m.year), Number(m.month) - 1, Number(m.day),
+      Number(m.hour), Number(m.minute), Number(m.second)
+    );
+    if (!Number.isFinite(tzMs)) return bareParse;
+    return probeUtc + (probeUtc - tzMs);
+  } catch {
+    return bareParse;
+  }
+}
+
 // ---------- Duffel ----------
 
 async function fetchOffersForCabin(
@@ -255,9 +291,13 @@ serve(async (req) => {
         // §41 — drop near-departure offers before they enter a bucket.
         // This also drops already-departed offers as a natural consequence
         // (depMs < nowMs satisfies depMs < nowMs + MIN_LEAD_MS).
-        const firstDep = o?.slices?.[0]?.segments?.[0]?.departing_at;
+        // §41.1 — parse against origin IANA zone rather than as UTC;
+        // Duffel returns bare-local departing_at strings.
+        const firstSeg = o?.slices?.[0]?.segments?.[0];
+        const firstDep = firstSeg?.departing_at;
+        const originTz = firstSeg?.origin?.time_zone;
         if (firstDep) {
-          const depMs = Date.parse(firstDep);
+          const depMs = parseAirportLocalTime(firstDep, originTz);
           if (Number.isFinite(depMs) && depMs < nowMs + MIN_LEAD_MS) {
             filteredForDepartureTooSoon++;
             continue;
