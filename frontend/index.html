@@ -12470,6 +12470,32 @@ const TUMAFLY_WHATSAPP_WAME = '254113165503';
     if (esLabel) esLabel.textContent = label;
   }
 
+  // §4.7 — Build a Duffel-shaped passengers array from the picker state.
+  // Duffel's /air/offer_requests wants a passengers array like:
+  //   [{type:"adult"}, {type:"child", age:8}, {type:"infant_without_seat"}]
+  // adult and infant_without_seat need no age; child requires an age.
+  //
+  // Slot order matters. It must match getExpectedPaxType(i) at booking time
+  // (see collectPassengers): adults first, then children, then infants.
+  // Otherwise Duffel returns type-mismatch errors when we create the order.
+  //
+  // Children: temporary age placeholder of 10 (mid-range of 2-11). Commit 4
+  // introduces a per-child DOB picker that will compute age at outbound
+  // departure and set both this array's age field and the booking-form
+  // DOB in lock-step so Duffel's book-time check passes.
+  //
+  // infantsSeat: Duffel's search API has no "infant_with_seat" — all infants
+  // are searched as infant_without_seat. Seat-vs-lap distinction (if we ever
+  // support it) is handled later at seat-selection time.
+  function buildPassengerTypes() {
+    const arr = [];
+    for (let i = 0; i < travelers.adults; i++)      arr.push({ type: 'adult' });
+    for (let i = 0; i < travelers.children; i++)    arr.push({ type: 'child', age: 10 });
+    for (let i = 0; i < travelers.infantsSeat; i++) arr.push({ type: 'infant_without_seat' });
+    for (let i = 0; i < travelers.infantsLap; i++)  arr.push({ type: 'infant_without_seat' });
+    return arr;
+  }
+
   function renderTravelerPopup(which) {
     const total = travelers.adults + travelers.children + travelers.infantsSeat + travelers.infantsLap;
     const rows = TRAVELER_TYPES.map(t => {
@@ -12634,7 +12660,12 @@ const TUMAFLY_WHATSAPP_WAME = '254113165503';
         body: JSON.stringify({
           origin, destination, date,
           return_date: tripType === 'round' ? returnDate : null,
+          // §4.7 — Send both. passenger_types is authoritative when non-empty
+          // (backend uses it as the exact Duffel passengers array). passengers
+          // stays as a defense-in-depth fallback: if the array is missing or
+          // malformed the backend defaults to Array(passengers).fill(adult).
           passengers: passengerCount,
+          passenger_types: buildPassengerTypes(),
           turnstile_token: turnstileToken,
         }),
       });

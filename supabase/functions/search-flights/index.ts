@@ -172,13 +172,16 @@ function parseAirportLocalTime(localIso: string, timeZone: string | undefined): 
 
 async function fetchOffersForCabin(
   slices: any[],
-  passengers: number,
+  passengersArray: Array<Record<string, any>>,
   cabin: CabinClass,
 ): Promise<{ offers: any[]; error: any | null }> {
+  // §4.7 — passengersArray is now the pre-built Duffel-shaped array from
+  // the caller (buildPassengerTypes on the frontend, or the adult-only
+  // fallback in serve()). Passed straight through to Duffel.
   const body = {
     data: {
       slices,
-      passengers: Array(passengers).fill({ type: "adult" }),
+      passengers: passengersArray,
       cabin_class: cabin,
     },
   };
@@ -209,7 +212,17 @@ serve(async (req) => {
   }
 
   try {
-    const { origin, destination, date, return_date, passengers = 1, turnstile_token } = await req.json();
+    const { origin, destination, date, return_date, passengers = 1, passenger_types, turnstile_token } = await req.json();
+
+    // §4.7 — Resolve the passengers array for Duffel. Frontend sends
+    // passenger_types as the authoritative shape (built by
+    // buildPassengerTypes from the picker state). Falls back to
+    // N-adults for defense-in-depth: unknown external callers or a
+    // malformed payload still get a valid request.
+    const paxArray: Array<Record<string, any>> =
+      Array.isArray(passenger_types) && passenger_types.length > 0
+        ? passenger_types
+        : Array(passengers).fill({ type: "adult" });
 
     // Bot protection (Cloudflare Turnstile). No-op when TURNSTILE_SECRET isn't set,
     // so this is safe to deploy before the Turnstile site is registered.
@@ -234,10 +247,10 @@ serve(async (req) => {
     // Fan out across all cabin classes IN PARALLEL — bound by the slowest single Duffel call,
     // not the sum.
     const [eco, prem, biz, frst, fx] = await Promise.all([
-      fetchOffersForCabin(slices, passengers, "economy"),
-      fetchOffersForCabin(slices, passengers, "premium_economy"),
-      fetchOffersForCabin(slices, passengers, "business"),
-      fetchOffersForCabin(slices, passengers, "first"),
+      fetchOffersForCabin(slices, paxArray, "economy"),
+      fetchOffersForCabin(slices, paxArray, "premium_economy"),
+      fetchOffersForCabin(slices, paxArray, "business"),
+      fetchOffersForCabin(slices, paxArray, "first"),
       getRates(),
     ]);
 
