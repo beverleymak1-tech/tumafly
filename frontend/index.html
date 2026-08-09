@@ -8858,9 +8858,18 @@ const TUMAFLY_WHATSAPP_WAME = '254113165503';
 
   let tripType = 'round';
   let travelers = { adults: 1, children: 0, infantsSeat: 0, infantsLap: 0 };
-  // passengerCount = total passengers we send to Duffel (currently: adults + children;
-  // infants are handled separately and require backend support, deferred to handoff)
+  // §4.7-3a — Two derived counts kept in sync by recomputeTravelers():
+  //   passengerCount   = adults + children. Used for per-traveler price
+  //                      displays on the results cards, URL pax param, and
+  //                      seat/baggage loops (which only apply to primary
+  //                      tickets — infants on lap don't select seats).
+  //   bookingPaxCount  = adults + children + infantsSeat + infantsLap.
+  //                      Used for booking-side slot count, sidebar header
+  //                      ("Total for N travelers"), and the get-offer
+  //                      length-gate. Reflects the total number of
+  //                      passenger objects Duffel expects.
   let passengerCount = 1;
+  let bookingPaxCount = 1;
   let allOffers = [];
   let activeStopsFilter = 'all';
   let activeCabinFilter = 'all';  // Phase B follow-up — pill row above results.
@@ -10363,10 +10372,24 @@ const TUMAFLY_WHATSAPP_WAME = '254113165503';
     // typed during Phase 2 while waiting) and append fresh cards for the rest.
     const pax = Math.max(1, Math.min(9, parseInt(data.passengers_count, 10) || 1));
     const shellPax = travelerStates.length; // usually 1 from Phase 1 shell
-    travelers.adults = pax;
-    travelers.children = 0;
-    travelers.infantsSeat = 0;
-    travelers.infantsLap = 0;
+    // §4.7-3a — Preserve the picker's traveler-type breakdown when it
+    // already sums to the offer's pax count (common path: picker → search
+    // → click offer → booking, no refresh). Without this we'd wipe a
+    // 1A+1I picker state to 2A here, mis-labelling slot headers ("Adult"
+    // instead of "Infant") and worse, causing collectPassengers to send
+    // [adult, adult] to Duffel where the offer expects [adult, infant] →
+    // type-mismatch rejection. Only lump to adults when the picker total
+    // no longer matches (URL-refresh edge case with no picker context).
+    const pickerTotal = (travelers.adults || 0)
+                      + (travelers.children || 0)
+                      + (travelers.infantsSeat || 0)
+                      + (travelers.infantsLap || 0);
+    if (pickerTotal !== pax) {
+      travelers.adults = pax;
+      travelers.children = 0;
+      travelers.infantsSeat = 0;
+      travelers.infantsLap = 0;
+    }
     recomputeTravelers();
 
     // Compute international status now that we have the offer.
@@ -12455,12 +12478,12 @@ const TUMAFLY_WHATSAPP_WAME = '254113165503';
   ];
   const TRAVELER_MAX_TOTAL = 6;
 
-  // Recompute total + passenger count and update both trigger labels.
-  // passengerCount (the Duffel-bound number) = adults + children.
-  // Infants are tracked but not sent yet — see handoff.
+  // Recompute derived pax counts + update trigger labels.
+  // See declarations above for the passengerCount vs bookingPaxCount split.
   function recomputeTravelers() {
     const total = travelers.adults + travelers.children + travelers.infantsSeat + travelers.infantsLap;
-    passengerCount = travelers.adults + travelers.children;
+    passengerCount  = travelers.adults + travelers.children;
+    bookingPaxCount = total;
     const label = total === 1 ? '1 traveler' : `${total} travelers`;
     const homeLabel = document.getElementById('tp-home-label');
     const resultsLabel = document.getElementById('tp-results-label');
@@ -14264,8 +14287,11 @@ const TUMAFLY_WHATSAPP_WAME = '254113165503';
   }
 
   function initTravelerStates() {
+    // §4.7-3a — Loop bookingPaxCount (adults + children + infants), not
+    // passengerCount (primaries only). A 1A+1I picker needs 2 slots so
+    // getExpectedPaxType(1) can return 'infant_without_seat' for slot 1.
     travelerStates = [];
-    for (let i = 0; i < passengerCount; i++) {
+    for (let i = 0; i < bookingPaxCount; i++) {
       travelerStates.push({
         saved: false,
         data: {
@@ -14676,7 +14702,9 @@ const TUMAFLY_WHATSAPP_WAME = '254113165503';
 
     // Only reset states if count changed or no states yet — preserve in-progress data
     // when user navigates back to results then re-enters booking with the same selections.
-    if (travelerStates.length !== passengerCount) initTravelerStates();
+    // §4.7-3a — Compare against bookingPaxCount (all travelers) rather than
+    // passengerCount (primaries only); otherwise a 1A+1I picker reinits to 1 slot.
+    if (travelerStates.length !== bookingPaxCount) initTravelerStates();
 
     // Clear ALL validation flags whenever we (re-)enter the booking view. Validation
     // highlights should only ever appear as a direct result of a Save click in this
@@ -17020,7 +17048,7 @@ const TUMAFLY_WHATSAPP_WAME = '254113165503';
     slot.innerHTML = `
       <div class="price-panel">
         <h4>${isEstimate ? 'Estimated price' : 'Price details'}</h4>
-        <div class="ppp">${passengerCount > 1 ? `Total for ${passengerCount} travelers` : 'Price per passenger'}</div>
+        <div class="ppp">${bookingPaxCount > 1 ? `Total for ${bookingPaxCount} travelers` : 'Price per passenger'}</div>
         ${breakdownHtml}
       </div>
     `;
