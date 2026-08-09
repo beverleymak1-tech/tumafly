@@ -17116,7 +17116,19 @@ const TUMAFLY_WHATSAPP_WAME = '254113165503';
     if (slotIndex === 0) {
       // Constraint A — slot 0 rules
       if (age < 16) return 'Under 16 must travel with an 18+ adult';
-      // Slot 0 is 16-17: must be 18+ if any other slot carries a minor
+      // Slot 0 is 16-17: must be 18+ if the party contains a minor. A
+      // "minor" is detectable from two sources:
+      //   1. Picker composition — children/infantsSeat/infantsLap > 0
+      //      guarantee an under-16 traveler is on the booking regardless
+      //      of whether their DOB has been entered yet. This closes the
+      //      lag window where slot 0 would appear valid until the other
+      //      slot's DOB is filled.
+      //   2. Another slot's DOB giving age < 16 (belt-and-suspenders —
+      //      handles the case where the picker was 2A but slot 1's DOB
+      //      actually gives a minor).
+      const pickerHasMinor = (travelers.children    || 0) > 0
+                          || (travelers.infantsSeat || 0) > 0
+                          || (travelers.infantsLap  || 0) > 0;
       const anyOtherIsMinor = travelerStates.some((s, i) => {
         if (i === 0) return false;
         const otherDob = s?.data?.born_on;
@@ -17124,7 +17136,9 @@ const TUMAFLY_WHATSAPP_WAME = '254113165503';
         const otherAge = computeAgeOnTravel(otherDob);
         return otherAge !== null && otherAge < 16;
       });
-      if (anyOtherIsMinor && age < 18) return 'Must be 18+ to travel with a minor';
+      if ((pickerHasMinor || anyOtherIsMinor) && age < 18) {
+        return 'Must be 18+ to travel with a minor';
+      }
       return null;
     }
 
