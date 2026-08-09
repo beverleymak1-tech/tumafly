@@ -256,7 +256,7 @@ serve(async (req) => {
     const offerPassengers = offer.passengers;
 
     // 7. Build mapped passengers (identical to pre-refactor lines 620–631)
-    const mappedPassengers = pending.passengers.map((p: any, i: number) => ({
+    const mappedPassengers: any[] = pending.passengers.map((p: any, i: number) => ({
       id: offerPassengers[i].id,
       type: p.type,
       title: p.title,
@@ -267,6 +267,22 @@ serve(async (req) => {
       email: pending.contact.email,
       phone_number: pending.contact.phone_number || null,
     }));
+
+    // §4.7 — Link each infant_without_seat passenger to an accompanying
+    // adult via `infant_passenger_id` on the adult. Duffel requires this
+    // for any order containing an infant; without it the order rejects
+    // with `at_least_one_adult_for_each_infant` even when the party has
+    // enough adults. Pair 1:1 in slot order — the picker already caps
+    // infants at N ≤ adults so this always matches.
+    const adultIdxs: number[] = [];
+    const infantIdxs: number[] = [];
+    for (let i = 0; i < mappedPassengers.length; i++) {
+      if (mappedPassengers[i].type === "adult") adultIdxs.push(i);
+      else if (mappedPassengers[i].type === "infant_without_seat") infantIdxs.push(i);
+    }
+    for (let k = 0; k < infantIdxs.length && k < adultIdxs.length; k++) {
+      mappedPassengers[adultIdxs[k]].infant_passenger_id = mappedPassengers[infantIdxs[k]].id;
+    }
 
     // 7a. Build services with sandbox soft-skip (identical to pre-refactor
     //     lines 636–662)
