@@ -10421,6 +10421,25 @@ const TUMAFLY_WHATSAPP_WAME = '254113165503';
       }
     } catch (e) { console.warn('[restoreBooking] lastSearchParams rebuild failed:', e); }
 
+    // §4.7-3a — Restore the picker's traveler-type breakdown from the
+    // new-tab commit stash (written by commitOfferInNewTab). This runs in
+    // the CHILD tab where `travelers` starts at module default (1 adult
+    // only) because the JS context is fresh. Without this, the pickerTotal
+    // check below fails (1 !== 2) and falls through to the wipe path,
+    // mis-labelling slot headers for mixed-pax bookings.
+    try {
+      const raw = sessionStorage.getItem(BOOKING_PASSENGER_SHADOW_KEY);
+      const stashed = raw ? JSON.parse(raw) : null;
+      const pb = stashed?.pickerBreakdown;
+      if (pb && typeof pb === 'object') {
+        if (Number.isFinite(pb.adults))      travelers.adults      = pb.adults;
+        if (Number.isFinite(pb.children))    travelers.children    = pb.children;
+        if (Number.isFinite(pb.infantsSeat)) travelers.infantsSeat = pb.infantsSeat;
+        if (Number.isFinite(pb.infantsLap))  travelers.infantsLap  = pb.infantsLap;
+        recomputeTravelers();
+      }
+    } catch (_) { /* sessionStorage disabled — falls through to wipe below */ }
+
     // Reconcile passenger count. If the offer says pax > 1, we need to add
     // cards. We preserve card 0 (which has shadow data + anything the user
     // typed during Phase 2 while waiting) and append fresh cards for the rest.
@@ -14218,6 +14237,18 @@ const TUMAFLY_WHATSAPP_WAME = '254113165503';
         travelers: [],
         contact: { email: '', phone_number: '', phone_dial_iso: '' },
         fare_expires_at_ms: expMs || 0,
+        // §4.7-3a — Stash the picker's traveler-type breakdown so the child
+        // tab (opened via window.open) can reconstitute state before its
+        // restoreBooking pax-reconcile check runs. Without this, the child
+        // starts at default 1 adult and wipes the offer's 2-pax count to
+        // 2 adults, mis-labelling slot headers ("Traveler 2 · Adult" for
+        // a 1A+1I booking) and sending [adult, adult] to Duffel.
+        pickerBreakdown: {
+          adults:      travelers?.adults      ?? 1,
+          children:    travelers?.children    ?? 0,
+          infantsSeat: travelers?.infantsSeat ?? 0,
+          infantsLap:  travelers?.infantsLap  ?? 0,
+        },
       }));
       sessionStorage.setItem(BOOKING_SECURE_SHADOW_KEY, JSON.stringify({
         travelers: [],
