@@ -16541,22 +16541,27 @@ const TUMAFLY_WHATSAPP_WAME = '254113165503';
         try { el.type = originalType; } catch (_) { /* some browsers block */ }
         el.removeAttribute('data-original-type');
       }
-      // §4.7-3b — Clear _openedFromSaved on the parent traveler so
-      // subsequent re-renders (e.g. from failed-save's renderPassengerForms
-      // call) render the field raw instead of re-masking it. Without this,
-      // editing a saved-then-reopened traveler, typing an invalid DOB, and
-      // clicking Save would:
-      //   1. Fire renderPassengerForms via saveTraveler's age-error branch
-      //   2. Re-render with _openedFromSaved: true → DOB re-masks to **/**/YYYY
-      //   3. validateDobLive skips readonly/data-masked → bubble disappears
-      // Once user has started editing, we treat the card as unsaved-editable
-      // until Save succeeds — that's the invariant for validation feedback
-      // to work consistently.
+      // §4.7-3b — Per-field unmask tracking. Focusing DOB shouldn't
+      // unmask passport (or vice versa) — an earlier version of this
+      // handler cleared _openedFromSaved for the whole traveler, which
+      // over-unmasked all sibling fields on any re-render (e.g. from
+      // failed-save's renderPassengerForms call). Instead we record
+      // WHICH field got unmasked and let each template consult
+      // s._unmaskedFields[fieldKey] to decide raw vs masked.
+      // _openedFromSaved stays true (the traveler is still in "opened
+      // from saved" mode); only the field-level display switches.
       const card = el.closest && el.closest('[data-traveler-card]');
       if (card) {
         const idx = parseInt(card.dataset.travelerCard, 10);
         if (!isNaN(idx) && travelerStates[idx]) {
-          travelerStates[idx]._openedFromSaved = false;
+          const s = travelerStates[idx];
+          s._unmaskedFields = s._unmaskedFields || {};
+          // Field key = element id with the "p${idx}-" prefix stripped.
+          // Yields keys: "dob", "pp-number", "pp-expires".
+          const prefix = `p${idx}-`;
+          if (el.id && el.id.startsWith(prefix)) {
+            s._unmaskedFields[el.id.slice(prefix.length)] = true;
+          }
         }
       }
     });
@@ -16571,6 +16576,11 @@ const TUMAFLY_WHATSAPP_WAME = '254113165503';
     // user focus (see _installMaskedFieldHandler) or globally on
     // saveTraveler success.
     travelerStates[i]._openedFromSaved = true;
+    // §4.7-3b — Reset per-field unmask tracking so all three masked
+    // fields (DOB, passport number, passport expiry) render masked on
+    // this fresh re-open. Without this reset, stale entries from a
+    // previous edit session would leak values back into the raw view.
+    travelerStates[i]._unmaskedFields = {};
     renderPassengerForms();
   }
 
@@ -16748,7 +16758,7 @@ const TUMAFLY_WHATSAPP_WAME = '254113165503';
         </div>
         <div>
           <label class="pax-label ${ppNumberErr ? 'pax-label-err' : ''}">Passport number${passportRequired ? REQ : ''}</label>
-          ${s._openedFromSaved && d.passport.number
+          ${s._openedFromSaved && d.passport.number && !s._unmaskedFields?.['pp-number']
             ? `<input id="p${i}-pp-number" type="text" readonly class="pax-input" value="${escapeHtml(_maskPassportNumber(d.passport.number))}" data-masked="true" data-original-type="text">`
             : `<input id="p${i}-pp-number" type="text" class="pax-input ${ppNumberErr ? 'pax-input-err' : ''}" value="${escapeHtml(d.passport.number)}">`
           }
@@ -16756,7 +16766,7 @@ const TUMAFLY_WHATSAPP_WAME = '254113165503';
         </div>
         <div>
           <label class="pax-label ${ppExpiresErr ? 'pax-label-err' : ''}">Passport expiration${passportRequired ? REQ : ''}</label>
-          ${s._openedFromSaved && d.passport.expires
+          ${s._openedFromSaved && d.passport.expires && !s._unmaskedFields?.['pp-expires']
             ? `<input id="p${i}-pp-expires" type="text" readonly class="pax-input" value="${escapeHtml(_maskDob(d.passport.expires))}" data-masked="true" data-original-type="date">`
             : `<input id="p${i}-pp-expires" type="date" class="pax-input ${ppExpiresErr ? 'pax-input-err' : ''}" value="${escapeHtml(d.passport.expires)}" min="${todayIso()}">`
           }
@@ -16833,7 +16843,7 @@ const TUMAFLY_WHATSAPP_WAME = '254113165503';
           <div class="pax-dob-wrap">
             <label class="pax-label ${dobErr ? 'pax-label-err' : ''}">Date of birth${REQ}</label>
             <div class="pax-dob-input-wrap">
-              ${s._openedFromSaved && d.born_on
+              ${s._openedFromSaved && d.born_on && !s._unmaskedFields?.['dob']
                 ? `<input id="p${i}-dob" type="text" readonly class="pax-input" value="${escapeHtml(_maskDob(d.born_on))}" data-masked="true" data-original-type="date">`
                 : `<input id="p${i}-dob" type="date" class="pax-input ${dobErr ? 'pax-input-err' : ''}" value="${escapeHtml(d.born_on)}" max="${todayIso()}">`
               }
