@@ -12618,7 +12618,12 @@ const TUMAFLY_WHATSAPP_WAME = '254113165503';
   function buildPassengerTypes() {
     const arr = [];
     for (let i = 0; i < travelers.adults; i++)      arr.push({ type: 'adult' });
-    for (let i = 0; i < travelers.children; i++)    arr.push({ type: 'child', age: 10 });
+    // §4.7 fix — Duffel rejects `{type: 'child', age: N}` (they're mutually
+    // exclusive; the API infers "child" from age boundaries 2-11). Send
+    // {age: 10} only, at search time. Real per-child ages are collected
+    // via DOB picker at booking (see Commit 4 roadmap); age 10 here is a
+    // safe placeholder in the middle of Duffel's child bracket.
+    for (let i = 0; i < travelers.children; i++)    arr.push({ age: 10 });
     for (let i = 0; i < travelers.infantsSeat; i++) arr.push({ type: 'infant_without_seat' });
     for (let i = 0; i < travelers.infantsLap; i++)  arr.push({ type: 'infant_without_seat' });
     return arr;
