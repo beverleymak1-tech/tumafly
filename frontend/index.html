@@ -4595,17 +4595,49 @@
       margin-top: 6px;
     }
 
-    /* §4.7-3b — DOB validation speech bubble. Fires immediately on DOB
-       change (via delegated input/change/blur listener in renderPassengerForms);
-       clears while the user is editing and reappears if the value is still
-       invalid after the change is committed. Duffel-aligned boundaries:
-       adult 12+, child 2-11, infant 0-1. Under-16 party-chaperone rule
-       (§4.7-3c) is a separate top-banner. */
+    /* §4.7-3b — DOB validation speech bubble. Two tiers:
+       - Tier 1 (Duffel age boundaries): adult 12+, child 2-11, infant 0-1.
+         Fires "Invalid DOB for a [Type]" when DOB doesn't match the ticket
+         category we searched Duffel with.
+       - Tier 2 (Tumafly chaperone policy): fires "Under 16 must travel
+         with an 18+ adult" when this slot's DOB is under 16 AND no other
+         slot in the party has DOB ≥ 18. Cross-field: any DOB change
+         re-validates all slots.
+       Both tiers fire immediately on DOB change (input/change/blur), clear
+       while the user is editing, and reappear if still invalid.
+
+       Layout: bubble right-aligned with field right edge, pointer on the
+       right side of the bubble pointing up at the ! indicator badge that
+       sits inside the field on the right. */
     .pax-dob-wrap { position: relative; }
+    .pax-dob-input-wrap { position: relative; }
+    .pax-dob-error-indicator {
+      position: absolute;
+      right: 40px;               /* leave room for native calendar picker */
+      top: 50%;
+      transform: translateY(-50%);
+      width: 20px;
+      height: 20px;
+      border-radius: 50%;
+      background: var(--brand);
+      color: white;
+      display: none;
+      align-items: center;
+      justify-content: center;
+      font-size: 13px;
+      font-weight: 800;
+      line-height: 1;
+      pointer-events: none;      /* clicks pass through to the input */
+      z-index: 2;
+      animation: paxDobBubbleIn 0.15s ease-out;
+    }
+    .pax-dob-input-wrap.pax-dob-invalid .pax-dob-error-indicator {
+      display: inline-flex;
+    }
     .pax-dob-bubble {
       position: absolute;
       top: 100%;
-      left: 0;
+      right: 0;                  /* §4.7-3b polish: right-align to field */
       margin-top: 8px;
       padding: 8px 12px;
       background: var(--brand);
@@ -4626,7 +4658,7 @@
       content: '';
       position: absolute;
       bottom: 100%;
-      left: 14px;
+      right: 45px;               /* §4.7-3b polish: align pointer with ! icon */
       border: 5px solid transparent;
       border-bottom-color: var(--brand);
     }
@@ -16051,13 +16083,15 @@ const TUMAFLY_WHATSAPP_WAME = '254113165503';
     const s = travelerStates[i];
     const d = s.data;
 
-    // §4.7-3b — DOB-vs-slot-type is a validation error (not a missing-field
-    // error). The bubble is already showing at the field; block save with
-    // a dedicated top alert that doesn't concatenate awkwardly into the
-    // "Please fill in ..." list of missing fields.
+    // §4.7-3b — DOB-vs-slot-type (tier 1) and party-chaperone (tier 2) are
+    // validation errors (not missing-field errors). The bubble is already
+    // showing at the field; block save with a dedicated top alert that
+    // doesn't concatenate awkwardly into the "Please fill in ..." list of
+    // missing fields.
     if (d.born_on) {
       const expected = getExpectedPaxType(i);
-      const ageErr = validateAgeForType(d.born_on, expected);
+      const ageErr = validateAgeForType(d.born_on, expected)
+                  || validatePartyChaperoneForSlot(d.born_on, i);
       if (ageErr) {
         s.showRequiredErrors = true;
         s.lastSaveError = `Please fix the date of birth for Traveler ${i + 1}.`;
@@ -16507,6 +16541,24 @@ const TUMAFLY_WHATSAPP_WAME = '254113165503';
         try { el.type = originalType; } catch (_) { /* some browsers block */ }
         el.removeAttribute('data-original-type');
       }
+      // §4.7-3b — Clear _openedFromSaved on the parent traveler so
+      // subsequent re-renders (e.g. from failed-save's renderPassengerForms
+      // call) render the field raw instead of re-masking it. Without this,
+      // editing a saved-then-reopened traveler, typing an invalid DOB, and
+      // clicking Save would:
+      //   1. Fire renderPassengerForms via saveTraveler's age-error branch
+      //   2. Re-render with _openedFromSaved: true → DOB re-masks to **/**/YYYY
+      //   3. validateDobLive skips readonly/data-masked → bubble disappears
+      // Once user has started editing, we treat the card as unsaved-editable
+      // until Save succeeds — that's the invariant for validation feedback
+      // to work consistently.
+      const card = el.closest && el.closest('[data-traveler-card]');
+      if (card) {
+        const idx = parseInt(card.dataset.travelerCard, 10);
+        if (!isNaN(idx) && travelerStates[idx]) {
+          travelerStates[idx]._openedFromSaved = false;
+        }
+      }
     });
   })();
 
@@ -16591,24 +16643,32 @@ const TUMAFLY_WHATSAPP_WAME = '254113165503';
         snapshotTraveler(idx);
         refreshUpdateOnFileCheckbox(idx);
         // §4.7-3b — Live DOB bubble. On `input` (during typing), hide the
-        // bubble so the user isn't nagged mid-edit. On `change` (native
-        // date input commits a valid date), re-validate + repaint the
-        // bubble if still invalid.
+        // bubble for the edited slot so the user isn't nagged mid-edit.
+        // On `change` (native date input commits a valid date), re-validate
+        // ALL slots because tier-2 (chaperone) is cross-field — changing
+        // one DOB can flip another slot from invalid to valid or vice
+        // versa (e.g. entering an 18+ adult DOB clears the chaperone
+        // bubble on the child's DOB field).
         if (e.target.id === `p${idx}-dob`) {
-          if (e.type === 'input') hideDobBubble(idx);
-          else validateDobLive(idx);
+          if (e.type === 'input') {
+            hideDobBubble(idx);
+          } else {
+            for (let k = 0; k < travelerStates.length; k++) validateDobLive(k);
+          }
         }
       };
       container.addEventListener('input', onLiveEdit, true);
       container.addEventListener('change', onLiveEdit, true);
-      // §4.7-3b — blur doesn't bubble; use capture. Only validates DOB
-      // (other fields don't have a live-bubble UI to worry about).
+      // §4.7-3b — blur doesn't bubble; use capture. Same cross-field
+      // re-validation as `change` because chaperone rule spans slots.
       container.addEventListener('blur', (e) => {
         const card = e.target.closest('[data-traveler-card]');
         if (!card) return;
         const idx = parseInt(card.dataset.travelerCard, 10);
         if (isNaN(idx)) return;
-        if (e.target.id === `p${idx}-dob`) validateDobLive(idx);
+        if (e.target.id === `p${idx}-dob`) {
+          for (let k = 0; k < travelerStates.length; k++) validateDobLive(k);
+        }
       }, true);
       container.__tfPickerWatchersAttached = true;
     }
@@ -16772,10 +16832,13 @@ const TUMAFLY_WHATSAPP_WAME = '254113165503';
           </div>
           <div class="pax-dob-wrap">
             <label class="pax-label ${dobErr ? 'pax-label-err' : ''}">Date of birth${REQ}</label>
-            ${s._openedFromSaved && d.born_on
-              ? `<input id="p${i}-dob" type="text" readonly class="pax-input" value="${escapeHtml(_maskDob(d.born_on))}" data-masked="true" data-original-type="date">`
-              : `<input id="p${i}-dob" type="date" class="pax-input ${dobErr ? 'pax-input-err' : ''}" value="${escapeHtml(d.born_on)}" max="${todayIso()}">`
-            }
+            <div class="pax-dob-input-wrap">
+              ${s._openedFromSaved && d.born_on
+                ? `<input id="p${i}-dob" type="text" readonly class="pax-input" value="${escapeHtml(_maskDob(d.born_on))}" data-masked="true" data-original-type="date">`
+                : `<input id="p${i}-dob" type="date" class="pax-input ${dobErr ? 'pax-input-err' : ''}" value="${escapeHtml(d.born_on)}" max="${todayIso()}">`
+              }
+              <span class="pax-dob-error-indicator" aria-hidden="true">!</span>
+            </div>
             ${dobErr ? '<div class="pax-error">Please enter the date of birth</div>' : ''}
           </div>
           <div>
@@ -17018,55 +17081,87 @@ const TUMAFLY_WHATSAPP_WAME = '254113165503';
   function validateAgeForType(bornOnIso, expectedType) {
     const age = computeAgeOnTravel(bornOnIso);
     if (age === null) return null;            // can't validate without DOB; let normal "required" check catch it
-    // §4.7-3b — Duffel-aligned boundaries: adult 12+, child 2-11, infant 0-1.
-    // Kept aligned with what we send to Duffel at search time so the
-    // offer's passenger types match at booking. The under-16 party
-    // chaperone rule (§4.7-3c) is a separate policy check surfaced via
-    // a top-banner, not this per-field bubble.
+    // §4.7-3b — Duffel-aligned TICKETING boundaries: adult 12+, child 2-11,
+    // infant 0-1. This tier-1 check asks a narrow question: "does this DOB
+    // match the ticket category we searched Duffel with?" A DOB outside
+    // these ranges would fail at /air/orders because the offer was priced
+    // for a different pax type.
     if (expectedType === 'adult'  && age < 12) return 'Invalid DOB for an Adult';
     if (expectedType === 'child'  && (age < 2 || age >= 12)) return 'Invalid DOB for a Child';
     if (expectedType === 'infant_without_seat' && age >= 2) return 'Invalid DOB for an Infant';
     return null;
   }
 
+  // §4.7-3b — Tier-2 party-chaperone rule (Tumafly policy, Priceline-style):
+  // Any traveler under 16 must have an 18+ traveler on the same booking.
+  // The full policy alert lives at the top of the Travelers card (§4.7-3c);
+  // this per-field bubble supplements it by pointing the user at the
+  // specific under-16 DOB that's the problem.
+  //
+  // Independent of tier 1: fires ONLY when tier 1 passes but chaperone
+  // rule is still violated (typical case: age 12-15 in an Adult slot,
+  // or age 2-11 in a Child slot with no 18+ adult).
+  //
+  // Cross-field: depends on OTHER slots' DOBs. On any DOB change, all
+  // slots are re-validated so bubbles stay in sync as the party fills in.
+  function validatePartyChaperoneForSlot(bornOnIso, slotIndex) {
+    const age = computeAgeOnTravel(bornOnIso);
+    if (age === null || age >= 16) return null;
+    // This slot is <16. Does another traveler have DOB giving age >= 18?
+    const partyHasChaperone = travelerStates.some((s, i) => {
+      if (i === slotIndex) return false;
+      const otherDob = s?.data?.born_on;
+      if (!otherDob) return false;
+      const otherAge = computeAgeOnTravel(otherDob);
+      return otherAge !== null && otherAge >= 18;
+    });
+    if (partyHasChaperone) return null;
+    return 'Under 16 must travel with an 18+ adult';
+  }
+
   // §4.7-3b — DOB speech-bubble helpers. hideDobBubble removes any bubble
-  // + red border for a slot (called on `input` events during typing);
-  // validateDobLive reads the current DOB value, runs validateAgeForType
-  // against the slot's expected type, and paints a fresh bubble if the
-  // value doesn't match. Called on `change` and `blur`, plus after every
-  // renderPassengerForms re-render to restore bubbles for slots with a
-  // persisted-but-invalid born_on.
+  // + red border + ! indicator for a slot (called on `input` events during
+  // typing). validateDobLive reads the current DOB, runs tier-1 then
+  // tier-2 checks, and paints a fresh bubble + indicator if either fails.
   function hideDobBubble(i) {
     const bubble = document.getElementById(`p${i}-dob-bubble`);
     if (bubble) bubble.remove();
     const input = document.getElementById(`p${i}-dob`);
-    // Only clear the red border if it was set by us (age validation).
-    // The save-click required-field flow uses its own pax-input-err
-    // via the showRequiredErrors flag on empty DOB; that path re-renders
-    // the whole card so we don't interfere there.
+    // Only clear the red border if it was set by us (age/chaperone check).
+    // The save-click required-field flow uses its own pax-input-err via
+    // showRequiredErrors on empty DOB; that path re-renders the whole
+    // card so we don't interfere there.
     if (input && input.dataset.tfDobAgeErr === '1') {
       input.classList.remove('pax-input-err');
       delete input.dataset.tfDobAgeErr;
     }
+    // Hide the ! indicator by removing the invalid class from input-wrap.
+    const inputWrap = input?.closest('.pax-dob-input-wrap');
+    if (inputWrap) inputWrap.classList.remove('pax-dob-invalid');
   }
 
   function validateDobLive(i) {
     const input = document.getElementById(`p${i}-dob`);
     if (!input) return;
-    // Skip readonly/masked view — the saved-traveler pathway doesn't
-    // participate in live validation (values were already validated
-    // when the traveler was originally saved).
+    // Skip readonly/masked view — saved-traveler pathway doesn't
+    // participate in live validation (values were already validated when
+    // the traveler was originally saved).
     if (input.readOnly || input.hasAttribute('data-masked')) return;
     const val = input.value || travelerStates[i]?.data?.born_on || '';
     if (!val) {
       hideDobBubble(i);
       return;
     }
-    const err = validateAgeForType(val, getExpectedPaxType(i));
+    // Tier 1: Duffel ticket-category boundary
+    let err = validateAgeForType(val, getExpectedPaxType(i));
+    // Tier 2: Tumafly under-16 chaperone rule (only if tier 1 passes)
+    if (!err) err = validatePartyChaperoneForSlot(val, i);
     hideDobBubble(i);
     if (!err) return;
     input.classList.add('pax-input-err');
     input.dataset.tfDobAgeErr = '1';
+    const inputWrap = input.closest('.pax-dob-input-wrap');
+    if (inputWrap) inputWrap.classList.add('pax-dob-invalid');
     const wrap = input.closest('.pax-dob-wrap');
     if (!wrap) return;
     const bubble = document.createElement('div');
