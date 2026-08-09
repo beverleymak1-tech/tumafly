@@ -4595,6 +4595,60 @@
       margin-top: 6px;
     }
 
+    /* §4.7-3b — DOB validation speech bubble. Fires immediately on DOB
+       change (via delegated input/change/blur listener in renderPassengerForms);
+       clears while the user is editing and reappears if the value is still
+       invalid after the change is committed. Duffel-aligned boundaries:
+       adult 12+, child 2-11, infant 0-1. Under-16 party-chaperone rule
+       (§4.7-3c) is a separate top-banner. */
+    .pax-dob-wrap { position: relative; }
+    .pax-dob-bubble {
+      position: absolute;
+      top: 100%;
+      left: 0;
+      margin-top: 8px;
+      padding: 8px 12px;
+      background: var(--brand);
+      color: white;
+      font-size: 13px;
+      font-weight: 600;
+      border-radius: 6px;
+      box-shadow: 0 2px 8px rgba(61, 149, 245, 0.28);
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      white-space: nowrap;
+      z-index: 5;
+      animation: paxDobBubbleIn 0.15s ease-out;
+      pointer-events: none;
+    }
+    .pax-dob-bubble::before {
+      content: '';
+      position: absolute;
+      bottom: 100%;
+      left: 14px;
+      border: 5px solid transparent;
+      border-bottom-color: var(--brand);
+    }
+    .pax-dob-bubble-icon {
+      width: 16px;
+      height: 16px;
+      border-radius: 50%;
+      background: white;
+      color: var(--brand);
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 12px;
+      font-weight: 800;
+      flex-shrink: 0;
+      line-height: 1;
+    }
+    @keyframes paxDobBubbleIn {
+      from { opacity: 0; transform: translateY(-2px); }
+      to   { opacity: 1; transform: translateY(0); }
+    }
+
     /* Phone input — flag + dialling code select on the left, number on the right,
        wrapped in one bordered container that mimics a single .pax-input. */
     .phone-input-group {
@@ -10367,25 +10421,6 @@ const TUMAFLY_WHATSAPP_WAME = '254113165503';
       }
     } catch (e) { console.warn('[restoreBooking] lastSearchParams rebuild failed:', e); }
 
-    // §4.7-3a — Restore the picker's traveler-type breakdown from the
-    // new-tab commit stash (written by commitOfferInNewTab). This runs in
-    // the CHILD tab where `travelers` starts at module default (1 adult
-    // only) because the JS context is fresh. Without this, the pickerTotal
-    // check below fails (1 !== 2) and falls through to the wipe path,
-    // mis-labelling slot headers for mixed-pax bookings.
-    try {
-      const raw = sessionStorage.getItem(BOOKING_PASSENGER_SHADOW_KEY);
-      const stashed = raw ? JSON.parse(raw) : null;
-      const pb = stashed?.pickerBreakdown;
-      if (pb && typeof pb === 'object') {
-        if (Number.isFinite(pb.adults))      travelers.adults      = pb.adults;
-        if (Number.isFinite(pb.children))    travelers.children    = pb.children;
-        if (Number.isFinite(pb.infantsSeat)) travelers.infantsSeat = pb.infantsSeat;
-        if (Number.isFinite(pb.infantsLap))  travelers.infantsLap  = pb.infantsLap;
-        recomputeTravelers();
-      }
-    } catch (_) { /* sessionStorage disabled — falls through to wipe below */ }
-
     // Reconcile passenger count. If the offer says pax > 1, we need to add
     // cards. We preserve card 0 (which has shadow data + anything the user
     // typed during Phase 2 while waiting) and append fresh cards for the rest.
@@ -14183,18 +14218,6 @@ const TUMAFLY_WHATSAPP_WAME = '254113165503';
         travelers: [],
         contact: { email: '', phone_number: '', phone_dial_iso: '' },
         fare_expires_at_ms: expMs || 0,
-        // §4.7-3a — Stash the picker's traveler-type breakdown so the child
-        // tab (opened via window.open) can reconstitute state before its
-        // restoreBooking pax-reconcile check runs. Without this, the child
-        // starts at default 1 adult and wipes the offer's 2-pax count to
-        // 2 adults, mis-labelling slot headers ("Traveler 2 · Adult" for
-        // a 1A+1I booking) and sending [adult, adult] to Duffel.
-        pickerBreakdown: {
-          adults:      travelers?.adults      ?? 1,
-          children:    travelers?.children    ?? 0,
-          infantsSeat: travelers?.infantsSeat ?? 0,
-          infantsLap:  travelers?.infantsLap  ?? 0,
-        },
       }));
       sessionStorage.setItem(BOOKING_SECURE_SHADOW_KEY, JSON.stringify({
         travelers: [],
@@ -15996,20 +16019,34 @@ const TUMAFLY_WHATSAPP_WAME = '254113165503';
     snapshotTraveler(i);
     const s = travelerStates[i];
     const d = s.data;
+
+    // §4.7-3b — DOB-vs-slot-type is a validation error (not a missing-field
+    // error). The bubble is already showing at the field; block save with
+    // a dedicated top alert that doesn't concatenate awkwardly into the
+    // "Please fill in ..." list of missing fields.
+    if (d.born_on) {
+      const expected = getExpectedPaxType(i);
+      const ageErr = validateAgeForType(d.born_on, expected);
+      if (ageErr) {
+        s.showRequiredErrors = true;
+        s.lastSaveError = `Please fix the date of birth for Traveler ${i + 1}.`;
+        renderPassengerForms();
+        setTimeout(() => {
+          const card = document.querySelector(`[data-traveler-card="${i}"]`);
+          if (!card) return;
+          const dobEl = document.getElementById(`p${i}-dob`);
+          (dobEl || card).scrollIntoView({ behavior: 'smooth', block: 'center' });
+        }, 50);
+        return;
+      }
+    }
+
     // Validation: required fields
     const errors = [];
     if (!d.given_name) errors.push('First name');
     if (!d.family_name) errors.push('Last name');
     if (!d.born_on) errors.push('Date of birth');
     if (!d.gender) errors.push('Gender');
-
-    // DOB vs expected type — must match what we searched Duffel with, or the
-    // order will reject at booking time with money already taken.
-    if (d.born_on) {
-      const expected = getExpectedPaxType(i);
-      const ageErr = validateAgeForType(d.born_on, expected);
-      if (ageErr) errors.push(ageErr);
-    }
 
     // When the trip is international, passport details become required for every traveler.
     // We use the showPassportErrors flag to surface per-field red errors only after a
@@ -16522,10 +16559,39 @@ const TUMAFLY_WHATSAPP_WAME = '254113165503';
         if (e.target.id === `p${idx}-save-to-account`) return;
         snapshotTraveler(idx);
         refreshUpdateOnFileCheckbox(idx);
+        // §4.7-3b — Live DOB bubble. On `input` (during typing), hide the
+        // bubble so the user isn't nagged mid-edit. On `change` (native
+        // date input commits a valid date), re-validate + repaint the
+        // bubble if still invalid.
+        if (e.target.id === `p${idx}-dob`) {
+          if (e.type === 'input') hideDobBubble(idx);
+          else validateDobLive(idx);
+        }
       };
       container.addEventListener('input', onLiveEdit, true);
       container.addEventListener('change', onLiveEdit, true);
+      // §4.7-3b — blur doesn't bubble; use capture. Only validates DOB
+      // (other fields don't have a live-bubble UI to worry about).
+      container.addEventListener('blur', (e) => {
+        const card = e.target.closest('[data-traveler-card]');
+        if (!card) return;
+        const idx = parseInt(card.dataset.travelerCard, 10);
+        if (isNaN(idx)) return;
+        if (e.target.id === `p${idx}-dob`) validateDobLive(idx);
+      }, true);
       container.__tfPickerWatchersAttached = true;
+    }
+
+    // §4.7-3b — After every re-render (innerHTML replacement wiped any
+    // previously-painted bubbles), restore them for slots whose stored
+    // born_on doesn't match the slot's expected type. This catches the
+    // "user filled invalid DOB → clicked Save → save failed → card re-
+    // rendered" path so the bubble reappears immediately without needing
+    // another change event.
+    for (let i = 0; i < travelerStates.length; i++) {
+      if (travelerStates[i]?.data?.born_on) {
+        try { validateDobLive(i); } catch (_) {}
+      }
     }
   }
 
@@ -16673,7 +16739,7 @@ const TUMAFLY_WHATSAPP_WAME = '254113165503';
             <input id="p${i}-family" type="text" class="pax-input ${familyErr ? 'pax-input-err' : ''}" value="${escapeHtml(d.family_name)}" placeholder="As on passport">
             ${familyErr ? '<div class="pax-error">Please enter the last name</div>' : ''}
           </div>
-          <div>
+          <div class="pax-dob-wrap">
             <label class="pax-label ${dobErr ? 'pax-label-err' : ''}">Date of birth${REQ}</label>
             ${s._openedFromSaved && d.born_on
               ? `<input id="p${i}-dob" type="text" readonly class="pax-input" value="${escapeHtml(_maskDob(d.born_on))}" data-masked="true" data-original-type="date">`
@@ -16921,10 +16987,62 @@ const TUMAFLY_WHATSAPP_WAME = '254113165503';
   function validateAgeForType(bornOnIso, expectedType) {
     const age = computeAgeOnTravel(bornOnIso);
     if (age === null) return null;            // can't validate without DOB; let normal "required" check catch it
-    if (expectedType === 'adult'  && age < 12) return 'This date of birth is for a child or infant. Restart your search with the correct passenger count.';
-    if (expectedType === 'child'  && (age < 2 || age >= 12)) return 'This date of birth doesn\'t match a Child (age 2–11). Restart your search with the correct passenger count.';
-    if (expectedType === 'infant_without_seat' && age >= 2) return 'This date of birth doesn\'t match an Infant (under 2). Restart your search with the correct passenger count.';
+    // §4.7-3b — Duffel-aligned boundaries: adult 12+, child 2-11, infant 0-1.
+    // Kept aligned with what we send to Duffel at search time so the
+    // offer's passenger types match at booking. The under-16 party
+    // chaperone rule (§4.7-3c) is a separate policy check surfaced via
+    // a top-banner, not this per-field bubble.
+    if (expectedType === 'adult'  && age < 12) return 'Invalid DOB for an Adult';
+    if (expectedType === 'child'  && (age < 2 || age >= 12)) return 'Invalid DOB for a Child';
+    if (expectedType === 'infant_without_seat' && age >= 2) return 'Invalid DOB for an Infant';
     return null;
+  }
+
+  // §4.7-3b — DOB speech-bubble helpers. hideDobBubble removes any bubble
+  // + red border for a slot (called on `input` events during typing);
+  // validateDobLive reads the current DOB value, runs validateAgeForType
+  // against the slot's expected type, and paints a fresh bubble if the
+  // value doesn't match. Called on `change` and `blur`, plus after every
+  // renderPassengerForms re-render to restore bubbles for slots with a
+  // persisted-but-invalid born_on.
+  function hideDobBubble(i) {
+    const bubble = document.getElementById(`p${i}-dob-bubble`);
+    if (bubble) bubble.remove();
+    const input = document.getElementById(`p${i}-dob`);
+    // Only clear the red border if it was set by us (age validation).
+    // The save-click required-field flow uses its own pax-input-err
+    // via the showRequiredErrors flag on empty DOB; that path re-renders
+    // the whole card so we don't interfere there.
+    if (input && input.dataset.tfDobAgeErr === '1') {
+      input.classList.remove('pax-input-err');
+      delete input.dataset.tfDobAgeErr;
+    }
+  }
+
+  function validateDobLive(i) {
+    const input = document.getElementById(`p${i}-dob`);
+    if (!input) return;
+    // Skip readonly/masked view — the saved-traveler pathway doesn't
+    // participate in live validation (values were already validated
+    // when the traveler was originally saved).
+    if (input.readOnly || input.hasAttribute('data-masked')) return;
+    const val = input.value || travelerStates[i]?.data?.born_on || '';
+    if (!val) {
+      hideDobBubble(i);
+      return;
+    }
+    const err = validateAgeForType(val, getExpectedPaxType(i));
+    hideDobBubble(i);
+    if (!err) return;
+    input.classList.add('pax-input-err');
+    input.dataset.tfDobAgeErr = '1';
+    const wrap = input.closest('.pax-dob-wrap');
+    if (!wrap) return;
+    const bubble = document.createElement('div');
+    bubble.id = `p${i}-dob-bubble`;
+    bubble.className = 'pax-dob-bubble';
+    bubble.innerHTML = `<span class="pax-dob-bubble-icon">!</span>${err}`;
+    wrap.appendChild(bubble);
   }
 
   function bookingFareTotal() {
