@@ -4613,7 +4613,7 @@
     .pax-dob-input-wrap { position: relative; }
     .pax-dob-error-indicator {
       position: absolute;
-      right: 40px;               /* leave room for native calendar picker */
+      right: 12px;               /* §4.7-3b polish: nearer field edge, matches Priceline placement */
       top: 50%;
       transform: translateY(-50%);
       width: 20px;
@@ -4658,7 +4658,7 @@
       content: '';
       position: absolute;
       bottom: 100%;
-      right: 45px;               /* §4.7-3b polish: align pointer with ! icon */
+      right: 17px;               /* §4.7-3b polish: pointer center-aligned with ! icon at right: 12px */
       border: 5px solid transparent;
       border-bottom-color: var(--brand);
     }
@@ -17092,22 +17092,44 @@ const TUMAFLY_WHATSAPP_WAME = '254113165503';
     return null;
   }
 
-  // §4.7-3b — Tier-2 party-chaperone rule (Tumafly policy, Priceline-style):
-  // Any traveler under 16 must have an 18+ traveler on the same booking.
-  // The full policy alert lives at the top of the Travelers card (§4.7-3c);
-  // this per-field bubble supplements it by pointing the user at the
-  // specific under-16 DOB that's the problem.
+  // §4.7-3b — Tier-2 party-chaperone rule (Tumafly policy, Priceline-style).
+  // Two constraints stitched together:
   //
-  // Independent of tier 1: fires ONLY when tier 1 passes but chaperone
-  // rule is still violated (typical case: age 12-15 in an Adult slot,
-  // or age 2-11 in a Child slot with no 18+ adult).
+  //   A. Slot 0 (Traveler 1 · Primary) is the designated chaperone. The
+  //      itinerary is delivered to slot 0's email, so slot 0 must always
+  //      be at least 16 (Tumafly's minimum solo age), and must be 18+
+  //      when any other slot carries a passenger under 16. A minor booked
+  //      as slot 0 is never valid.
+  //
+  //   B. For any slot: age < 16 requires an 18+ traveler somewhere in the
+  //      party. In practice constraint A means "an 18+ in slot 0", but we
+  //      accept any slot as a chaperone here — makes the check robust when
+  //      slot 0 hasn't been filled yet (parents typically fill their own
+  //      DOB before a child's).
   //
   // Cross-field: depends on OTHER slots' DOBs. On any DOB change, all
   // slots are re-validated so bubbles stay in sync as the party fills in.
   function validatePartyChaperoneForSlot(bornOnIso, slotIndex) {
     const age = computeAgeOnTravel(bornOnIso);
-    if (age === null || age >= 16) return null;
-    // This slot is <16. Does another traveler have DOB giving age >= 18?
+    if (age === null) return null;
+
+    if (slotIndex === 0) {
+      // Constraint A — slot 0 rules
+      if (age < 16) return 'Under 16 must travel with an 18+ adult';
+      // Slot 0 is 16-17: must be 18+ if any other slot carries a minor
+      const anyOtherIsMinor = travelerStates.some((s, i) => {
+        if (i === 0) return false;
+        const otherDob = s?.data?.born_on;
+        if (!otherDob) return false;
+        const otherAge = computeAgeOnTravel(otherDob);
+        return otherAge !== null && otherAge < 16;
+      });
+      if (anyOtherIsMinor && age < 18) return 'Must be 18+ to travel with a minor';
+      return null;
+    }
+
+    // Constraint B — non-primary slots
+    if (age >= 16) return null;
     const partyHasChaperone = travelerStates.some((s, i) => {
       if (i === slotIndex) return false;
       const otherDob = s?.data?.born_on;
@@ -17138,6 +17160,20 @@ const TUMAFLY_WHATSAPP_WAME = '254113165503';
     // Hide the ! indicator by removing the invalid class from input-wrap.
     const inputWrap = input?.closest('.pax-dob-input-wrap');
     if (inputWrap) inputWrap.classList.remove('pax-dob-invalid');
+    // §4.7-3b polish: clear the top save-error alert too. It's set by
+    // saveTraveler when Save is clicked with an age/chaperone violation
+    // ("Please fix the date of birth for Traveler N."). Once the user
+    // starts editing the DOB, the alert should clear immediately (same
+    // behavior as the bubble). We clear both state and DOM without a
+    // full re-render — a re-render would swap the DOB DOM out from
+    // under an active edit.
+    const s = travelerStates[i];
+    if (s && s.lastSaveError && /date of birth/i.test(s.lastSaveError)) {
+      s.lastSaveError = null;
+      const card = document.querySelector(`[data-traveler-card="${i}"]`);
+      const alertEl = card?.querySelector('.pax-inline-save-error');
+      if (alertEl) alertEl.remove();
+    }
   }
 
   function validateDobLive(i) {
@@ -17167,7 +17203,9 @@ const TUMAFLY_WHATSAPP_WAME = '254113165503';
     const bubble = document.createElement('div');
     bubble.id = `p${i}-dob-bubble`;
     bubble.className = 'pax-dob-bubble';
-    bubble.innerHTML = `<span class="pax-dob-bubble-icon">!</span>${err}`;
+    // §4.7-3b polish: no ! glyph inside the bubble — it lives in the field
+    // now as .pax-dob-error-indicator, and the bubble's pointer points at it.
+    bubble.textContent = err;
     wrap.appendChild(bubble);
   }
 
