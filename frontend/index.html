@@ -16093,13 +16093,22 @@ const TUMAFLY_WHATSAPP_WAME = '254113165503';
     // showing at the field; block save with a dedicated top alert that
     // doesn't concatenate awkwardly into the "Please fill in ..." list of
     // missing fields.
+    //
+    // §4.7-3c — Copy differs by tier: tier-1 (Duffel category mismatch,
+    // e.g. infant DOB in adult slot) keeps the terse "Please fix the date
+    // of birth for Traveler N." tier-2 (chaperone violation) uses the
+    // Priceline policy copy in the same inline-error slot. Kills the need
+    // for a separate top-of-card banner — the message is where the user
+    // already looks after clicking Save.
     if (d.born_on) {
       const expected = getExpectedPaxType(i);
-      const ageErr = validateAgeForType(d.born_on, expected)
-                  || validatePartyChaperoneForSlot(d.born_on, i);
-      if (ageErr) {
+      const tier1Err = validateAgeForType(d.born_on, expected);
+      const tier2Err = tier1Err ? null : validatePartyChaperoneForSlot(d.born_on, i);
+      if (tier1Err || tier2Err) {
         s.showRequiredErrors = true;
-        s.lastSaveError = `Please fix the date of birth for Traveler ${i + 1}.`;
+        s.lastSaveError = tier2Err
+          ? 'Children under the age of 16 may only travel with an adult 18 years or older. Please check the passenger information.'
+          : `Please fix the date of birth for Traveler ${i + 1}.`;
         renderPassengerForms();
         setTimeout(() => {
           const card = document.querySelector(`[data-traveler-card="${i}"]`);
@@ -17189,15 +17198,20 @@ const TUMAFLY_WHATSAPP_WAME = '254113165503';
     // Hide the ! indicator by removing the invalid class from input-wrap.
     const inputWrap = input?.closest('.pax-dob-input-wrap');
     if (inputWrap) inputWrap.classList.remove('pax-dob-invalid');
-    // §4.7-3b polish: clear the top save-error alert too. It's set by
-    // saveTraveler when Save is clicked with an age/chaperone violation
-    // ("Please fix the date of birth for Traveler N."). Once the user
-    // starts editing the DOB, the alert should clear immediately (same
-    // behavior as the bubble). We clear both state and DOM without a
-    // full re-render — a re-render would swap the DOB DOM out from
-    // under an active edit.
+    // §4.7-3b polish + §4.7-3c: clear the top save-error alert too. It's
+    // set by saveTraveler when Save is clicked with an age/chaperone
+    // violation — either the terse "Please fix the date of birth ..."
+    // (tier-1 Duffel category mismatch) or the Priceline policy copy
+    // "Children under the age of 16 may only travel with an adult 18
+    // years or older ..." (tier-2 chaperone). Once the user starts editing
+    // the DOB, the alert should clear immediately (same behavior as the
+    // bubble). We clear both state and DOM without a full re-render — a
+    // re-render would swap the DOB DOM out from under an active edit.
     const s = travelerStates[i];
-    if (s && s.lastSaveError && /date of birth/i.test(s.lastSaveError)) {
+    if (s && s.lastSaveError && (
+      /date of birth/i.test(s.lastSaveError) ||
+      /Children under the age of 16/i.test(s.lastSaveError)
+    )) {
       s.lastSaveError = null;
       const card = document.querySelector(`[data-traveler-card="${i}"]`);
       const alertEl = card?.querySelector('.pax-inline-save-error');
