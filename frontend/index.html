@@ -3112,6 +3112,15 @@
     }
     .price-panel .line .label { color: var(--text-2); }
     .price-panel .line .value { font-weight: 500; color: var(--ink); font-variant-numeric: tabular-nums; }
+    /* §4.7-3e — Indented per-type count sub-lines rendered right under the
+       Flight row (e.g. "Adult × 2", "Infant × 1"). Duffel doesn't expose
+       per-pax fares so these carry composition, not amounts. */
+    .price-panel .pax-subline {
+      padding: 2px 0 2px 16px;
+      font-size: 12px;
+      color: var(--text-3);
+      margin-top: -4px;
+    }
     .price-panel .divider { border-top: 1px solid var(--border); margin: 8px 0; }
     .price-panel .total {
       display: flex;
@@ -17389,8 +17398,22 @@ const TUMAFLY_WHATSAPP_WAME = '254113165503';
     const seatsKes = b.seats_kes || 0;
     const baggageKes = b.baggage_kes || 0;
 
+    // §4.7-3e — Composition sub-lines under the Flight row. Count-only
+    // (Duffel doesn't expose per-pax base fares). Infants with-seat and
+    // without-seat are merged into one "Infant × N" row since we send
+    // both as `infant_without_seat` at search/book.
+    const paxAdults   = travelers?.adults   || 0;
+    const paxChildren = travelers?.children || 0;
+    const paxInfants  = (travelers?.infantsSeat || 0) + (travelers?.infantsLap || 0);
+    const paxSublinesHtml = [
+      paxAdults   ? `<div class="pax-subline">Adult × ${paxAdults}</div>`     : '',
+      paxChildren ? `<div class="pax-subline">Child × ${paxChildren}</div>`   : '',
+      paxInfants  ? `<div class="pax-subline">Infant × ${paxInfants}</div>`   : '',
+    ].join('');
+
     const breakdownHtml = `
-      <div class="line"><span class="label">Flight ${passengerCount > 1 ? `<span style="color:var(--text-3);font-size:12px;">×${passengerCount}</span> ` : ''}<span style="color:var(--text-3);font-size:12px;">(taxes included)</span></span><span class="value">${formatKes(b.base_kes)}</span></div>
+      <div class="line"><span class="label">Flight <span style="color:var(--text-3);font-size:12px;">(taxes included)</span></span><span class="value">${formatKes(b.base_kes)}</span></div>
+      ${paxSublinesHtml}
       ${seatsKes > 0 ? `<div class="line"><span class="label">Seat selection ${seatTotalCount() > 1 ? `<span style="color:var(--text-3);font-size:12px;">×${seatTotalCount()}</span>` : ''}</span><span class="value">${formatKes(seatsKes)}</span></div>` : ''}
       ${baggageKes > 0 ? `<div class="line"><span class="label">Baggage <span style="color:var(--text-3);font-size:12px;">×${baggageTotalQuantity()}</span></span><span class="value">${formatKes(baggageKes)}</span></div>` : ''}
       <div class="line"><span class="label">TumaFly service fee</span><span class="value">${formatKes(b.service_fee_kes)}</span></div>
