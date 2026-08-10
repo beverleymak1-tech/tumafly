@@ -2035,11 +2035,11 @@
       font-variant-numeric: tabular-nums;
     }
     .tp-footer {
+      /* §4.7-3g — Removed border-top + padding-top for a lighter,
+         un-divided look under the counter rows. */
       font-size: 12px;
       color: var(--text-3);
       margin-top: 14px;
-      padding-top: 14px;
-      border-top: 1px solid var(--border);
       text-align: center;
     }
     .tp-error {
@@ -12584,10 +12584,15 @@ const TUMAFLY_WHATSAPP_WAME = '254113165503';
   // ============================================================
   // TRAVELERS PICKER
   // ============================================================
+  // §4.7-3g — Removed the "Infants · In seat" row. Duffel treats both
+  // infantsSeat and infantsLap as `infant_without_seat` at search and
+  // book, so exposing two rows was UX noise with no functional difference.
+  // The infantsSeat state field is retained (initialized to 0) so that
+  // downstream reads (sidebar sub-line, pickerBreakdown restore) stay
+  // backward-compatible with any stashed sessionStorage from an older tab.
   const TRAVELER_TYPES = [
     { key: 'adults',      label: 'Adults',          meta: 'Age 12 or above', min: 1 },
     { key: 'children',    label: 'Children',        meta: 'Ages 2-11',       min: 0 },
-    { key: 'infantsSeat', label: 'Infants',         meta: 'In seat',         min: 0 },
     { key: 'infantsLap',  label: 'Infants',         meta: 'On lap',          min: 0 },
   ];
   const TRAVELER_MAX_TOTAL = 6;
