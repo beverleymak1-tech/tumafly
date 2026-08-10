@@ -12667,14 +12667,33 @@ const TUMAFLY_WHATSAPP_WAME = '254113165503';
     return rows + `<div class="tp-footer">You can search for up to ${TRAVELER_MAX_TOTAL} travelers</div>`;
   }
 
+  // §4.7-3f — Track the pax mix at picker-open time. On close (via
+  // toggle, click-outside, or opening another picker), compare to the
+  // snapshot; if it changed AND we're on results, fire onSummaryChange
+  // once. Same mix (bumped up then back down) = no-op.
+  let _travelerPickerOpenMix = null;
+  function _paxMixSig() {
+    return `${travelers.adults}-${travelers.children}-${travelers.infantsSeat}-${travelers.infantsLap}`;
+  }
+  function _maybeRefreshResultsOnPickerClose(which) {
+    if (which !== 'results') return;
+    if (_travelerPickerOpenMix == null) return;
+    const changed = _paxMixSig() !== _travelerPickerOpenMix;
+    _travelerPickerOpenMix = null;
+    if (changed && typeof onSummaryChange === 'function') onSummaryChange();
+  }
+
   function toggleTravelerPicker(which) {
-    // Close the other if open
+    // Close the other if open (and refresh results if that "other" was
+    // the results picker with a changed mix).
     const others = ['home', 'results', 'es'].filter(w => w !== which);
     others.forEach(w => {
       const p = document.getElementById(`tp-${w}-popup`);
       const t = document.getElementById(`tp-${w}-trigger`);
-      if (p) p.classList.add('hidden');
+      if (!p || p.classList.contains('hidden')) return;
+      p.classList.add('hidden');
       if (t) t.classList.remove('open');
+      _maybeRefreshResultsOnPickerClose(w);
     });
 
     const popup = document.getElementById(`tp-${which}-popup`);
@@ -12684,8 +12703,11 @@ const TUMAFLY_WHATSAPP_WAME = '254113165503';
     if (isOpen) {
       popup.classList.add('hidden');
       trigger.classList.remove('open');
+      _maybeRefreshResultsOnPickerClose(which);
       return;
     }
+    // Opening: snapshot the current mix so close can compare.
+    if (which === 'results') _travelerPickerOpenMix = _paxMixSig();
     popup.innerHTML = renderTravelerPopup(which);
     popup.classList.remove('hidden');
     trigger.classList.add('open');
@@ -12709,11 +12731,14 @@ const TUMAFLY_WHATSAPP_WAME = '254113165503';
     // travelers in memory until refresh, after which restoreResults' URL
     // pax param rehydrates travelers.adults.
     if (which === 'home' && typeof stashHomeForm === 'function') stashHomeForm();
-    // If we're on the results page, re-run the search after change
-    if (which === 'results') onSummaryChange();
+    // §4.7-3f — Rapid-adjust fix: no auto-search on every increment/decrement.
+    // Search now fires only when the picker CLOSES with a changed mix
+    // (click-outside or trigger toggle-off) or when the user clicks the
+    // results-page Update button. A user rapid-clicking from 2A to 5A
+    // then back to 3A now yields one search on close, not four.
   }
 
-  // Click-outside-to-close
+  // Click-outside-to-close (with §4.7-3f mix-change refresh)
   document.addEventListener('mousedown', (e) => {
     ['home', 'results', 'es'].forEach(w => {
       const popup = document.getElementById(`tp-${w}-popup`);
@@ -12723,6 +12748,7 @@ const TUMAFLY_WHATSAPP_WAME = '254113165503';
       if (popup.contains(e.target) || (trigger && trigger.contains(e.target))) return;
       popup.classList.add('hidden');
       trigger?.classList.remove('open');
+      _maybeRefreshResultsOnPickerClose(w);
     });
   });
 
