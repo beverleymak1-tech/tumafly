@@ -2050,36 +2050,76 @@
       margin-top: 8px;
     }
     /* §4a — Per-child DOB rows rendered under the Children counter row
-       when children > 0. Divider mirrors the .tp-row bottom-border so the
-       block reads as an extension of the Children row, not a separate
-       section. */
-    .tp-cdob-list {
-      display: flex;
-      flex-direction: column;
-      gap: 8px;
-      padding: 4px 0 12px;
-      border-bottom: 1px solid var(--border);
-    }
+       when children > 0. Layout matches .tp-row exactly (grid, per-row
+       bottom divider) so each child DOB reads as a first-class row in the
+       picker, not a sub-section. Session 30 styling pattern preserved
+       across the revert: wrapper div owns visible border + hover/focus
+       + custom chevron; native <input type="date"> renders transparent
+       inside. Reason for the wrapper pattern: Chromebook Chrome (and
+       some others) strip appearance:none custom borders from native
+       date/select inputs, leaving the field looking bare. Wrapper
+       inherits reliable box styling; native input drives interaction. */
     .tp-cdob-row {
       display: grid;
       grid-template-columns: 1fr auto;
-      gap: 12px;
+      gap: 16px;
       align-items: center;
+      padding: 10px 0;
+      border-bottom: 1px solid var(--border);
     }
-    .tp-cdob-label {
-      font-size: 13px;
-      color: var(--text-2);
+    .tp-popup .tp-cdob-wrap {
+      position: relative;
+      display: inline-flex;
+      align-items: center;
+      min-width: 148px;
+      border: 1.5px solid #9CA3AF;
+      border-radius: var(--radius-sm, 8px);
+      background-color: #ffffff;
+      background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='14' height='14' viewBox='0 0 24 24' fill='none' stroke='%23374151' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'><polyline points='6 9 12 15 18 9'/></svg>");
+      background-repeat: no-repeat;
+      background-position: right 12px center;
+      box-shadow: 0 1px 2px rgba(0, 0, 0, 0.03);
+      transition: border-color 0.15s;
     }
-    .tp-cdob-input {
+    .tp-popup .tp-cdob-wrap:hover { border-color: var(--brand); }
+    .tp-popup .tp-cdob-wrap:focus-within {
+      border-color: var(--brand);
+      box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.2);
+    }
+    .tp-popup .tp-cdob-input {
+      appearance: none;
+      -webkit-appearance: none;
+      -moz-appearance: none;
+      width: 100%;
+      padding: 10px 36px 10px 14px;
+      border: 0;
+      background: transparent;
+      color: var(--ink);
       font-family: inherit;
       font-size: 14px;
-      padding: 6px 10px;
-      border: 1px solid var(--border-2);
-      border-radius: 6px;
-      background: var(--surface);
-      color: var(--ink);
-      min-width: 148px;
+      font-weight: 500;
+      cursor: pointer;
+      outline: none;
     }
+    /* Native calendar-picker-indicator hidden — the wrapper's own chevron
+       is the only visible one. Positioning it absolute over the full field
+       keeps the click target intact so tapping anywhere still opens the
+       native date picker on all platforms. */
+    .tp-popup .tp-cdob-input::-webkit-calendar-picker-indicator {
+      opacity: 0;
+      position: absolute;
+      right: 0;
+      width: 100%;
+      height: 100%;
+      cursor: pointer;
+    }
+    .tp-popup .tp-cdob-input::-webkit-datetime-edit {
+      padding: 0;
+    }
+    /* Unset state — muted mm/dd/yyyy prompt so an empty field reads as
+       "please pick" not "value is 0". Toggled on/off by the wrapper's
+       tp-cdob-wrap-unset class. */
+    .tp-popup .tp-cdob-wrap-unset .tp-cdob-input { color: var(--text-3, #6B7280); }
 
     .btn {
       font-family: inherit;
@@ -12814,25 +12854,32 @@ const TUMAFLY_WHATSAPP_WAME = '254113165503';
     d.setFullYear(d.getFullYear() + deltaYears);
     return d.toISOString().slice(0, 10);
   }
-  function renderChildDobRows(which) {
+ function renderChildDobRows(which) {
     const outbound = _pickerOutboundDate(which);
     const minAttr = outbound ? ` min="${_shiftYearsIso(outbound, -12)}"` : '';
     const maxAttr = outbound ? ` max="${_shiftYearsIso(outbound, -2)}"`  : '';
     const rows = [];
     for (let k = 0; k < travelers.children; k++) {
       const val = (travelers.childDobs && travelers.childDobs[k]) || '';
+      const label = travelers.children === 1 ? "Child's date of birth" : `Child ${k + 1} date of birth`;
+      const unsetCls = val ? '' : ' tp-cdob-wrap-unset';
       rows.push(`
         <div class="tp-cdob-row">
-          <label class="tp-cdob-label" for="tp-${which}-cdob-${k}">Child ${k + 1} date of birth</label>
-          <input
-            type="date"
-            id="tp-${which}-cdob-${k}"
-            class="tp-cdob-input"
-            value="${val}"${minAttr}${maxAttr}
-            onchange="onChildDobChange('${which}', ${k}, this.value)">
+          <div class="tp-row-label">${label}</div>
+          <div class="tp-cdob-wrap${unsetCls}">
+            <input
+              type="date"
+              id="tp-${which}-cdob-${k}"
+              class="tp-cdob-input"
+              value="${val}"${minAttr}${maxAttr}
+              aria-label="${label}"
+              onchange="onChildDobChange('${which}', ${k}, this.value)">
+          </div>
         </div>
       `);
     }
+    return rows.join('');
+  }
     return `<div class="tp-cdob-list">${rows.join('')}</div>`;
   }
 
