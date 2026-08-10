@@ -16221,9 +16221,22 @@ const TUMAFLY_WHATSAPP_WAME = '254113165503';
       const tier2Err = tier1Err ? null : validatePartyChaperoneForSlot(d.born_on, i);
       if (tier1Err || tier2Err) {
         s.showRequiredErrors = true;
-        s.lastSaveError = tier2Err
-          ? 'Children under the age of 16 may only travel with an adult 18 years or older. Please check the passenger information.'
-          : `Please fix the date of birth for Traveler ${i + 1}.`;
+        // §4.7-3c refinement — Alert copy varies by which tier fires:
+        //   tier-2 chaperone violation → Priceline policy copy
+        //   tier-1 infant-slot mismatch → specific "under 2" guidance
+        //     (user picked Infant but the DOB isn't under 2 — tell them
+        //     exactly what an Infant requires and offer the alternative)
+        //   any other tier-1 → terse fallback (child/adult mismatches keep
+        //     the generic copy for now; can be split further if needed).
+        let alertMsg;
+        if (tier2Err) {
+          alertMsg = 'Children under the age of 16 may only travel with an adult 18 years or older. Please check the passenger information.';
+        } else if (expected === 'infant_without_seat') {
+          alertMsg = `Traveler ${i + 1} was booked as an Infant. Enter a date of birth for a child under 2 at travel, or restart your search with a different traveler type.`;
+        } else {
+          alertMsg = `Please fix the date of birth for Traveler ${i + 1}.`;
+        }
+        s.lastSaveError = alertMsg;
         renderPassengerForms();
         setTimeout(() => {
           const card = document.querySelector(`[data-traveler-card="${i}"]`);
