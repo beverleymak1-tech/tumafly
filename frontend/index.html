@@ -2049,6 +2049,37 @@
       color: var(--danger);
       margin-top: 8px;
     }
+    /* §4a — Per-child DOB rows rendered under the Children counter row
+       when children > 0. Divider mirrors the .tp-row bottom-border so the
+       block reads as an extension of the Children row, not a separate
+       section. */
+    .tp-cdob-list {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      padding: 4px 0 12px;
+      border-bottom: 1px solid var(--border);
+    }
+    .tp-cdob-row {
+      display: grid;
+      grid-template-columns: 1fr auto;
+      gap: 12px;
+      align-items: center;
+    }
+    .tp-cdob-label {
+      font-size: 13px;
+      color: var(--text-2);
+    }
+    .tp-cdob-input {
+      font-family: inherit;
+      font-size: 14px;
+      padding: 6px 10px;
+      border: 1px solid var(--border-2);
+      border-radius: 6px;
+      background: var(--surface);
+      color: var(--ink);
+      min-width: 148px;
+    }
 
     .btn {
       font-family: inherit;
@@ -8972,7 +9003,7 @@ const TUMAFLY_WHATSAPP_WAME = '254113165503';
   }
 
   let tripType = 'round';
-  let travelers = { adults: 1, children: 0, infantsSeat: 0, infantsLap: 0 };
+  let travelers = { adults: 1, children: 0, infantsSeat: 0, infantsLap: 0, childDobs: [] };
   // §4.7-3a — Two derived counts kept in sync by recomputeTravelers():
   //   passengerCount   = adults + children. Used for per-traveler price
   //                      displays on the results cards, URL pax param, and
@@ -11144,6 +11175,12 @@ const TUMAFLY_WHATSAPP_WAME = '254113165503';
           children:      travelers?.children      ?? 0,
           infantsSeat:   travelers?.infantsSeat   ?? 0,
           infantsLap:    travelers?.infantsLap    ?? 0,
+          // §4a — Preserve per-child DOBs across F5 on home. Sliced to
+          // travelers.children length so a stale childDobs from an
+          // aborted picker session can't grow past the current count.
+          childDobs:     Array.isArray(travelers?.childDobs)
+                           ? travelers.childDobs.slice(0, travelers?.children || 0)
+                           : [],
         },
       };
       sessionStorage.setItem(TF_HOME_FORM_KEY, JSON.stringify(data));
@@ -11186,6 +11223,12 @@ const TUMAFLY_WHATSAPP_WAME = '254113165503';
           children:      travelers?.children      ?? 0,
           infantsSeat:   travelers?.infantsSeat   ?? 0,
           infantsLap:    travelers?.infantsLap    ?? 0,
+          // §4a — Mirror of stashHomeForm's childDobs field so a search
+          // committed from any surface (results, edit-search, fare-timer
+          // rerun) refreshes the home shadow with the current per-child DOBs.
+          childDobs:     Array.isArray(travelers?.childDobs)
+                           ? travelers.childDobs.slice(0, travelers?.children || 0)
+                           : [],
         },
       };
       sessionStorage.setItem(TF_HOME_FORM_KEY, JSON.stringify(data));
@@ -11254,6 +11297,10 @@ const TUMAFLY_WHATSAPP_WAME = '254113165503';
         if (Number.isFinite(data.travelers.children))    travelers.children    = data.travelers.children;
         if (Number.isFinite(data.travelers.infantsSeat)) travelers.infantsSeat = data.travelers.infantsSeat;
         if (Number.isFinite(data.travelers.infantsLap))  travelers.infantsLap  = data.travelers.infantsLap;
+        // §4a — Restore per-child DOBs. recomputeTravelers below will
+        // trim/pad to match children count so a stale-length array from
+        // an older session doesn't leave dangling entries.
+        if (Array.isArray(data.travelers.childDobs)) travelers.childDobs = data.travelers.childDobs.slice();
         if (typeof recomputeTravelers === 'function') recomputeTravelers();
       }
 
@@ -12666,6 +12713,16 @@ const TUMAFLY_WHATSAPP_WAME = '254113165503';
     const total = travelers.adults + travelers.children + travelers.infantsSeat + travelers.infantsLap;
     passengerCount  = travelers.adults + travelers.children;
     bookingPaxCount = total;
+    // §4a — Keep travelers.childDobs aligned with travelers.children. Every
+    // write path (picker bump, URL restore, pickerBreakdown restore,
+    // stashHomeForm restore, wipe paths) funnels through recomputeTravelers,
+    // so normalizing the array here guarantees state consistency without
+    // scattering resize logic at every mutation site. Growth appends blanks;
+    // shrink pops the tail so removing "Children -1" drops the last DOB in
+    // visual reading order.
+    if (!Array.isArray(travelers.childDobs)) travelers.childDobs = [];
+    while (travelers.childDobs.length < travelers.children) travelers.childDobs.push('');
+    while (travelers.childDobs.length > travelers.children) travelers.childDobs.pop();
     const label = total === 1 ? '1 traveler' : `${total} travelers`;
     const homeLabel = document.getElementById('tp-home-label');
     const resultsLabel = document.getElementById('tp-results-label');
@@ -12713,7 +12770,7 @@ const TUMAFLY_WHATSAPP_WAME = '254113165503';
       const minusDisabled = count <= t.min ? 'disabled' : '';
       // Plus disabled when total cap reached
       const plusDisabled = total >= TRAVELER_MAX_TOTAL ? 'disabled' : '';
-      return `
+      const rowHtml = `
         <div class="tp-row">
           <div>
             <div class="tp-row-label">${t.label}</div>
@@ -12726,8 +12783,68 @@ const TUMAFLY_WHATSAPP_WAME = '254113165503';
           </div>
         </div>
       `;
+      // §4a — Inject per-child DOB inputs directly beneath the Children
+      // counter row when count > 0. Commit 4 groundwork: 4b reads these
+      // to compute exact ages for Duffel's search-time {age: N}, 4c
+      // persists them across the new-tab boundary, and 4d pre-fills the
+      // booking form's child DOB slots so search-time and book-time ages
+      // are locked together (prevents born_on_does_not_match at /air/orders).
+      if (t.key === 'children' && travelers.children > 0) {
+        return rowHtml + renderChildDobRows(which);
+      }
+      return rowHtml;
     }).join('');
     return rows + `<div class="tp-footer">You can search for up to ${TRAVELER_MAX_TOTAL} travelers</div>`;
+  }
+
+  // §4a — Read the outbound date from whichever form this picker is
+  // attached to. Home form uses id="date", results uses id="r-date",
+  // edit-search modal uses id="es-date". If none is set (user hasn't
+  // picked a date yet on the home form), returns '' and the DOB inputs
+  // are rendered without min/max attrs — 4b's buildPassengerTypes gate
+  // refuses the search until each child DOB resolves to age 2-11.
+  function _pickerOutboundDate(which) {
+    const id = which === 'home' ? 'date' : which === 'results' ? 'r-date' : 'es-date';
+    return document.getElementById(id)?.value || '';
+  }
+  function _shiftYearsIso(iso, deltaYears) {
+    if (!iso) return '';
+    const d = new Date(iso);
+    if (isNaN(d.getTime())) return '';
+    d.setFullYear(d.getFullYear() + deltaYears);
+    return d.toISOString().slice(0, 10);
+  }
+  function renderChildDobRows(which) {
+    const outbound = _pickerOutboundDate(which);
+    const minAttr = outbound ? ` min="${_shiftYearsIso(outbound, -12)}"` : '';
+    const maxAttr = outbound ? ` max="${_shiftYearsIso(outbound, -2)}"`  : '';
+    const rows = [];
+    for (let k = 0; k < travelers.children; k++) {
+      const val = (travelers.childDobs && travelers.childDobs[k]) || '';
+      rows.push(`
+        <div class="tp-cdob-row">
+          <label class="tp-cdob-label" for="tp-${which}-cdob-${k}">Child ${k + 1} date of birth</label>
+          <input
+            type="date"
+            id="tp-${which}-cdob-${k}"
+            class="tp-cdob-input"
+            value="${val}"${minAttr}${maxAttr}
+            onchange="onChildDobChange('${which}', ${k}, this.value)">
+        </div>
+      `);
+    }
+    return `<div class="tp-cdob-list">${rows.join('')}</div>`;
+  }
+
+  // §4a — Write the picker's DOB input back to travelers.childDobs. No
+  // re-render on change: the popup already reflects the value the user
+  // just typed, and re-rendering would steal focus from an open native
+  // date picker. Home picker also persists to sessionStorage so refresh
+  // preserves the DOB alongside other home-form state.
+  function onChildDobChange(which, k, val) {
+    if (!Array.isArray(travelers.childDobs)) travelers.childDobs = [];
+    travelers.childDobs[k] = val || '';
+    if (which === 'home' && typeof stashHomeForm === 'function') stashHomeForm();
   }
 
   // §4.7-3f — Track the pax mix at picker-open time. On close (via
