@@ -5318,6 +5318,22 @@
        completely untouched.
        ═══════════════════════════════════════════════════════════════ */
 
+    /* §4.7 polish v2 — Suppress Chrome's blue segment-highlight on
+       <input type="date">. When our fields receive :focus (either click,
+       tab, or programmatic auto-advance), the field itself already gets
+       a blue-alpha wash via `.field input:focus` matching From/To's cue.
+       Chrome's additional segment-level highlight on ::-webkit-datetime-
+       edit-*-field:focus stacks on top of that and looks awkward next to
+       an open calendar. Override to transparent so the field-level wash
+       is the sole visual cue. Users can still type digits into the field
+       — the segment is still functionally focused, just not painted. */
+    input[type="date"]::-webkit-datetime-edit-month-field:focus,
+    input[type="date"]::-webkit-datetime-edit-day-field:focus,
+    input[type="date"]::-webkit-datetime-edit-year-field:focus {
+      background-color: transparent;
+      color: inherit;
+    }
+
     /* ── iOS Safari date-input fixes (not media-gated — harmless on all platforms) ──
        iOS Safari has multiple compounding quirks with <input type="date">:
        1) Native UA stylesheet imposes a large intrinsic min-width that overflows
@@ -11305,21 +11321,12 @@ const TUMAFLY_WHATSAPP_WAME = '254113165503';
     const dep = document.getElementById('date');
     if (!dep) return;
     _homeAutoAdv.justAdvancedTo = 'date';
-    // §4.7 polish: don't call focus() before showPicker(). On <input type=
-    // "date"> in Chrome, focus() selects the mm segment as a visible blue
-    // highlight — which then stays visible in the field below the open
-    // calendar, unlike click-focus where Chrome atomically hides the
-    // segment as the picker paints. showPicker() implicitly focuses the
-    // input as part of opening the picker, without the segment-highlight
-    // artifact.
-    let opened = false;
-    try {
-      if (dep.showPicker) { dep.showPicker(); opened = true; }
-    } catch (e) { /* silent */ }
-    // Fallback: some browsers throw SecurityError when showPicker isn't
-    // in a user-activation gesture chain. In that case fall back to
-    // focus() so the user at least knows where to tap.
-    if (!opened) dep.focus();
+    // §4.7 polish v2: restore focus() so the field gets the blue-alpha
+    // :focus wash matching From/To. The segment-highlight artifact
+    // (Chrome's mm/dd/yyyy segment blue block) is suppressed globally
+    // via CSS below on the ::-webkit-datetime-edit-*-field pseudo-elements.
+    dep.focus();
+    try { dep.showPicker?.(); } catch (e) { /* silent */ }
   }
 
   function _homeAutoAdvance_openReturn() {
@@ -11334,14 +11341,11 @@ const TUMAFLY_WHATSAPP_WAME = '254113165503';
     // user has to close+reopen to see pre-depart dates masked out.
     _tfSyncReturnMin(document.getElementById('date'), ret);
     _homeAutoAdv.justAdvancedTo = 'return-date';
-    // §4.7 polish: same treatment as _homeAutoAdvance_openDate — skip
-    // the explicit focus() before showPicker() to avoid the segment-
-    // highlight artifact next to the open calendar.
-    let opened = false;
-    try {
-      if (ret.showPicker) { ret.showPicker(); opened = true; }
-    } catch (e) { /* silent */ }
-    if (!opened) ret.focus();
+    // §4.7 polish v2: same treatment as _homeAutoAdvance_openDate — restore
+    // focus() before showPicker() so the field gets the same :focus wash
+    // as From/To. Segment-highlight artifact suppressed globally via CSS.
+    ret.focus();
+    try { ret.showPicker?.(); } catch (e) { /* silent */ }
   }
 
   function _homeAutoAdvance_openTravelers() {
