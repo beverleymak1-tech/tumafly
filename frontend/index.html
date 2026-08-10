@@ -11305,12 +11305,21 @@ const TUMAFLY_WHATSAPP_WAME = '254113165503';
     const dep = document.getElementById('date');
     if (!dep) return;
     _homeAutoAdv.justAdvancedTo = 'date';
-    dep.focus();
-    // showPicker() is HTML5, well-supported in Chrome 99+, Safari 16+,
-    // Firefox 101+. Wrap in try — some browsers throw if the input isn't
-    // in a user-activation gesture chain, in which case focus alone is
-    // still useful (tap the field to open native picker).
-    try { dep.showPicker?.(); } catch (e) { /* silent */ }
+    // §4.7 polish: don't call focus() before showPicker(). On <input type=
+    // "date"> in Chrome, focus() selects the mm segment as a visible blue
+    // highlight — which then stays visible in the field below the open
+    // calendar, unlike click-focus where Chrome atomically hides the
+    // segment as the picker paints. showPicker() implicitly focuses the
+    // input as part of opening the picker, without the segment-highlight
+    // artifact.
+    let opened = false;
+    try {
+      if (dep.showPicker) { dep.showPicker(); opened = true; }
+    } catch (e) { /* silent */ }
+    // Fallback: some browsers throw SecurityError when showPicker isn't
+    // in a user-activation gesture chain. In that case fall back to
+    // focus() so the user at least knows where to tap.
+    if (!opened) dep.focus();
   }
 
   function _homeAutoAdvance_openReturn() {
@@ -11325,8 +11334,14 @@ const TUMAFLY_WHATSAPP_WAME = '254113165503';
     // user has to close+reopen to see pre-depart dates masked out.
     _tfSyncReturnMin(document.getElementById('date'), ret);
     _homeAutoAdv.justAdvancedTo = 'return-date';
-    ret.focus();
-    try { ret.showPicker?.(); } catch (e) { /* silent */ }
+    // §4.7 polish: same treatment as _homeAutoAdvance_openDate — skip
+    // the explicit focus() before showPicker() to avoid the segment-
+    // highlight artifact next to the open calendar.
+    let opened = false;
+    try {
+      if (ret.showPicker) { ret.showPicker(); opened = true; }
+    } catch (e) { /* silent */ }
+    if (!opened) ret.focus();
   }
 
   function _homeAutoAdvance_openTravelers() {
