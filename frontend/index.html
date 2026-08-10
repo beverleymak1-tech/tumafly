@@ -2101,17 +2101,19 @@
       cursor: pointer;
       outline: none;
     }
-    /* Native calendar-picker-indicator hidden — the wrapper's own chevron
-       is the only visible one. Positioning it absolute over the full field
-       keeps the click target intact so tapping anywhere still opens the
-       native date picker on all platforms. */
+    /* §4a — Session 32 fix — Native calendar-picker-indicator hidden.
+       Previous pattern (opacity: 0 + position: absolute + width/height
+       100%) turned the whole input into an invisible full-cover
+       click target for the indicator. On Chromebook Chrome, pressing
+       "Clear" in the native date picker left that click target armed:
+       the next click anywhere within the input's visual band reopened
+       the picker instead of hitting sibling controls (Children ± buttons
+       sit right next to the DOB wrapper). Hiding with display:none has
+       no such armed-state — Chrome still opens the picker on plain
+       input-text-area clicks, and the wrapper's own SVG chevron is the
+       visible affordance. */
     .tp-popup .tp-cdob-input::-webkit-calendar-picker-indicator {
-      opacity: 0;
-      position: absolute;
-      right: 0;
-      width: 100%;
-      height: 100%;
-      cursor: pointer;
+      display: none;
     }
     .tp-popup .tp-cdob-input::-webkit-datetime-edit {
       padding: 0;
