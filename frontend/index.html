@@ -12740,6 +12740,17 @@ const TUMAFLY_WHATSAPP_WAME = '254113165503';
 
   // Click-outside-to-close (with §4.7-3f mix-change refresh)
   document.addEventListener('mousedown', (e) => {
+    // §4.7-3f — If the outside-click target is itself a search-triggering
+    // control (Update button on results, Update-search on the edit-search
+    // modal), close the picker but SKIP the auto-refresh. That control
+    // will fire runSearch through its own onclick; auto-refreshing here
+    // would race the Turnstile token acquisition and 403 the second call.
+    const targetTriggersOwnSearch = !!(
+      e.target.closest && (
+        e.target.closest('#r-update-btn') ||
+        e.target.closest('#es-update-btn')
+      )
+    );
     ['home', 'results', 'es'].forEach(w => {
       const popup = document.getElementById(`tp-${w}-popup`);
       const trigger = document.getElementById(`tp-${w}-trigger`);
@@ -12748,7 +12759,8 @@ const TUMAFLY_WHATSAPP_WAME = '254113165503';
       if (popup.contains(e.target) || (trigger && trigger.contains(e.target))) return;
       popup.classList.add('hidden');
       trigger?.classList.remove('open');
-      _maybeRefreshResultsOnPickerClose(w);
+      if (!targetTriggersOwnSearch) _maybeRefreshResultsOnPickerClose(w);
+      else _travelerPickerOpenMix = null;  // snapshot no longer needed
     });
   });
 
