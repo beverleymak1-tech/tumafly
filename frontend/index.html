@@ -16676,6 +16676,7 @@ const TUMAFLY_WHATSAPP_WAME = '254113165503';
         if (e.target.id === `p${idx}-dob`) {
           if (e.type === 'input') {
             hideDobBubble(idx);
+            clearDobAgeAlert(idx);
           } else {
             for (let k = 0; k < travelerStates.length; k++) validateDobLive(k);
           }
@@ -17198,25 +17199,25 @@ const TUMAFLY_WHATSAPP_WAME = '254113165503';
     // Hide the ! indicator by removing the invalid class from input-wrap.
     const inputWrap = input?.closest('.pax-dob-input-wrap');
     if (inputWrap) inputWrap.classList.remove('pax-dob-invalid');
-    // §4.7-3b polish + §4.7-3c: clear the top save-error alert too. It's
-    // set by saveTraveler when Save is clicked with an age/chaperone
-    // violation — either the terse "Please fix the date of birth ..."
-    // (tier-1 Duffel category mismatch) or the Priceline policy copy
-    // "Children under the age of 16 may only travel with an adult 18
-    // years or older ..." (tier-2 chaperone). Once the user starts editing
-    // the DOB, the alert should clear immediately (same behavior as the
-    // bubble). We clear both state and DOM without a full re-render — a
-    // re-render would swap the DOB DOM out from under an active edit.
+  }
+
+  // §4.7-3c — Clear the age/chaperone save-error alert on user DOB edit.
+  // Deliberately separate from hideDobBubble because validateDobLive's
+  // routine sweep (end-of-render loop) calls hideDobBubble as a "hide
+  // then decide" step; if alert-clear lived there, the just-set alert
+  // from a failed save would be cleared by the render immediately after.
+  // This helper is called only from the DOB input event (user typing),
+  // not from validateDobLive or blur/change handlers.
+  function clearDobAgeAlert(i) {
     const s = travelerStates[i];
-    if (s && s.lastSaveError && (
-      /date of birth/i.test(s.lastSaveError) ||
-      /Children under the age of 16/i.test(s.lastSaveError)
-    )) {
-      s.lastSaveError = null;
-      const card = document.querySelector(`[data-traveler-card="${i}"]`);
-      const alertEl = card?.querySelector('.pax-inline-save-error');
-      if (alertEl) alertEl.remove();
-    }
+    if (!s || !s.lastSaveError) return;
+    // Match both the terse (tier-1) and Priceline (tier-2) copies.
+    if (!/date of birth/i.test(s.lastSaveError)
+        && !/Children under the age of 16/i.test(s.lastSaveError)) return;
+    s.lastSaveError = null;
+    const card = document.querySelector(`[data-traveler-card="${i}"]`);
+    const alertEl = card?.querySelector('.pax-inline-save-error');
+    if (alertEl) alertEl.remove();
   }
 
   function validateDobLive(i) {
