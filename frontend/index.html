@@ -10581,6 +10581,13 @@
           if (Number.isFinite(pb.children))    travelers.children    = pb.children;
           if (Number.isFinite(pb.infantsSeat)) travelers.infantsSeat = pb.infantsSeat;
           if (Number.isFinite(pb.infantsLap))  travelers.infantsLap  = pb.infantsLap;
+          // §4c — Restore per-child DOBs alongside the counter mix so the
+          // child tab's booking form can pre-fill each Child slot's DOB
+          // in Phase 4d. recomputeTravelers() below trims/pads childDobs
+          // to match travelers.children, so a mismatched-length array
+          // (edge case: corrupt stash, or write happened mid-picker-edit)
+          // won't leave dangling entries.
+          if (Array.isArray(pb.childDobs)) travelers.childDobs = pb.childDobs.slice();
           recomputeTravelers();
         }
       } catch (_) { /* sessionStorage disabled — falls through to wipe below */ }
@@ -14677,11 +14684,21 @@
           // starts at default 1 adult and wipes the offer's 2-pax count to
           // 2 adults, mis-labelling slot headers ("Traveler 2 · Adult" for
           // a 1A+1I booking) and sending [adult, adult] to Duffel.
+          //
+          // §4c — childDobs sliced to travelers.children length (defensive
+          // against a stale-length array from an aborted picker session).
+          // The child tab uses this to (a) label slot headers correctly
+          // and (b) pre-fill each Child slot's DOB in the booking form so
+          // the tier-3 lock (Phase 4d) can compare search-time age vs
+          // book-time DOB and refuse mismatches before /air/orders.
           pickerBreakdown: {
             adults:      travelers?.adults      ?? 1,
             children:    travelers?.children    ?? 0,
             infantsSeat: travelers?.infantsSeat ?? 0,
             infantsLap:  travelers?.infantsLap  ?? 0,
+            childDobs:   Array.isArray(travelers?.childDobs)
+                           ? travelers.childDobs.slice(0, travelers?.children || 0)
+                           : [],
           },
         }));
         sessionStorage.setItem(BOOKING_SECURE_SHADOW_KEY, JSON.stringify({
