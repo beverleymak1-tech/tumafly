@@ -2100,6 +2100,17 @@
       font-weight: 500;
       cursor: pointer;
       outline: none;
+      /* §4a — pointer-events: none blocks Chrome's default click-to-focus
+         on the segment (mm/dd/yyyy) the user lands on. Without this, any
+         click on the input body focuses that segment and Chrome paints a
+         solid-blue highlight over it — same jarring visual Session 31
+         fixed on the search date fields. The wrapper's onclick handler
+         intercepts the click and opens the picker via .showPicker(), so
+         the picker still opens on any tap; the input itself never
+         receives focus, so no segment gets highlighted. Keyboard access
+         is a small casualty (tab-focus on the wrapper is not wired), but
+         the picker is a mouse/touch surface for the target audience. */
+      pointer-events: none;
     }
     /* §4a — Session 32 fix — Native calendar-picker-indicator hidden.
        Previous pattern (opacity: 0 + position: absolute + width/height
@@ -12868,7 +12879,7 @@ const TUMAFLY_WHATSAPP_WAME = '254113165503';
       rows.push(`
         <div class="tp-cdob-row">
           <div class="tp-row-label">${label}</div>
-          <div class="tp-cdob-wrap${unsetCls}">
+          <div class="tp-cdob-wrap${unsetCls}" onclick="onChildDobWrapClick(this)">
             <input
               type="date"
               id="tp-${which}-cdob-${k}"
@@ -12881,6 +12892,23 @@ const TUMAFLY_WHATSAPP_WAME = '254113165503';
       `);
     }
     return rows.join('');
+  }
+
+  // §4a — Wrapper click handler that opens the native date picker
+  // without focusing the input. Together with pointer-events:none on
+  // the input, this suppresses Chrome's mm/dd/yyyy segment highlight
+  // (the blue paint over the clicked segment) while preserving the
+  // tap-to-open UX. .showPicker() is a real user-gesture-initiated
+  // call because it's inside a click handler, so Chrome accepts it.
+  // try/catch guards against older Chrome (<M99) or non-Chromium
+  // browsers that lack .showPicker() — silent no-op there, and the
+  // user can still tab-focus and press Space to open, or click again
+  // once display:none is loosened.
+  function onChildDobWrapClick(wrap) {
+    if (!wrap) return;
+    const input = wrap.querySelector('input[type="date"]');
+    if (!input) return;
+    try { input.showPicker(); } catch (_) { /* older browser */ }
   }
 
   // §4a — Write the picker's DOB input back to travelers.childDobs. No
