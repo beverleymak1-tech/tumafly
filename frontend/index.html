@@ -12995,9 +12995,17 @@
     // toggle, click-outside, or opening another picker), compare to the
     // snapshot; if it changed AND we're on results, fire onSummaryChange
     // once. Same mix (bumped up then back down) = no-op.
+    //
+    // §4b — Sig also includes travelers.childDobs so a DOB edit inside
+    // the picker (with counters unchanged) is treated as a mix change
+    // and triggers the same auto-refire. Without this, users on results
+    // could correct a bad DOB and click outside the picker expecting
+    // the search to update — instead they'd have to click Update
+    // explicitly, inconsistent with the ± counter path.
     let _travelerPickerOpenMix = null;
     function _paxMixSig() {
-      return `${travelers.adults}-${travelers.children}-${travelers.infantsSeat}-${travelers.infantsLap}`;
+      const dobPart = (travelers.childDobs || []).join(',');
+      return `${travelers.adults}-${travelers.children}-${travelers.infantsSeat}-${travelers.infantsLap}|${dobPart}`;
     }
     function _maybeRefreshResultsOnPickerClose(which) {
       if (which !== 'results') return;
