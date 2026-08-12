@@ -10635,7 +10635,10 @@
             saved: false,
             data: {
               title: 'mr', gender: '', given_name: '', middle_name: '', family_name: '',
-              born_on: '', nationality: '',
+              // §4d — Pre-fill child slot DOBs from travelers.childDobs
+              // (restored moments ago from pickerBreakdown). Adult/infant
+              // slots return '' — user enters DOB manually there.
+              born_on: seedBornOnForSlot(i), nationality: '',
               passport: { country: '', number: '', expires: '' },
               frequent_flyer: [],
               known_traveler_id: '', redress_number: '', special_assistance: '',
@@ -14836,7 +14839,9 @@
             given_name: '',
             middle_name: '',
             family_name: '',
-            born_on: '',
+            // §4d — Pre-fill child slot DOBs from travelers.childDobs.
+            // Adult/infant slots and empty search-time DOBs return ''.
+            born_on: seedBornOnForSlot(i),
             nationality: '',
             passport: { country: '', number: '', expires: '' },
             frequent_flyer: [],
@@ -16518,10 +16523,15 @@
         const expected = getExpectedPaxType(i);
         const tier1Err = validateAgeForType(d.born_on, expected);
         const tier2Err = tier1Err ? null : validatePartyChaperoneForSlot(d.born_on, i);
-        if (tier1Err || tier2Err) {
+        // §4d — Tier 3: child DOB must equal search-time DOB. Runs only
+        // when tiers 1 and 2 pass; each tier's alertMsg has priority in
+        // the branch below (tier2 > tier3 > tier1-infant > tier1-generic).
+        const tier3Err = (tier1Err || tier2Err) ? null : validateChildDobAgainstSearch(d.born_on, i);
+        if (tier1Err || tier2Err || tier3Err) {
           s.showRequiredErrors = true;
           // §4.7-3c refinement — Alert copy varies by which tier fires:
           //   tier-2 chaperone violation → Priceline policy copy
+          //   tier-3 child DOB mismatch  → "restart search" guidance
           //   tier-1 infant-slot mismatch → specific "under 2" guidance
           //     (user picked Infant but the DOB isn't under 2 — tell them
           //     exactly what an Infant requires and offer the alternative)
@@ -16530,6 +16540,8 @@
           let alertMsg;
           if (tier2Err) {
             alertMsg = 'Children under the age of 16 may only travel with an adult 18 years or older. Please check the passenger information.';
+          } else if (tier3Err) {
+            alertMsg = `Traveler ${i + 1}'s date of birth doesn't match the one used in your search. Restart your search to change a child's age.`;
           } else if (expected === 'infant_without_seat') {
             alertMsg = `Traveler ${i + 1} was booked as an Infant. Enter a date of birth for a child under 2 at travel, or restart your search with a different traveler type.`;
           } else {
@@ -17512,6 +17524,25 @@
       return t === 'adult' ? 'Adult' : t === 'child' ? 'Child' : 'Infant';
     }
 
+    // §4d — For child slots, return the search-time DOB from
+    // travelers.childDobs. For adult/infant slots or when no DOB
+    // was captured at search, return '' — the traveler enters DOB
+    // manually. Called by initTravelerStates + restoreBooking to
+    // pre-fill child DOB inputs on first render so the user doesn't
+    // have to re-type what they already entered in the picker.
+    // Tier 3 (validateChildDobAgainstSearch) then locks book-time
+    // DOB to search-time DOB; the pre-fill makes the lock invisible
+    // in the common case (user leaves the pre-filled value alone).
+    function seedBornOnForSlot(slotIndex) {
+      const a = travelers.adults || 0;
+      const c = travelers.children || 0;
+      const isChild = slotIndex >= a && slotIndex < a + c;
+      if (!isChild) return '';
+      const k = slotIndex - a;
+      const dobs = travelers.childDobs || [];
+      return dobs[k] || '';
+    }
+
     // Compute age in years on the trip's outbound departure date (or today as
     // fallback). Duffel evaluates age at first travel date — using "today"
     // would let a 11y8m old child book as adult if the flight is 4 months out.
@@ -17607,6 +17638,29 @@
       return 'Under 16 must travel with an 18+ adult';
     }
 
+    // §4d — Tier 3: for child slots, the book-time DOB must equal the
+    // search-time DOB stashed in travelers.childDobs. Duffel priced
+    // the offer using the age we sent at search; a mismatch — even one
+    // day — changes the derived age and /air/orders rejects with
+    // born_on_does_not_match. Catching it here means the user sees
+    // a clear reason ("doesn't match the age used in your search")
+    // and a clear fix ("Restart search to change a child's age")
+    // instead of a payment succeeding and Duffel refusing to ticket.
+    //
+    // Only fires for slots whose expected type is 'child'. Silently
+    // no-ops if the search-time DOB is missing (legacy path — user
+    // came from an older cached search that predates Phase 4c) or
+    // the current input is empty (required-field check handles that).
+    function validateChildDobAgainstSearch(bornOnIso, slotIndex) {
+      if (getExpectedPaxType(slotIndex) !== 'child') return null;
+      const k = slotIndex - (travelers.adults || 0);
+      const searchDob = (travelers.childDobs || [])[k] || '';
+      if (!searchDob) return null;
+      if (!bornOnIso) return null;
+      if (bornOnIso === searchDob) return null;
+      return "This DOB doesn't match the age used in your search. Restart search to change a child's age.";
+    }
+
     // §4.7-3b — DOB speech-bubble helpers. hideDobBubble removes any bubble
     // + red border + ! indicator for a slot (called on `input` events during
     // typing). validateDobLive reads the current DOB, runs tier-1 then
@@ -17663,6 +17717,11 @@
       let err = validateAgeForType(val, getExpectedPaxType(i));
       // Tier 2: Tumafly under-16 chaperone rule (only if tier 1 passes)
       if (!err) err = validatePartyChaperoneForSlot(val, i);
+      // §4d — Tier 3: child DOB must match search-time DOB (only if
+      // tiers 1 and 2 pass). Locks the age Duffel priced the offer with
+      // to the DOB collected at booking; mismatch = born_on_does_not_match
+      // at /air/orders. Cheaper to catch here than after the customer pays.
+      if (!err) err = validateChildDobAgainstSearch(val, i);
       hideDobBubble(i);
       if (!err) return;
       input.classList.add('pax-input-err');
