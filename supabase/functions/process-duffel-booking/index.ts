@@ -257,9 +257,23 @@ serve(async (req) => {
 
     // 7. Build mapped passengers (identical to pre-refactor lines 620–631)
     const mappedPassengers: any[] = pending.passengers.map((p: any, i: number) => {
-      const offerPax = offerPassengers[i];
+      // §7 (revised after Duffel support confirmation) — Order-creation
+      // payload only writes id + metadata. Per Duffel: "The POST /air/orders
+      // schema expects you to pass only the id of the passenger (to map
+      // them back to the original offer) and their personal metadata
+      // (given_name, family_name, born_on, gender, title, and
+      // identity_documents)." type and age are NOT writable fields at
+      // order creation; Duffel silently strips them from ingress.
+      //
+      // Discriminator (type or age) lives on the OFFER's passenger record
+      // and is reconciled by Duffel from the id link — we don't re-send it.
+      //
+      // Previous versions of this file sent type: p.type (and briefly
+      // mirrored offerPax.age); both were being discarded server-side
+      // and explained the null/null passenger records observed on
+      // GET /air/orders/{id} for age-searched children in sandbox.
       const mapped: any = {
-        id: offerPax.id,
+        id: offerPassengers[i].id,
         title: p.title,
         given_name: p.given_name,
         family_name: p.family_name,
@@ -268,27 +282,6 @@ serve(async (req) => {
         email: pending.contact.email,
         phone_number: pending.contact.phone_number || null,
       };
-      // §7 — Mirror the offer's passenger discriminator. Duffel's offer
-      // slots come in two shapes and the order-creation passenger MUST
-      // use the same one for that slot:
-      //   { type: "adult" | "infant_without_seat" }   → send `type`
-      //   { age: N }                                  → send `age`
-      // We used to always send `type: p.type` (including "child"), which
-      // Duffel accepted at test-mode Duffel Airways without error but
-      // stored the resulting passenger with type: null AND age: null.
-      // The dashboard then couldn't render the passenger card, and real
-      // carriers would reject the order at ticketing with a discriminator
-      // mismatch. Copying whichever field the offer slot exposes fixes
-      // both without needing to re-derive age from born_on ourselves.
-      if (typeof offerPax.age === "number") {
-        mapped.age = offerPax.age;
-      } else if (offerPax.type) {
-        mapped.type = offerPax.type;
-      } else {
-        // Fallback to what pending had — shouldn't happen if search-time
-        // passenger_types was well-formed, but keeps the payload valid.
-        mapped.type = p.type;
-      }
       // §6 — Pass identity documents (passport) through to Duffel when
       // the frontend captured them. The frontend already assembles the
       // correct Duffel shape at renderPassengerForms:
@@ -310,11 +303,17 @@ serve(async (req) => {
     // with `at_least_one_adult_for_each_infant` even when the party has
     // enough adults. Pair 1:1 in slot order — the picker already caps
     // infants at N ≤ adults so this always matches.
+    //
+    // §7 (revised) — Since mappedPassengers no longer carries a `type`
+    // field (order-creation schema doesn't write it), the loop below
+    // reads discriminators from pending.passengers[i].type — our
+    // persisted source of truth from the frontend picker.
     const adultIdxs: number[] = [];
     const infantIdxs: number[] = [];
     for (let i = 0; i < mappedPassengers.length; i++) {
-      if (mappedPassengers[i].type === "adult") adultIdxs.push(i);
-      else if (mappedPassengers[i].type === "infant_without_seat") infantIdxs.push(i);
+      const pendingType = pending.passengers[i]?.type;
+      if (pendingType === "adult") adultIdxs.push(i);
+      else if (pendingType === "infant_without_seat") infantIdxs.push(i);
     }
     for (let k = 0; k < infantIdxs.length && k < adultIdxs.length; k++) {
       mappedPassengers[adultIdxs[k]].infant_passenger_id = mappedPassengers[infantIdxs[k]].id;
