@@ -256,17 +256,32 @@ serve(async (req) => {
     const offerPassengers = offer.passengers;
 
     // 7. Build mapped passengers (identical to pre-refactor lines 620–631)
-    const mappedPassengers: any[] = pending.passengers.map((p: any, i: number) => ({
-      id: offerPassengers[i].id,
-      type: p.type,
-      title: p.title,
-      given_name: p.given_name,
-      family_name: p.family_name,
-      born_on: p.born_on,
-      gender: p.gender,
-      email: pending.contact.email,
-      phone_number: pending.contact.phone_number || null,
-    }));
+        const mappedPassengers: any[] = pending.passengers.map((p: any, i: number) => {
+          const mapped: any = {
+            id: offerPassengers[i].id,
+            type: p.type,
+            title: p.title,
+            given_name: p.given_name,
+            family_name: p.family_name,
+            born_on: p.born_on,
+            gender: p.gender,
+            email: pending.contact.email,
+            phone_number: pending.contact.phone_number || null,
+          };
+          // §6 — Pass identity documents (passport) through to Duffel when
+          // the frontend captured them. The frontend already assembles the
+          // correct Duffel shape at renderPassengerForms:
+          //   [{ type: 'passport', unique_identifier, issuing_country_code, expires_on }]
+          // Duffel sandbox is permissive and orders complete without this
+          // field; Duffel production often rejects international bookings
+          // when identity_documents is absent (per-carrier requirement).
+          // Passing the array through unchanged keeps prod-credential
+          // bookings honest without duplicating shape logic here.
+          if (Array.isArray(p.identity_documents) && p.identity_documents.length) {
+            mapped.identity_documents = p.identity_documents;
+          }
+          return mapped;
+        });
 
     // §4.7 — Link each infant_without_seat passenger to an accompanying
     // adult via `infant_passenger_id` on the adult. Duffel requires this
