@@ -256,32 +256,53 @@ serve(async (req) => {
     const offerPassengers = offer.passengers;
 
     // 7. Build mapped passengers (identical to pre-refactor lines 620–631)
-        const mappedPassengers: any[] = pending.passengers.map((p: any, i: number) => {
-          const mapped: any = {
-            id: offerPassengers[i].id,
-            type: p.type,
-            title: p.title,
-            given_name: p.given_name,
-            family_name: p.family_name,
-            born_on: p.born_on,
-            gender: p.gender,
-            email: pending.contact.email,
-            phone_number: pending.contact.phone_number || null,
-          };
-          // §6 — Pass identity documents (passport) through to Duffel when
-          // the frontend captured them. The frontend already assembles the
-          // correct Duffel shape at renderPassengerForms:
-          //   [{ type: 'passport', unique_identifier, issuing_country_code, expires_on }]
-          // Duffel sandbox is permissive and orders complete without this
-          // field; Duffel production often rejects international bookings
-          // when identity_documents is absent (per-carrier requirement).
-          // Passing the array through unchanged keeps prod-credential
-          // bookings honest without duplicating shape logic here.
-          if (Array.isArray(p.identity_documents) && p.identity_documents.length) {
-            mapped.identity_documents = p.identity_documents;
-          }
-          return mapped;
-        });
+    const mappedPassengers: any[] = pending.passengers.map((p: any, i: number) => {
+      const offerPax = offerPassengers[i];
+      const mapped: any = {
+        id: offerPax.id,
+        title: p.title,
+        given_name: p.given_name,
+        family_name: p.family_name,
+        born_on: p.born_on,
+        gender: p.gender,
+        email: pending.contact.email,
+        phone_number: pending.contact.phone_number || null,
+      };
+      // §7 — Mirror the offer's passenger discriminator. Duffel's offer
+      // slots come in two shapes and the order-creation passenger MUST
+      // use the same one for that slot:
+      //   { type: "adult" | "infant_without_seat" }   → send `type`
+      //   { age: N }                                  → send `age`
+      // We used to always send `type: p.type` (including "child"), which
+      // Duffel accepted at test-mode Duffel Airways without error but
+      // stored the resulting passenger with type: null AND age: null.
+      // The dashboard then couldn't render the passenger card, and real
+      // carriers would reject the order at ticketing with a discriminator
+      // mismatch. Copying whichever field the offer slot exposes fixes
+      // both without needing to re-derive age from born_on ourselves.
+      if (typeof offerPax.age === "number") {
+        mapped.age = offerPax.age;
+      } else if (offerPax.type) {
+        mapped.type = offerPax.type;
+      } else {
+        // Fallback to what pending had — shouldn't happen if search-time
+        // passenger_types was well-formed, but keeps the payload valid.
+        mapped.type = p.type;
+      }
+      // §6 — Pass identity documents (passport) through to Duffel when
+      // the frontend captured them. The frontend already assembles the
+      // correct Duffel shape at renderPassengerForms:
+      //   [{ type: 'passport', unique_identifier, issuing_country_code, expires_on }]
+      // Duffel sandbox is permissive and orders complete without this
+      // field; Duffel production often rejects international bookings
+      // when identity_documents is absent (per-carrier requirement).
+      // Passing the array through unchanged keeps prod-credential
+      // bookings honest without duplicating shape logic here.
+      if (Array.isArray(p.identity_documents) && p.identity_documents.length) {
+        mapped.identity_documents = p.identity_documents;
+      }
+      return mapped;
+    });
 
     // §4.7 — Link each infant_without_seat passenger to an accompanying
     // adult via `infant_passenger_id` on the adult. Duffel requires this
