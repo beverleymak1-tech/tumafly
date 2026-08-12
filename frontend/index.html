@@ -4362,12 +4362,11 @@
           transition: border-color 0.15s, box-shadow 0.15s;
           /* §5 — Chrome renders <input type="date"> and <input type="text">
              at slightly different intrinsic heights (date carries picker
-             chrome; text doesn't). Explicit min-height keeps side-by-side
-             pairs like "Passport number" + "Passport expiration" visually
-             aligned regardless of type. 44px = 22px content + 22px padding,
-             matching the current padding math. */
-          min-height: 44px;
-          box-sizing: border-box;
+             chrome; text doesn't), and the global input[type="date"] rule
+             at ~L5564 sets min-height: 48px for iOS empty-collapse
+             behaviour. Matching 48px here keeps side-by-side pairs like
+             "Passport number" + "Passport expiration" visually aligned. */
+          min-height: 48px;
         }
         .pax-input:focus, .pax-select:focus {
           border-color: var(--brand);
