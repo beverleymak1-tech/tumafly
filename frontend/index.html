@@ -4360,6 +4360,14 @@
           color: var(--ink);
           outline: none;
           transition: border-color 0.15s, box-shadow 0.15s;
+          /* §5 — Chrome renders <input type="date"> and <input type="text">
+             at slightly different intrinsic heights (date carries picker
+             chrome; text doesn't). Explicit min-height keeps side-by-side
+             pairs like "Passport number" + "Passport expiration" visually
+             aligned regardless of type. 44px = 22px content + 22px padding,
+             matching the current padding math. */
+          min-height: 44px;
+          box-sizing: border-box;
         }
         .pax-input:focus, .pax-select:focus {
           border-color: var(--brand);
@@ -4647,30 +4655,44 @@
            destination and issuing country; enforcing it in the UI
            would create false alarms. T&Cs handle the legal side:
            customer confirms passport suitability at booking.
-           .pax-expiry-wrap is position: relative so both the info
-           button (top-right corner) and the tip (below field) can
-           absolute-position against it. */
+           .pax-expiry-wrap wraps the whole field (label + input-wrap +
+           any inline error) as the tip's positioning parent.
+           .pax-expiry-input-wrap wraps just the input so the info
+           button can absolute-position inside the input's box (mirrors
+           .pax-dob-input-wrap's ! indicator placement pattern). */
         .pax-expiry-wrap { position: relative; }
+        .pax-expiry-input-wrap { position: relative; }
         .pax-expiry-info-btn {
           position: absolute;
-          top: 0;
-          right: 0;
+          top: 50%;
+          right: 12px;
+          transform: translateY(-50%);
           width: 22px;
           height: 22px;
           padding: 0;
           border: 0;
           background: transparent;
           cursor: pointer;
-          color: var(--text-3);
+          color: var(--brand);
           display: inline-flex;
           align-items: center;
           justify-content: center;
           border-radius: 50%;
-          transition: color 0.15s;
+          transition: color 0.15s, background 0.15s;
+          /* §5 fix — z-index above the browser's calendar-picker-indicator
+             (which is a full-cover overlay on <input type="date"> to
+             normalise tap-to-open on Chromebook; see the global rule
+             around line 5432). Without this, clicks on the icon
+             sometimes land on the picker indicator and open the date
+             picker instead of the info tip. pointer-events: auto is
+             explicit for defense-in-depth against any inherited none. */
+          z-index: 3;
+          pointer-events: auto;
         }
         .pax-expiry-info-btn:hover,
         .pax-expiry-info-btn.active {
-          color: var(--brand);
+          color: var(--brand-dark, var(--brand));
+          background: rgba(61, 149, 245, 0.10);
         }
         .pax-expiry-info-btn svg {
           width: 16px;
@@ -4678,9 +4700,8 @@
           display: block;
         }
         /* Dark-slab tooltip (informational, distinct from tier-1/2/3 DOB
-           error bubbles and from an amber warning). Uses --ink so it
-           reads as "info" against the form's white background. Pointer
-           at top-right anchors it visually to the info button above. */
+           error bubbles). Anchored to .pax-expiry-wrap so it sits below
+           the full field (label + input), not just the input row. */
         .pax-expiry-tip {
           position: absolute;
           top: 100%;
@@ -4703,7 +4724,7 @@
           content: '';
           position: absolute;
           bottom: 100%;
-          right: 7px;
+          right: 18px;
           border: 5px solid transparent;
           border-bottom-color: var(--ink);
         }
@@ -17328,17 +17349,19 @@
           </div>
           <div class="pax-expiry-wrap">
             <label class="pax-label ${ppExpiresErr ? 'pax-label-err' : ''}">Passport expiration${passportRequired ? REQ : ''}</label>
-            <button type="button" class="pax-expiry-info-btn" aria-label="About passport validity" onclick="togglePassportExpiryTip(this, ${i})">
-              <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
-                <circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="1.7"/>
-                <path d="M12 11v6" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
-                <circle cx="12" cy="7.5" r="1.1" fill="currentColor"/>
-              </svg>
-            </button>
-            ${s._openedFromSaved && d.passport.expires && !s._unmaskedFields?.['pp-expires']
-              ? `<input id="p${i}-pp-expires" type="text" readonly class="pax-input" value="${escapeHtml(_maskDob(d.passport.expires))}" data-masked="true" data-original-type="date">`
-              : `<input id="p${i}-pp-expires" type="date" class="pax-input ${ppExpiresErr ? 'pax-input-err' : ''}" value="${escapeHtml(d.passport.expires)}" min="${todayIso()}">`
-            }
+            <div class="pax-expiry-input-wrap">
+              ${s._openedFromSaved && d.passport.expires && !s._unmaskedFields?.['pp-expires']
+                ? `<input id="p${i}-pp-expires" type="text" readonly class="pax-input" value="${escapeHtml(_maskDob(d.passport.expires))}" data-masked="true" data-original-type="date">`
+                : `<input id="p${i}-pp-expires" type="date" class="pax-input ${ppExpiresErr ? 'pax-input-err' : ''}" value="${escapeHtml(d.passport.expires)}" min="${todayIso()}" title="">`
+              }
+              <button type="button" class="pax-expiry-info-btn" aria-label="About passport validity" onclick="event.stopPropagation(); togglePassportExpiryTip(this, ${i}); return false;">
+                <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                  <circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="1.7"/>
+                  <path d="M12 11v6" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+                  <circle cx="12" cy="7.5" r="1.1" fill="currentColor"/>
+                </svg>
+              </button>
+            </div>
             ${ppExpiresErr ? '<div class="pax-error">Please enter the passport expiration date</div>' : ''}
           </div>
         </div>
