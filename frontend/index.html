@@ -4641,6 +4641,73 @@
         }
         .intl-banner-warn svg { color: #dc2626; }
 
+        /* §5 (§42) — Static info button + click-tip on the passport
+           expiration field. No validation — just a discoverable hint
+           the user can tap for guidance. The 6-month rule varies by
+           destination and issuing country; enforcing it in the UI
+           would create false alarms. T&Cs handle the legal side:
+           customer confirms passport suitability at booking.
+           .pax-expiry-wrap is position: relative so both the info
+           button (top-right corner) and the tip (below field) can
+           absolute-position against it. */
+        .pax-expiry-wrap { position: relative; }
+        .pax-expiry-info-btn {
+          position: absolute;
+          top: 0;
+          right: 0;
+          width: 22px;
+          height: 22px;
+          padding: 0;
+          border: 0;
+          background: transparent;
+          cursor: pointer;
+          color: var(--text-3);
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+          border-radius: 50%;
+          transition: color 0.15s;
+        }
+        .pax-expiry-info-btn:hover,
+        .pax-expiry-info-btn.active {
+          color: var(--brand);
+        }
+        .pax-expiry-info-btn svg {
+          width: 16px;
+          height: 16px;
+          display: block;
+        }
+        /* Dark-slab tooltip (informational, distinct from tier-1/2/3 DOB
+           error bubbles and from an amber warning). Uses --ink so it
+           reads as "info" against the form's white background. Pointer
+           at top-right anchors it visually to the info button above. */
+        .pax-expiry-tip {
+          position: absolute;
+          top: 100%;
+          right: 0;
+          margin-top: 10px;
+          padding: 10px 12px;
+          background: var(--ink);
+          color: white;
+          font-size: 12.5px;
+          font-weight: 500;
+          line-height: 1.45;
+          border-radius: 6px;
+          box-shadow: 0 4px 12px rgba(0, 0, 0, 0.18);
+          max-width: min(280px, 100%);
+          box-sizing: border-box;
+          z-index: 6;
+          animation: paxDobBubbleIn 0.15s ease-out;
+        }
+        .pax-expiry-tip::before {
+          content: '';
+          position: absolute;
+          bottom: 100%;
+          right: 7px;
+          border: 5px solid transparent;
+          border-bottom-color: var(--ink);
+        }
+
         /* Fare-timer bar — shown at the top of booking + payment views. The customer's
            Duffel offer expires after a fixed window (typically 20 min from search). We
            surface the remaining time so they're not blindsided by a paid_offer_expired
@@ -17259,8 +17326,15 @@
             }
             ${ppNumberErr ? '<div class="pax-error">Please enter the passport number</div>' : ''}
           </div>
-          <div>
+          <div class="pax-expiry-wrap">
             <label class="pax-label ${ppExpiresErr ? 'pax-label-err' : ''}">Passport expiration${passportRequired ? REQ : ''}</label>
+            <button type="button" class="pax-expiry-info-btn" aria-label="About passport validity" onclick="togglePassportExpiryTip(this, ${i})">
+              <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                <circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="1.7"/>
+                <path d="M12 11v6" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+                <circle cx="12" cy="7.5" r="1.1" fill="currentColor"/>
+              </svg>
+            </button>
             ${s._openedFromSaved && d.passport.expires && !s._unmaskedFields?.['pp-expires']
               ? `<input id="p${i}-pp-expires" type="text" readonly class="pax-input" value="${escapeHtml(_maskDob(d.passport.expires))}" data-masked="true" data-original-type="date">`
               : `<input id="p${i}-pp-expires" type="date" class="pax-input ${ppExpiresErr ? 'pax-input-err' : ''}" value="${escapeHtml(d.passport.expires)}" min="${todayIso()}">`
@@ -17597,6 +17671,49 @@
       const m = ref.getMonth() - dob.getMonth();
       if (m < 0 || (m === 0 && ref.getDate() < dob.getDate())) age--;
       return age;
+    }
+
+    // §5 (§42) — Static info tip on the passport expiration field.
+    // No validation logic: destination-country validity thresholds vary
+    // (3/6 months, and sometimes measured from return not outbound), so
+    // any UI rule risks false alarms that could scare users into calling
+    // support. T&Cs cover the legal position ("no verification of
+    // passenger documents"); this tip is just discoverable guidance for
+    // users who want to think about it. Click the info button to open;
+    // click the button again, click outside, or open another one to
+    // close. Single tip open at a time.
+    function togglePassportExpiryTip(btn, i) {
+      const wrap = btn.closest('.pax-expiry-wrap');
+      if (!wrap) return;
+      const existing = wrap.querySelector('.pax-expiry-tip');
+      if (existing) {
+        existing.remove();
+        btn.classList.remove('active');
+        return;
+      }
+      // Close any other open tips first — one at a time keeps the UI
+      // uncluttered and prevents overlapping tips on adjacent slots.
+      document.querySelectorAll('.pax-expiry-tip').forEach(el => el.remove());
+      document.querySelectorAll('.pax-expiry-info-btn.active').forEach(el => el.classList.remove('active'));
+      const tip = document.createElement('div');
+      tip.className = 'pax-expiry-tip';
+      tip.textContent = "Many countries require your passport to be valid for at least 6 months after your travel date. Please check your destination's entry rules.";
+      wrap.appendChild(tip);
+      btn.classList.add('active');
+    }
+
+    // §5 (§42) — Outside-click dismissal, attached once. Capture phase so
+    // it runs before the target's own listeners (avoids the tip re-
+    // opening due to event bubbling on the same tick). Idempotent guard
+    // prevents duplicate listeners across renderPassengerForms rebuilds.
+    if (!window.__tfExpiryTipHandlerAttached) {
+      document.addEventListener('click', (e) => {
+        if (e.target.closest('.pax-expiry-info-btn')) return;
+        if (e.target.closest('.pax-expiry-tip')) return;
+        document.querySelectorAll('.pax-expiry-tip').forEach(el => el.remove());
+        document.querySelectorAll('.pax-expiry-info-btn.active').forEach(el => el.classList.remove('active'));
+      }, true);
+      window.__tfExpiryTipHandlerAttached = true;
     }
 
     // Returns null when OK, or a string error when the DOB doesn't match the
