@@ -4739,12 +4739,20 @@
           color: white;
           font-size: 13px;
           font-weight: 600;
+          line-height: 1.4;          /* §4d: breathing room once bubble wraps */
           border-radius: 6px;
           box-shadow: 0 2px 8px rgba(61, 149, 245, 0.28);
           display: inline-flex;
           align-items: center;
           gap: 6px;
-          white-space: nowrap;
+          /* §4d — tier-3 copy is ~90 chars and blew past nowrap. Allow wrap
+             and cap width so the bubble stays within the DOB field's column
+             (max-width falls back to 260px when the parent isn't measurable,
+             which is a comfortable mobile-first line length). Tier-1 and
+             tier-2 copy is short enough to still render single-line. */
+          white-space: normal;
+          max-width: min(260px, 100%);
+          box-sizing: border-box;
           z-index: 5;
           animation: paxDobBubbleIn 0.15s ease-out;
           pointer-events: none;
@@ -9932,11 +9940,44 @@
       // child/infant breakdown, so attributing all to adults is the safe
       // default — the Duffel search uses total passenger count regardless,
       // and the user can re-open the picker to redistribute if they want.
+      //
+      // §4d — Before falling back to lump-to-adults, try the home-form
+      // sessionStorage stash (written by stashHomeForm + mirrored on every
+      // search via syncHomeFormShadowFromSearch). If its (adults + children)
+      // total matches the URL's pax, restore the full breakdown including
+      // travelers.childDobs. This preserves 1A+1C (and infants) across F5
+      // on #results and keeps Phase 4c's chain intact: an offer clicked
+      // after F5 spawns a booking tab whose pickerBreakdown still carries
+      // childDobs, so tier-3 (Phase 4d) can lock the child DOB. Mismatch
+      // = stash is stale or from a different search context, fall through.
+      // URL pax excludes infants (see runSearch's URL replace: pax = passengerCount
+      // = adults + children), so the total check must exclude them too.
       tripType = ret ? 'round' : 'one';
-      travelers.adults = pax;
-      travelers.children = 0;
-      travelers.infantsSeat = 0;
-      travelers.infantsLap = 0;
+      let breakdownRestored = false;
+      try {
+        const raw = sessionStorage.getItem(TF_HOME_FORM_KEY);
+        if (raw) {
+          const stash = JSON.parse(raw);
+          const t = stash?.travelers;
+          if (t && typeof t === 'object') {
+            const stashedPrimary = (Number(t.adults) || 0) + (Number(t.children) || 0);
+            if (stashedPrimary === pax) {
+              travelers.adults      = Number(t.adults)      || 0;
+              travelers.children    = Number(t.children)    || 0;
+              travelers.infantsSeat = Number(t.infantsSeat) || 0;
+              travelers.infantsLap  = Number(t.infantsLap)  || 0;
+              if (Array.isArray(t.childDobs)) travelers.childDobs = t.childDobs.slice();
+              breakdownRestored = true;
+            }
+          }
+        }
+      } catch (_) { /* stash corrupt or storage disabled — fall through */ }
+      if (!breakdownRestored) {
+        travelers.adults = pax;
+        travelers.children = 0;
+        travelers.infantsSeat = 0;
+        travelers.infantsLap = 0;
+      }
       recomputeTravelers();
 
       // Show the results view immediately so the user isn't staring at home
