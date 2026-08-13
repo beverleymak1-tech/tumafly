@@ -1,5 +1,6 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { redactContext } from "../_shared/redact.ts";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SERVICE_ROLE_KEY = Deno.env.get("SERVICE_ROLE_KEY")!;
@@ -42,7 +43,8 @@ type AlertType =
   | "PROCESS_DUFFEL_NETWORK_ERROR"         // Duffel POST /air/orders threw (network/timeout/DNS)
   | "PROCESS_DUFFEL_UNHANDLED_ERROR"       // try/catch at handler top in process-duffel-booking
   | "DUFFEL_ORDER_ACCEPTED_ASYNC"          // Duffel 202 — rare, informational, reconciler will finish
-  | "CONFIRMATION_EMAIL_FAILED";           // send-confirmation returned non-2xx or threw; reconciler retries
+  | "CONFIRMATION_EMAIL_FAILED"            // send-confirmation returned non-2xx or threw; reconciler retries
+  | "UNKNOWN_ALERT_TYPE";                  // S-02 fallback — unregistered alert_type received, rendered synthetically to avoid silent-drop
 
 const ALERT_CONFIG: Record<AlertType, { severity: string; subject: string; action: string }> = {
   PAID_NO_OFFER: {
@@ -169,6 +171,12 @@ const ALERT_CONFIG: Record<AlertType, { severity: string; subject: string; actio
           subject: "send-confirmation returned non-2xx or threw",
           action: "Booking is safe — customer is 'booked' in DB and at Duffel. Only the confirmation email failed. retry-stuck-bookings (#9) sweeps 'booked' rows with NULL confirmation_email_sent_at and retries. If this fires more than once for the same row, investigate send-confirmation and RESEND_API_KEY. Customer will not have their e-ticket until email delivers — WhatsApp them their PNR + ticket numbers if 15+ minutes have passed since booking.",
         },
+        // ── S-02 fallback: unregistered alert types render here (never silently dropped) ──
+        UNKNOWN_ALERT_TYPE: {
+          severity: "🟡 UNKNOWN",
+          subject: "Unregistered alert type received",
+          action: "This alert_type is not registered in alert-founder's whitelist. Redacted payload attached. Add the type to the AlertType union + ALERT_CONFIG in supabase/functions/alert-founder/index.ts, then redeploy.",
+        },
       };
 
 function buildEmailHtml(
@@ -234,15 +242,34 @@ serve(async (req) => {
   try {
     const { alert_type, context } = await req.json();
 
-    if (!alert_type || !ALERT_CONFIG[alert_type as AlertType]) {
-      return new Response(JSON.stringify({ error: "Invalid alert_type" }), {
+    // Hard-guard: alert_type must be present. Empty is a caller bug, not an
+    // unknown-type (which S-02 now handles gracefully below).
+    if (!alert_type) {
+      return new Response(JSON.stringify({ error: "Missing alert_type" }), {
         status: 400,
         headers: { ...CORS_HEADERS, "Content-Type": "application/json" },
       });
     }
 
-    const cfg = ALERT_CONFIG[alert_type as AlertType];
-    const html = buildEmailHtml(alert_type as AlertType, context || {});
+    // S-02: PII-redact the incoming context BEFORE it renders to email or
+    // lands in the alerts table. redactContext walks nested objects.
+    const safeContext = redactContext(context || {}) as Record<string, unknown>;
+
+    // S-02: UNKNOWN_ALERT_TYPE fallback. Previous behaviour was HTTP 400 on
+    // unregistered types — silently dropped. Now: render synthetically so
+    // operators see the unknown type and can add it to the whitelist.
+    const isKnown = !!ALERT_CONFIG[alert_type as AlertType];
+    const effectiveType: AlertType = isKnown
+      ? (alert_type as AlertType)
+      : "UNKNOWN_ALERT_TYPE";
+
+    // Preserve which unknown type came in so operators can trace the caller.
+    const contextForEmail = isKnown
+      ? safeContext
+      : { received_alert_type: alert_type, ...safeContext };
+
+    const cfg = ALERT_CONFIG[effectiveType];
+    const html = buildEmailHtml(effectiveType, contextForEmail);
 
     // Send email via Resend
     const emailRes = await fetch("https://api.resend.com/emails", {
@@ -254,7 +281,7 @@ serve(async (req) => {
       body: JSON.stringify({
         from: "TumaFly Alerts <alerts@tumafly.com>",
         to: [FOUNDER_EMAIL],
-        subject: `${cfg.severity} ${cfg.subject}`,
+        subject: isKnown ? `${cfg.severity} ${cfg.subject}` : `${cfg.severity} ${cfg.subject} — ${alert_type}`,
         html,
       }),
     });
@@ -266,16 +293,20 @@ serve(async (req) => {
       console.error("Resend email failed:", JSON.stringify(emailData));
     }
 
-    // Also log the alert to a table for audit/dashboard later
+    // Also log the alert to a table for audit/dashboard later.
+    // S-02: use `contextForEmail` (already redacted + provenance-tagged) for
+    // the stored payload; use `effectiveType` so unknown types land as
+    // UNKNOWN_ALERT_TYPE rather than the raw string (which may not be in the
+    // DB enum, if the column is enum-typed).
     const supabase = createClient(SUPABASE_URL, SERVICE_ROLE_KEY);
     await supabase.from("alerts").insert({
-      alert_type,
+      alert_type: effectiveType,
       severity: cfg.severity.replace(/[^A-Z]/g, ""),
-      context,
+      context: contextForEmail,
       sent_to: FOUNDER_EMAIL,
       email_id: emailData.id || null,
       email_status: emailRes.ok ? "sent" : "failed",
-      ...(emailRes.ok ? {} : { context: { ...context, resend_error: emailData } }),
+      ...(emailRes.ok ? {} : { context: { ...contextForEmail, resend_error: emailData } }),
     });
 
     return new Response(JSON.stringify({
