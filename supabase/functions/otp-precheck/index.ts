@@ -9,6 +9,9 @@
 const SUPABASE_URL          = Deno.env.get("SUPABASE_URL")!;
 const SUPABASE_SERVICE_ROLE = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 
+// S-07b.1 diagnostic: log env-var presence at boot (length only, never values)
+console.log(`[otp-precheck] boot — SUPABASE_URL: ${SUPABASE_URL ? "set" : "MISSING"}, SUPABASE_SERVICE_ROLE_KEY length: ${SUPABASE_SERVICE_ROLE?.length ?? 0}`);
+
 // Throttle rule: 10 IP-scoped requests per rolling 15 minutes
 const IP_WINDOW_MINUTES = 15;
 const IP_LIMIT          = 10;
@@ -46,7 +49,7 @@ async function sha256Hex(input: string): Promise<string> {
 
 async function alertFounderTyped(alert_type: string, context: Record<string, unknown>) {
   try {
-    await fetch(`${SUPABASE_URL}/functions/v1/alert-founder`, {
+    const res = await fetch(`${SUPABASE_URL}/functions/v1/alert-founder`, {
       method:  "POST",
       headers: {
         "Content-Type":  "application/json",
@@ -54,8 +57,14 @@ async function alertFounderTyped(alert_type: string, context: Record<string, unk
       },
       body: JSON.stringify({ alert_type, context }),
     });
+    if (!res.ok) {
+      const body = await res.text();
+      console.error(`[otp-precheck] alertFounder non-2xx: status=${res.status} type=${alert_type} body=${body.substring(0, 300)}`);
+    } else {
+      console.log(`[otp-precheck] alertFounder OK: type=${alert_type} status=${res.status}`);
+    }
   } catch (e) {
-    console.error("[otp-precheck] alertFounder failed:", e instanceof Error ? e.message : e);
+    console.error(`[otp-precheck] alertFounder threw for type=${alert_type}:`, e instanceof Error ? e.message : e);
   }
 }
 
@@ -103,9 +112,10 @@ Deno.serve(async (req) => {
     const total = parseInt(contentRange.split("/")[1] ?? "0", 10);
 
     if (total >= IP_LIMIT) {
-      // Threshold hit — do NOT record another attempt (would extend the window)
-      const hashedIp = await sha256Hex(ip);
-      await alertFounderTyped("OTP_THROTTLE_HIT", {
+          // Threshold hit — do NOT record another attempt (would extend the window)
+          console.log(`[otp-precheck] throttle HIT: total=${total} limit=${IP_LIMIT} — firing alert`);
+          const hashedIp = await sha256Hex(ip);
+          await alertFounderTyped("OTP_THROTTLE_HIT", {
         scope:              "ip",
         scope_value_sha256: hashedIp,
         window_minutes:     IP_WINDOW_MINUTES,
