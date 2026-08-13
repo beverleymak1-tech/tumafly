@@ -1,0 +1,303 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Cookie Policy · TumaFly</title>
+    <meta name="description" content="How TumaFly uses cookies and similar technologies on tumafly.com.">
+    <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32.png">
+    <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        :root {
+          --brand: #3D95F5;
+          --brand-dark: #1a6fd4;
+          --brand-soft: #e8f3ff;
+          --ink: #0F1923;
+          --text: #1A202C;
+          --text-2: #4A5568;
+          --text-3: #8A96A3;
+          --bg: #FAFBFC;
+          --surface: #FFFFFF;
+          --border: #E5E9EF;
+          --font: 'DM Sans', system-ui, -apple-system, sans-serif;
+          --content: 760px;
+        }
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        html { scroll-behavior: smooth; }
+        body {
+          font-family: var(--font);
+          background: var(--bg);
+          color: var(--text);
+          font-size: 16px;
+          line-height: 1.65;
+          -webkit-font-smoothing: antialiased;
+        }
+
+        /* Top bar — mirrors the main site nav but simpler */
+        .legal-nav {
+          background: var(--surface);
+          border-bottom: 1px solid var(--border);
+          height: 60px;
+          display: flex;
+          align-items: center;
+          position: sticky;
+          top: 0;
+          z-index: 10;
+        }
+        .legal-nav-inner {
+          max-width: var(--content);
+          width: 100%;
+          margin: 0 auto;
+          padding: 0 24px;
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+        }
+        .legal-nav a.legal-brand {
+          display: flex; align-items: center; gap: 8px;
+          text-decoration: none; color: var(--ink); font-weight: 700; font-size: 18px;
+        }
+        .legal-nav a.legal-brand img { height: 28px; width: auto; display: block; }
+        .legal-nav a.legal-back {
+          color: var(--text-2); font-size: 14px; text-decoration: none; font-weight: 500;
+        }
+        .legal-nav a.legal-back:hover { color: var(--ink); }
+
+        /* Content column */
+        .legal-page {
+          max-width: var(--content);
+          margin: 0 auto;
+          padding: 48px 24px 96px;
+        }
+        .legal-page h1 {
+          font-size: 32px;
+          line-height: 1.2;
+          color: var(--ink);
+          font-weight: 700;
+          letter-spacing: -0.01em;
+          margin-bottom: 8px;
+        }
+        .legal-page .effective-date {
+          color: var(--text-3);
+          font-size: 14px;
+          font-weight: 500;
+          margin-bottom: 40px;
+          padding-bottom: 24px;
+          border-bottom: 1px solid var(--border);
+        }
+        .legal-page h2 {
+          font-size: 20px;
+          line-height: 1.3;
+          color: var(--ink);
+          font-weight: 700;
+          margin-top: 48px;
+          margin-bottom: 16px;
+          scroll-margin-top: 80px;
+        }
+        .legal-page h3 {
+          font-size: 16px;
+          line-height: 1.4;
+          color: var(--ink);
+          font-weight: 600;
+          margin-top: 32px;
+          margin-bottom: 12px;
+          scroll-margin-top: 80px;
+        }
+        .legal-page p {
+          color: var(--text);
+          margin-bottom: 16px;
+        }
+        .legal-page a {
+          color: var(--brand-dark);
+          text-decoration: underline;
+          text-underline-offset: 2px;
+        }
+        .legal-page a:hover { color: var(--ink); }
+        .legal-page strong { font-weight: 600; color: var(--ink); }
+        .legal-page ol, .legal-page ul {
+          padding-left: 24px;
+          margin: 16px 0 24px;
+        }
+        .legal-page ol[type="a"] > li,
+        .legal-page ol[type="i"] > li,
+        .legal-page ul > li {
+          margin-bottom: 12px;
+          padding-left: 4px;
+        }
+        .legal-page ol[type="a"] > li::marker,
+        .legal-page ol[type="i"] > li::marker {
+          font-weight: 600;
+          color: var(--text-2);
+        }
+
+        /* Table of contents block */
+        .legal-toc {
+          background: var(--surface);
+          border: 1px solid var(--border);
+          border-radius: 12px;
+          padding: 20px 24px;
+          margin: 32px 0 48px;
+        }
+        .legal-toc-title {
+          font-size: 12px;
+          font-weight: 700;
+          letter-spacing: 0.08em;
+          text-transform: uppercase;
+          color: var(--text-3);
+          margin-bottom: 12px;
+        }
+        .legal-toc ol {
+          list-style: none;
+          padding: 0;
+          margin: 0;
+          display: flex;
+          flex-direction: column;
+          gap: 6px;
+          counter-reset: toc;
+        }
+        .legal-toc li {
+          counter-increment: toc;
+        }
+        .legal-toc li::before {
+          content: counter(toc) ". ";
+          color: var(--text-3);
+          font-variant-numeric: tabular-nums;
+          margin-right: 6px;
+        }
+        .legal-toc a {
+          color: var(--text-2);
+          text-decoration: none;
+          font-size: 14px;
+          font-weight: 500;
+        }
+        .legal-toc a:hover { color: var(--brand-dark); text-decoration: underline; }
+
+        /* Footer */
+        .legal-page-footer {
+          max-width: var(--content);
+          margin: 0 auto;
+          padding: 32px 24px 48px;
+          border-top: 1px solid var(--border);
+          display: flex;
+          justify-content: space-between;
+          align-items: center;
+          font-size: 13px;
+          color: var(--text-3);
+        }
+        .legal-page-footer a {
+          color: var(--text-2);
+          text-decoration: none;
+          margin-left: 16px;
+        }
+        .legal-page-footer a:hover { color: var(--ink); }
+
+        /* Print */
+        @media print {
+          .legal-nav, .legal-page-footer { display: none; }
+          body { background: white; }
+          .legal-page { padding: 0; }
+        }
+
+
+        .legal-page ol[type="a"] { list-style-type: lower-alpha; }
+        .legal-page ol[type="A"] { list-style-type: upper-alpha; }
+        .legal-page ol[type="i"] { list-style-type: lower-roman; }
+        .legal-page ol[type="I"] { list-style-type: upper-roman; }
+        .legal-page ol[type="1"] { list-style-type: decimal; }
+
+        /* Mobile */
+        @media (max-width: 600px) {
+          .legal-page { padding: 32px 20px 64px; }
+          .legal-page h1 { font-size: 26px; }
+          .legal-page h2 { font-size: 18px; margin-top: 36px; }
+          .legal-page-footer { flex-direction: column; gap: 12px; align-items: flex-start; }
+          .legal-page-footer a { margin-left: 0; margin-right: 16px; }
+        }
+    </style>
+</head>
+<body>
+
+<nav class="legal-nav">
+    <div class="legal-nav-inner">
+        <a href="/" class="legal-brand">
+            <img src="/logo.svg" alt="TumaFly">
+        </a>
+        <a href="/" class="legal-back">← Back to TumaFly</a>
+    </div>
+</nav>
+
+<article class="legal-page">
+    <h1>Cookie Policy</h1>
+    <p class="effective-date">Effective Date: 13 August 2026</p>
+    <nav class="legal-toc">
+        <div class="legal-toc-title">Contents</div>
+        <ol>
+            <li><a href="#section-1-introduction">Introduction</a></li>
+            <li><a href="#section-2-what-are-cookies">What Are Cookies?</a></li>
+            <li><a href="#section-3-types-of-cookies-we-use">Types of Cookies We Use</a></li>
+            <li><a href="#section-4-third-party-cookies">Third-Party Cookies</a></li>
+            <li><a href="#section-5-how-we-use-cookies">How We Use Cookies</a></li>
+            <li><a href="#section-6-managing-your-cookie-preferences">Managing Your Cookie Preferences</a></li>
+            <li><a href="#section-7-changes-to-this-cookie-policy">Changes to This Cookie Policy</a></li>
+            <li><a href="#section-8-contact-us">Contact Us</a></li>
+        </ol>
+    </nav>
+    <h2 id="section-1-introduction">1. Introduction</h2>
+    <p>This Cookie Policy explains how Tumalink Digital Solutions Limited (trading as Tumafly) ("Tumafly", "we", "our", or "us") uses cookies and similar technologies when you visit or use our website, mobile application, and other digital platforms (collectively, the "Platform").</p>
+    <p>By continuing to use our Platform, you acknowledge that cookies may be used in accordance with this Cookie Policy and our Privacy Notice. Where required by applicable law, we will obtain your consent before placing non-essential cookies on your device.</p>
+    <h2 id="section-2-what-are-cookies">2. What Are Cookies?</h2>
+    <p>Cookies are small text files that are placed on your computer, smartphone, tablet, or other device when you visit a website. Cookies enable websites to recognise your device, remember your preferences, improve functionality, analyse website usage, and enhance your overall user experience.</p>
+    <p>We may also use similar technologies such as web beacons, pixels, tags, and local storage to collect and process information about your use of our Platform.</p>
+    <h2 id="section-3-types-of-cookies-we-use">3. Types of Cookies We Use</h2>
+    <p>We may use the following categories of cookies:</p>
+    <h3 id="sub-a-strictly-necessary-cookies">(a) Strictly Necessary Cookies</h3>
+    <p>These cookies are essential for the operation, security, and functionality of our Platform. They enable core features such as user authentication, session management, fraud prevention, and secure transactions. These cookies cannot be disabled through our cookie preference centre.</p>
+    <h3 id="sub-b-functional-cookies">(b) Functional Cookies</h3>
+    <p>These cookies remember your preferences, such as language, region, and other settings, to provide a more personalised experience.</p>
+    <h3 id="sub-c-analytics-and-performance-cookies">(c) Analytics and Performance Cookies</h3>
+    <p>These cookies help us understand how visitors interact with our Platform by collecting information such as page visits, navigation patterns, and error reports. The information is generally aggregated and used to improve the performance and functionality of our Platform.</p>
+    <h3 id="sub-d-advertising-and-marketing-cookies">(d) Advertising and Marketing Cookies</h3>
+    <p>Where applicable, these cookies are used to deliver relevant advertisements, measure the effectiveness of marketing campaigns, and limit the number of times you see an advertisement.</p>
+    <h2 id="section-4-third-party-cookies">4. Third-Party Cookies</h2>
+    <p>Some cookies may be placed by trusted third-party service providers that assist us in operating our Platform. These may include providers of analytics, website security, content delivery, customer support, payment processing, and marketing services.</p>
+    <p>Examples may include:</p>
+    <ul>
+        <li><p>Cloudflare (website security and performance)</p></li>
+        <li><p>Other service providers engaged by Tumafly from time to time.</p></li>
+    </ul>
+    <p>These third parties process information in accordance with their own privacy policies.</p>
+    <h2 id="section-5-how-we-use-cookies">5. How We Use Cookies</h2>
+    <p>We use cookies to:</p>
+    <ul>
+        <li><p>ensure the proper functioning and security of our Platform;</p></li>
+        <li><p>remember your preferences and settings;</p></li>
+        <li><p>improve the performance and usability of our Platform;</p></li>
+        <li><p>analyse website traffic and user behaviour;</p></li>
+        <li><p>detect and prevent fraud or unauthorised access;</p></li>
+        <li><p>measure the effectiveness of our communications and marketing activities; and</p></li>
+        <li><p>comply with our legal and regulatory obligations.</p></li>
+    </ul>
+    <h2 id="section-6-managing-your-cookie-preferences">6. Managing Your Cookie Preferences</h2>
+    <p>You may manage or disable cookies through your browser or device settings. Most browsers allow you to refuse, delete, or block cookies.</p>
+    <p>Please note that disabling certain cookies may affect the functionality, performance, or availability of parts of our Platform.</p>
+    <p>Where available, you may also manage your cookie preferences through our cookie banner or preference centre.</p>
+    <h2 id="section-7-changes-to-this-cookie-policy">7. Changes to This Cookie Policy</h2>
+    <p>We may update this Cookie Policy from time to time to reflect changes in our practices, technologies, legal requirements, or business operations. Any updates will be published on our Platform together with the revised effective date.</p>
+    <h2 id="section-8-contact-us">8. Contact Us</h2>
+    <p>If you have any questions about this Cookie Policy or our use of cookies, or if you wish to exercise your rights under applicable data protection laws, please contact us using the contact details provided in our Privacy Notice.</p>
+</article>
+
+<footer class="legal-page-footer">
+    <div>© 2026 Tumalink Digital Solutions Limited</div>
+    <div>
+        <a href="/legal/terms">Terms</a>
+        <a href="/legal/privacy">Privacy</a>
+        <a href="/legal/cookies">Cookies</a>
+    </div>
+</footer>
+
+</body>
+</html>

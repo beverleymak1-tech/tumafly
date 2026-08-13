@@ -1,0 +1,417 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Privacy Notice · TumaFly</title>
+    <meta name="description" content="How TumaFly collects, uses, and protects your personal data under the Kenya Data Protection Act, 2019.">
+    <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32.png">
+    <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        :root {
+          --brand: #3D95F5;
+          --brand-dark: #1a6fd4;
+          --brand-soft: #e8f3ff;
+          --ink: #0F1923;
+          --text: #1A202C;
+          --text-2: #4A5568;
+          --text-3: #8A96A3;
+          --bg: #FAFBFC;
+          --surface: #FFFFFF;
+          --border: #E5E9EF;
+          --font: 'DM Sans', system-ui, -apple-system, sans-serif;
+          --content: 760px;
+        }
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        html { scroll-behavior: smooth; }
+        body {
+          font-family: var(--font);
+          background: var(--bg);
+          color: var(--text);
+          font-size: 16px;
+          line-height: 1.65;
+          -webkit-font-smoothing: antialiased;
+        }
+
+        /* Top bar — mirrors the main site nav but simpler */
+        .legal-nav {
+          background: var(--surface);
+          border-bottom: 1px solid var(--border);
+          height: 60px;
+          display: flex;
+          align-items: center;
+          position: sticky;
+          top: 0;
+          z-index: 10;
+        }
+        .legal-nav-inner {
+          max-width: var(--content);
+          width: 100%;
+          margin: 0 auto;
+          padding: 0 24px;
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+        }
+        .legal-nav a.legal-brand {
+          display: flex; align-items: center; gap: 8px;
+          text-decoration: none; color: var(--ink); font-weight: 700; font-size: 18px;
+        }
+        .legal-nav a.legal-brand img { height: 28px; width: auto; display: block; }
+        .legal-nav a.legal-back {
+          color: var(--text-2); font-size: 14px; text-decoration: none; font-weight: 500;
+        }
+        .legal-nav a.legal-back:hover { color: var(--ink); }
+
+        /* Content column */
+        .legal-page {
+          max-width: var(--content);
+          margin: 0 auto;
+          padding: 48px 24px 96px;
+        }
+        .legal-page h1 {
+          font-size: 32px;
+          line-height: 1.2;
+          color: var(--ink);
+          font-weight: 700;
+          letter-spacing: -0.01em;
+          margin-bottom: 8px;
+        }
+        .legal-page .effective-date {
+          color: var(--text-3);
+          font-size: 14px;
+          font-weight: 500;
+          margin-bottom: 40px;
+          padding-bottom: 24px;
+          border-bottom: 1px solid var(--border);
+        }
+        .legal-page h2 {
+          font-size: 20px;
+          line-height: 1.3;
+          color: var(--ink);
+          font-weight: 700;
+          margin-top: 48px;
+          margin-bottom: 16px;
+          scroll-margin-top: 80px;
+        }
+        .legal-page h3 {
+          font-size: 16px;
+          line-height: 1.4;
+          color: var(--ink);
+          font-weight: 600;
+          margin-top: 32px;
+          margin-bottom: 12px;
+          scroll-margin-top: 80px;
+        }
+        .legal-page p {
+          color: var(--text);
+          margin-bottom: 16px;
+        }
+        .legal-page a {
+          color: var(--brand-dark);
+          text-decoration: underline;
+          text-underline-offset: 2px;
+        }
+        .legal-page a:hover { color: var(--ink); }
+        .legal-page strong { font-weight: 600; color: var(--ink); }
+        .legal-page ol, .legal-page ul {
+          padding-left: 24px;
+          margin: 16px 0 24px;
+        }
+        .legal-page ol[type="a"] > li,
+        .legal-page ol[type="i"] > li,
+        .legal-page ul > li {
+          margin-bottom: 12px;
+          padding-left: 4px;
+        }
+        .legal-page ol[type="a"] > li::marker,
+        .legal-page ol[type="i"] > li::marker {
+          font-weight: 600;
+          color: var(--text-2);
+        }
+
+        /* Table of contents block */
+        .legal-toc {
+          background: var(--surface);
+          border: 1px solid var(--border);
+          border-radius: 12px;
+          padding: 20px 24px;
+          margin: 32px 0 48px;
+        }
+        .legal-toc-title {
+          font-size: 12px;
+          font-weight: 700;
+          letter-spacing: 0.08em;
+          text-transform: uppercase;
+          color: var(--text-3);
+          margin-bottom: 12px;
+        }
+        .legal-toc ol {
+          list-style: none;
+          padding: 0;
+          margin: 0;
+          display: flex;
+          flex-direction: column;
+          gap: 6px;
+          counter-reset: toc;
+        }
+        .legal-toc li {
+          counter-increment: toc;
+        }
+        .legal-toc li::before {
+          content: counter(toc) ". ";
+          color: var(--text-3);
+          font-variant-numeric: tabular-nums;
+          margin-right: 6px;
+        }
+        .legal-toc a {
+          color: var(--text-2);
+          text-decoration: none;
+          font-size: 14px;
+          font-weight: 500;
+        }
+        .legal-toc a:hover { color: var(--brand-dark); text-decoration: underline; }
+
+        /* Footer */
+        .legal-page-footer {
+          max-width: var(--content);
+          margin: 0 auto;
+          padding: 32px 24px 48px;
+          border-top: 1px solid var(--border);
+          display: flex;
+          justify-content: space-between;
+          align-items: center;
+          font-size: 13px;
+          color: var(--text-3);
+        }
+        .legal-page-footer a {
+          color: var(--text-2);
+          text-decoration: none;
+          margin-left: 16px;
+        }
+        .legal-page-footer a:hover { color: var(--ink); }
+
+        /* Print */
+        @media print {
+          .legal-nav, .legal-page-footer { display: none; }
+          body { background: white; }
+          .legal-page { padding: 0; }
+        }
+
+
+        .legal-page ol[type="a"] { list-style-type: lower-alpha; }
+        .legal-page ol[type="A"] { list-style-type: upper-alpha; }
+        .legal-page ol[type="i"] { list-style-type: lower-roman; }
+        .legal-page ol[type="I"] { list-style-type: upper-roman; }
+        .legal-page ol[type="1"] { list-style-type: decimal; }
+
+        /* Mobile */
+        @media (max-width: 600px) {
+          .legal-page { padding: 32px 20px 64px; }
+          .legal-page h1 { font-size: 26px; }
+          .legal-page h2 { font-size: 18px; margin-top: 36px; }
+          .legal-page-footer { flex-direction: column; gap: 12px; align-items: flex-start; }
+          .legal-page-footer a { margin-left: 0; margin-right: 16px; }
+        }
+    </style>
+</head>
+<body>
+
+<nav class="legal-nav">
+    <div class="legal-nav-inner">
+        <a href="/" class="legal-brand">
+            <img src="/logo.svg" alt="TumaFly">
+        </a>
+        <a href="/" class="legal-back">← Back to TumaFly</a>
+    </div>
+</nav>
+
+<article class="legal-page">
+    <h1>Privacy Notice</h1>
+    <p class="effective-date">Effective Date: 13 August 2026</p>
+    <nav class="legal-toc">
+        <div class="legal-toc-title">Contents</div>
+        <ol>
+            <li><a href="#section-1-introduction">Introduction</a></li>
+            <li><a href="#section-2-data-controller">Data Controller</a></li>
+            <li><a href="#section-3-personal-data-we-collect">Personal Data We Collect</a></li>
+            <li><a href="#section-4-purposes-of-processing">Purposes of Processing</a></li>
+            <li><a href="#section-5-lawful-basis-for-processing">Lawful Basis for Processing</a></li>
+            <li><a href="#section-6-processing-of-sensitive-personal-data">Processing of Sensitive Personal Data</a></li>
+            <li><a href="#section-7-disclosure-of-personal-data">Disclosure of Personal Data</a></li>
+            <li><a href="#section-8-cross-border-transfers">Cross-Border Transfers</a></li>
+            <li><a href="#section-9-data-security">Data Security</a></li>
+            <li><a href="#section-10-data-retention">Data Retention</a></li>
+            <li><a href="#section-11-your-rights">Your Rights</a></li>
+            <li><a href="#section-12-data-breach-notification">Data Breach Notification</a></li>
+            <li><a href="#section-13-marketing-communications">Marketing Communications</a></li>
+            <li><a href="#section-14-cookies-and-similar-technologies">Cookies and Similar Technologies</a></li>
+            <li><a href="#section-15-cloudflare-turnstile">Cloudflare Turnstile</a></li>
+            <li><a href="#section-16-third-party-websites">Third-Party Websites</a></li>
+            <li><a href="#section-17-changes-to-this-privacy-notice">Changes to this Privacy Notice</a></li>
+            <li><a href="#section-18-contact-information">Contact Information</a></li>
+        </ol>
+    </nav>
+    <h2 id="section-1-introduction">1. Introduction</h2>
+    <p>Tumalink Digital Solutions Limited ("Tumafly", "we", "our" or "us") is committed to protecting your privacy and processing your personal data in accordance with the Data Protection Act, 2019, the Data Protection (General) Regulations, 2021, and other applicable laws of Kenya.</p>
+    <p>This Privacy Notice explains how we collect, use, disclose, store and protect your personal data when you access or use our website, mobile application or any other platform operated by Tumafly (collectively, the "<strong>Sites</strong>"), or when you make a Booking through our platform.</p>
+    <h2 id="section-2-data-controller">2. Data Controller</h2>
+    <p>Tumalink Digital Solutions Limited is the data controller in respect of the personal data collected through the Sites.</p>
+    <p>Tumalink is registered with the Office of the Data Protection Commissioner as a Data Controller and Data Processor.</p>
+    <p>For privacy-related enquiries, please contact:</p>
+    <h3 id="h3-data-protection-officer-or-privacy-officer">Data Protection Officer (or Privacy Officer)</h3>
+    <p>Email: <strong><a href="mailto:privacy@tumafly.com">privacy@tumafly.com</a></strong></p>
+    <p>General enquiries: hello@tumafly.com or WhatsApp Number +254 113 165503</p>
+    <h2 id="section-3-personal-data-we-collect">3. Personal Data We Collect</h2>
+    <p>We may collect and process the following categories of personal data:</p>
+    <ul>
+        <li><p>identification information (name, date of birth, gender and nationality);</p></li>
+        <li><p>passport, national identification or visa information where required;</p></li>
+        <li><p>contact information;</p></li>
+        <li><p>Booking and travel itinerary information;</p></li>
+        <li><p>payment confirmation details (excluding full payment card details);</p></li>
+        <li><p>authentication credentials</p></li>
+        <li><p>currency preference</p></li>
+        <li><p>customer service correspondence;</p></li>
+        <li><p>technical information including IP address, browser type, operating system and device identifiers;</p></li>
+        <li><p>cookies and website usage information; and</p></li>
+        <li><p>any other information voluntarily provided by you.</p></li>
+    </ul>
+    <p>Where you provide information relating to another traveller, you confirm that you are authorised to do so.</p>
+    <p>Where a booking includes a child or infant, we will process the child's personal data only to the extent necessary to provide our services and, where required by applicable law, on the basis of consent from a parent or legal guardian. We do not knowingly collect personal data directly from children. If we become aware that we have collected a child's personal data without the required consent or lawful basis, we will take appropriate steps to delete or otherwise lawfully process such information.</p>
+    <h2 id="section-4-purposes-of-processing">4. Purposes of Processing</h2>
+    <p>Tumafly processes personal data for the following purposes:</p>
+    <ul>
+        <li><p>facilitating Bookings and ticket issuance;</p></li>
+        <li><p>processing Payments and Refunds;</p></li>
+        <li><p>communicating travel information;</p></li>
+        <li><p>responding to customer enquiries;</p></li>
+        <li><p>verifying identity where necessary;</p></li>
+        <li><p>preventing fraud and enhancing security;</p></li>
+        <li><p>complying with legal and regulatory obligations;</p></li>
+        <li><p>maintaining business records;</p></li>
+        <li><p>improving the functionality of the Sites;</p></li>
+        <li><p>enforcing our Terms and Conditions; and</p></li>
+        <li><p>sending marketing communications where permitted by law or where consent has been obtained.</p></li>
+    </ul>
+    <h2 id="section-5-lawful-basis-for-processing">5. Lawful Basis for Processing</h2>
+    <p>We process personal data where:</p>
+    <ul>
+        <li><p>processing is necessary for the performance of a contract;</p></li>
+        <li><p>processing is necessary to comply with a legal obligation;</p></li>
+        <li><p>processing is necessary for our legitimate interests provided such interests do not override your rights and freedoms; or</p></li>
+        <li><p>you have provided your consent where consent is required under applicable law.</p></li>
+    </ul>
+    <h2 id="section-6-processing-of-sensitive-personal-data">6. Processing of Sensitive Personal Data</h2>
+    <p>We recognize that certain categories of personal data require a higher level of protection. Where we process sensitive personal data, we will do so only where permitted or required by applicable law and will implement appropriate technical, organizational and security measures to safeguard such data. We will process sensitive personal data only for specified, explicit and lawful purposes and in accordance with the additional requirements and safeguards prescribed under the Kenya Data Protection Act, 2019 and any applicable regulations.</p>
+    <h2 id="section-7-disclosure-of-personal-data">7. Disclosure of Personal Data</h2>
+    <p>Tumafly may disclose personal data to carefully selected third-party service providers that support the delivery of our services, including but not limited to:</p>
+    <ul>
+        <li><p>Airlines and global distribution systems;</p></li>
+        <li><p>inventory and booking technology providers, including <strong>Duffel</strong> (United Kingdom);</p></li>
+        <li><p>payment service providers, including Paystack Payments Kenya Limited (Kenya);</p></li>
+        <li><p>cloud hosting and database providers, including <strong>Supabase</strong> (United States);</p></li>
+        <li><p>security and anti-fraud providers, including <strong>Cloudflare</strong> (United States);</p></li>
+        <li><p>email and customer communication providers, including <strong>Resend</strong> (United States);</p></li>
+        <li><p>analytics and technology providers, including <strong>Google</strong> (United States); and</p></li>
+        <li><p>messaging and communications providers, including <strong>Africa's Talking</strong> (Kenya)</p></li>
+        <li><p>regulatory authorities;</p></li>
+        <li><p>immigration, customs and security agencies;</p></li>
+        <li><p>law enforcement agencies; and</p></li>
+        <li><p>professional advisers</p></li>
+    </ul>
+    <p>These service providers process personal data only on Tumafly's documented instructions, are required to implement appropriate technical and organizational security measures, and are contractually bound to maintain the confidentiality and security of personal data.</p>
+    <h2 id="section-8-cross-border-transfers">8. Cross-Border Transfers</h2>
+    <p>As an online travel booking platform, Tumafly may transfer or permit access to personal data outside Kenya where this is necessary to facilitate Bookings, process Payments, communicate with Clients, protect the security of the Sites, or otherwise provide our services.</p>
+    <p>Our third-party service providers are currently located in, among other jurisdictions:</p>
+    <ul>
+        <li><p>the <strong>United Kingdom</strong> (Duffel);</p></li>
+        <li><p>the United States of America (Supabase, Cloudflare, Resend and Google); and</p></li>
+        <li><p><strong>Kenya (Paystack Payments Kenya Limited and Africa’s Talking).</strong></p></li>
+    </ul>
+    <p>Where personal data is transferred outside Kenya, Tumafly shall ensure that such transfer is carried out in accordance with the <strong>Data Protection Act, 2019</strong> and the <strong>Data Protection (General) Regulations, 2021</strong>. Where required, Tumafly shall implement appropriate safeguards, including contractual data protection obligations with recipients, transfers to jurisdictions recognised as providing an adequate level of protection where applicable, or any other lawful transfer mechanism permitted under Kenyan law.</p>
+    <h2 id="section-9-data-security">9. Data Security</h2>
+    <p>Tumafly implements appropriate technical and organisational security measures designed to safeguard personal data against accidental or unlawful destruction, loss, alteration, unauthorised disclosure or access.</p>
+    <p>These measures include encryption of personal data in transit and, where appropriate, at rest, access controls based on the need-to-know principle, and regular reviews of our security practices.</p>
+    <p>We do not store your full payment card details. All payment card transactions are processed securely by our PCI DSS Level 1 compliant payment service provider.</p>
+    <h2 id="section-10-data-retention">10. Data Retention</h2>
+    <p>Personal data shall be retained only for as long as is reasonably necessary for:</p>
+    <ul>
+        <li><p>providing our services;</p></li>
+        <li><p>complying with legal obligations;</p></li>
+        <li><p>resolving disputes;</p></li>
+        <li><p>establishing or defending legal claims; or</p></li>
+        <li><p>meeting statutory record-keeping requirements.</p></li>
+    </ul>
+    <p>Thereafter, the data shall be securely deleted, anonymised or archived in accordance with applicable law.</p>
+    <h2 id="section-11-your-rights">11. Your Rights</h2>
+    <p>Subject to the Data Protection Act, 2019, you have the right to:</p>
+    <ul>
+        <li><p>be informed of the use of your personal data;</p></li>
+        <li><p>access your personal data;</p></li>
+        <li><p>object to the processing of your personal data;</p></li>
+        <li><p>request correction of inaccurate or incomplete personal data;</p></li>
+        <li><p>request deletion of personal data where lawful;</p></li>
+        <li><p>withdraw consent where processing is based on consent; and</p></li>
+        <li><p>lodge a complaint with the Office of the Data Protection Commissioner.</p></li>
+    </ul>
+    <p>We will respond to your valid data subject rights requests within thirty (30) days of receipt. Where permitted by applicable law, we may extend this period up to a further sixty (60) days for complex requests and will notify you of the extension and the reasons for it.</p>
+    <p>Requests relating to your personal data may be submitted to <a href="mailto:privacy@tumafly.com"><strong>privacy@tumafly.com</strong></a></p>
+    <h2 id="section-12-data-breach-notification">12. Data Breach Notification</h2>
+    <p>We are committed to protecting your personal data and maintaining appropriate technical and organizational measures to safeguard it against accidental or unlawful destruction, loss, alteration, unauthorized disclosure of, or access to, personal data.</p>
+    <p>Where we become aware of a personal data breach involving your personal data, we will assess the nature and impact of the breach and take appropriate steps to contain, investigate and remediate it.</p>
+    <p>Where required under the Kenya Data Protection Act, 2019 and the Data Protection (General) Regulations, 2021, we will notify the Office of the Data Protection Commissioner (ODPC) of the personal data breach without undue delay and, where feasible, within seventy-two (72) hours of becoming aware of the breach.</p>
+    <p>Where the personal data breach is likely to result in a high risk to your rights and freedoms, we will notify you without undue delay. Such notification will include, where appropriate:</p>
+    <ul>
+        <li><p>a description of the nature of the personal data breach;</p></li>
+        <li><p>the categories of personal data affected;</p></li>
+        <li><p>the likely consequences of the breach;</p></li>
+        <li><p>the measures we have taken or propose to take to address and mitigate the effects of the breach; and</p></li>
+        <li><p>recommendations on any steps you can take to protect yourself from potential harm.</p></li>
+    </ul>
+    <p>Notwithstanding the foregoing, we may not notify affected data subjects of a personal data breach where notification is not required by applicable law, including where appropriate security measures, such as encryption, have rendered the personal data unintelligible to unauthorized persons or where the breach is no longer likely to result in a high risk to the rights and freedoms of affected data subjects.</p>
+    <h2 id="section-13-marketing-communications">13. Marketing Communications</h2>
+    <p>Where permitted by law, Tumafly may send promotional communications regarding its products and services.</p>
+    <p>You may opt out of receiving marketing communications at any time by:</p>
+    <ul>
+        <li><p>clicking the unsubscribe link in any marketing email;</p></li>
+        <li><p>contacting hello@tumafly.com or WhatsApp Number +254 113 165503; and</p></li>
+    </ul>
+    <p>Opting out shall not affect operational or transactional communications relating to your Bookings.</p>
+    <h2 id="section-14-cookies-and-similar-technologies">14. Cookies and Similar Technologies</h2>
+    <p>We use cookies and similar technologies to operate, secure and improve our website and services, to remember your preferences, analyze website traffic and usage, and enhance your browsing experience. Some cookies are essential for the operation of our website, while others help us understand how our website is used or deliver personalized content and advertisements where applicable.</p>
+    <p>You can manage or disable cookies through your browser settings at any time. Please note that disabling certain cookies may affect the functionality and performance of our website and limit your ability to access certain features or services.</p>
+    <p>Where required by applicable law, we will obtain your consent before placing non-essential cookies on your device. For more information about the cookies we use, the purposes for which they are used, and how you can manage your cookie preferences, please refer to our Cookie Policy.</p>
+    <h2 id="section-15-cloudflare-turnstile">15. Cloudflare Turnstile</h2>
+    <p>To protect the Sites and our users from spam, automated abuse, fraudulent activity, and other malicious traffic, Tumafly uses <strong>Cloudflare Turnstile</strong> in invisible mode on certain features of the Sites, including the flight search and Booking processes. Turnstile analyses technical and behavioural information to distinguish human users from automated systems without requiring users to complete traditional CAPTCHA challenges.</p>
+    <p>In connection with the provision of this service, certain technical information (such as IP address, browser characteristics, device information, and interaction data) may be processed by <strong>Cloudflare, Inc.</strong> for security, fraud prevention, and service integrity purposes. Such processing is undertaken in accordance with Cloudflare's privacy practices.</p>
+    <p>For further information on how Cloudflare processes personal data through Turnstile, please refer to the <strong>Cloudflare Turnstile Privacy Policy</strong> available at: <a href="https://www.cloudflare.com/en-gb/turnstile-privacy-policy/"><strong>https://www.cloudflare.com/en-gb/turnstile-privacy-policy/</strong></a>.</p>
+    <p>By using the Sites, you acknowledge that such processing is necessary to protect the security, integrity, and availability of Tumafly's services and is undertaken in accordance with this Privacy Notice and applicable data protection laws.</p>
+    <h2 id="section-16-third-party-websites">16. Third-Party Websites</h2>
+    <p>The Sites may contain links to third-party websites.</p>
+    <p>Tumafly is not responsible for the privacy practices or content of such websites.</p>
+    <h2 id="section-17-changes-to-this-privacy-notice">17. Changes to this Privacy Notice</h2>
+    <p>Tumafly may amend this Privacy Notice from time to time.</p>
+    <p>Any updated version shall be published on the Sites together with the revised effective date.</p>
+    <h2 id="section-18-contact-information">18. Contact Information</h2>
+    <p>Questions regarding this Privacy Notice or the processing of personal data may be directed to:</p>
+    <h3 id="h3-tumalink-digital-solutions-limited">Tumalink Digital Solutions Limited</h3>
+    <p>Email: <a href="mailto:privacy@tumafly.com"><strong>privacy@tumafly.com</strong></a></p>
+    <p>General enquiries: hello@tumafly.com or WhatsApp Number +254 113 165503</p>
+    <p>If you are dissatisfied with our response, you may lodge a complaint with the Office of the Data Protection Commissioner in accordance with the Data Protection Act, 2019.</p>
+</article>
+
+<footer class="legal-page-footer">
+    <div>© 2026 Tumalink Digital Solutions Limited</div>
+    <div>
+        <a href="/legal/terms">Terms</a>
+        <a href="/legal/privacy">Privacy</a>
+        <a href="/legal/cookies">Cookies</a>
+    </div>
+</footer>
+
+</body>
+</html>

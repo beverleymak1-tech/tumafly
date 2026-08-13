@@ -1,0 +1,427 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Terms and Conditions · TumaFly</title>
+    <meta name="description" content="Terms of use for the TumaFly platform, operated by Tumalink Digital Solutions Limited.">
+    <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32.png">
+    <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        :root {
+          --brand: #3D95F5;
+          --brand-dark: #1a6fd4;
+          --brand-soft: #e8f3ff;
+          --ink: #0F1923;
+          --text: #1A202C;
+          --text-2: #4A5568;
+          --text-3: #8A96A3;
+          --bg: #FAFBFC;
+          --surface: #FFFFFF;
+          --border: #E5E9EF;
+          --font: 'DM Sans', system-ui, -apple-system, sans-serif;
+          --content: 760px;
+        }
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        html { scroll-behavior: smooth; }
+        body {
+          font-family: var(--font);
+          background: var(--bg);
+          color: var(--text);
+          font-size: 16px;
+          line-height: 1.65;
+          -webkit-font-smoothing: antialiased;
+        }
+
+        /* Top bar — mirrors the main site nav but simpler */
+        .legal-nav {
+          background: var(--surface);
+          border-bottom: 1px solid var(--border);
+          height: 60px;
+          display: flex;
+          align-items: center;
+          position: sticky;
+          top: 0;
+          z-index: 10;
+        }
+        .legal-nav-inner {
+          max-width: var(--content);
+          width: 100%;
+          margin: 0 auto;
+          padding: 0 24px;
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+        }
+        .legal-nav a.legal-brand {
+          display: flex; align-items: center; gap: 8px;
+          text-decoration: none; color: var(--ink); font-weight: 700; font-size: 18px;
+        }
+        .legal-nav a.legal-brand img { height: 28px; width: auto; display: block; }
+        .legal-nav a.legal-back {
+          color: var(--text-2); font-size: 14px; text-decoration: none; font-weight: 500;
+        }
+        .legal-nav a.legal-back:hover { color: var(--ink); }
+
+        /* Content column */
+        .legal-page {
+          max-width: var(--content);
+          margin: 0 auto;
+          padding: 48px 24px 96px;
+        }
+        .legal-page h1 {
+          font-size: 32px;
+          line-height: 1.2;
+          color: var(--ink);
+          font-weight: 700;
+          letter-spacing: -0.01em;
+          margin-bottom: 8px;
+        }
+        .legal-page .effective-date {
+          color: var(--text-3);
+          font-size: 14px;
+          font-weight: 500;
+          margin-bottom: 40px;
+          padding-bottom: 24px;
+          border-bottom: 1px solid var(--border);
+        }
+        .legal-page h2 {
+          font-size: 20px;
+          line-height: 1.3;
+          color: var(--ink);
+          font-weight: 700;
+          margin-top: 48px;
+          margin-bottom: 16px;
+          scroll-margin-top: 80px;
+        }
+        .legal-page h3 {
+          font-size: 16px;
+          line-height: 1.4;
+          color: var(--ink);
+          font-weight: 600;
+          margin-top: 32px;
+          margin-bottom: 12px;
+          scroll-margin-top: 80px;
+        }
+        .legal-page p {
+          color: var(--text);
+          margin-bottom: 16px;
+        }
+        .legal-page a {
+          color: var(--brand-dark);
+          text-decoration: underline;
+          text-underline-offset: 2px;
+        }
+        .legal-page a:hover { color: var(--ink); }
+        .legal-page strong { font-weight: 600; color: var(--ink); }
+        .legal-page ol, .legal-page ul {
+          padding-left: 24px;
+          margin: 16px 0 24px;
+        }
+        .legal-page ol[type="a"] > li,
+        .legal-page ol[type="i"] > li,
+        .legal-page ul > li {
+          margin-bottom: 12px;
+          padding-left: 4px;
+        }
+        .legal-page ol[type="a"] > li::marker,
+        .legal-page ol[type="i"] > li::marker {
+          font-weight: 600;
+          color: var(--text-2);
+        }
+
+        /* Table of contents block */
+        .legal-toc {
+          background: var(--surface);
+          border: 1px solid var(--border);
+          border-radius: 12px;
+          padding: 20px 24px;
+          margin: 32px 0 48px;
+        }
+        .legal-toc-title {
+          font-size: 12px;
+          font-weight: 700;
+          letter-spacing: 0.08em;
+          text-transform: uppercase;
+          color: var(--text-3);
+          margin-bottom: 12px;
+        }
+        .legal-toc ol {
+          list-style: none;
+          padding: 0;
+          margin: 0;
+          display: flex;
+          flex-direction: column;
+          gap: 6px;
+          counter-reset: toc;
+        }
+        .legal-toc li {
+          counter-increment: toc;
+        }
+        .legal-toc li::before {
+          content: counter(toc) ". ";
+          color: var(--text-3);
+          font-variant-numeric: tabular-nums;
+          margin-right: 6px;
+        }
+        .legal-toc a {
+          color: var(--text-2);
+          text-decoration: none;
+          font-size: 14px;
+          font-weight: 500;
+        }
+        .legal-toc a:hover { color: var(--brand-dark); text-decoration: underline; }
+
+        /* Footer */
+        .legal-page-footer {
+          max-width: var(--content);
+          margin: 0 auto;
+          padding: 32px 24px 48px;
+          border-top: 1px solid var(--border);
+          display: flex;
+          justify-content: space-between;
+          align-items: center;
+          font-size: 13px;
+          color: var(--text-3);
+        }
+        .legal-page-footer a {
+          color: var(--text-2);
+          text-decoration: none;
+          margin-left: 16px;
+        }
+        .legal-page-footer a:hover { color: var(--ink); }
+
+        /* Print */
+        @media print {
+          .legal-nav, .legal-page-footer { display: none; }
+          body { background: white; }
+          .legal-page { padding: 0; }
+        }
+
+
+        .legal-page ol[type="a"] { list-style-type: lower-alpha; }
+        .legal-page ol[type="A"] { list-style-type: upper-alpha; }
+        .legal-page ol[type="i"] { list-style-type: lower-roman; }
+        .legal-page ol[type="I"] { list-style-type: upper-roman; }
+        .legal-page ol[type="1"] { list-style-type: decimal; }
+
+        /* Mobile */
+        @media (max-width: 600px) {
+          .legal-page { padding: 32px 20px 64px; }
+          .legal-page h1 { font-size: 26px; }
+          .legal-page h2 { font-size: 18px; margin-top: 36px; }
+          .legal-page-footer { flex-direction: column; gap: 12px; align-items: flex-start; }
+          .legal-page-footer a { margin-left: 0; margin-right: 16px; }
+        }
+    </style>
+</head>
+<body>
+
+<nav class="legal-nav">
+    <div class="legal-nav-inner">
+        <a href="/" class="legal-brand">
+            <img src="/logo.svg" alt="TumaFly">
+        </a>
+        <a href="/" class="legal-back">← Back to TumaFly</a>
+    </div>
+</nav>
+
+<article class="legal-page">
+    <h1>Terms and Conditions</h1>
+    <p class="effective-date">Effective Date: 13 August 2026</p>
+    <nav class="legal-toc">
+        <div class="legal-toc-title">Contents</div>
+        <ol>
+            <li><a href="#section-definitions-and-interpretations">Definitions And Interpretations</a></li>
+            <li><a href="#section-the-terms-and-conditions">The Terms And Conditions</a></li>
+            <li><a href="#section-services-rendered">Services Rendered</a></li>
+            <li><a href="#section-third-party-service-providers">Third Party Service Providers</a></li>
+            <li><a href="#section-booking-process">Booking Process</a></li>
+            <li><a href="#section-payment-and-payment-terms">Payment And Payment Terms</a></li>
+            <li><a href="#section-cancellation-and-refund-policy">Cancellation And Refund Policy</a></li>
+            <li><a href="#section-airline-responsibilities">Airline Responsibilities</a></li>
+            <li><a href="#section-client-responsibilities">Client Responsibilities</a></li>
+            <li><a href="#section-liability">Liability</a></li>
+            <li><a href="#section-force-majeure">Force Majeure</a></li>
+            <li><a href="#section-marketing-communications-and-notifications">Marketing Communications And Notifications</a></li>
+            <li><a href="#section-privacy-and-data-protection">Privacy And Data Protection</a></li>
+            <li><a href="#section-confidentiality">Confidentiality</a></li>
+            <li><a href="#section-intellectual-property">Intellectual Property</a></li>
+            <li><a href="#section-severability">Severability</a></li>
+            <li><a href="#section-entire-contract">Entire Contract</a></li>
+            <li><a href="#section-governing-law">Governing Law</a></li>
+            <li><a href="#section-dispute-resolution">Dispute Resolution</a></li>
+        </ol>
+    </nav>
+    <h2 id="section-definitions-and-interpretations">Definitions And Interpretations</h2>
+    <p>In these Terms and Conditions, unless the context otherwise requires:</p>
+    <p>“Airline” means the carrier responsible for providing flight service.</p>
+    <p>“Airline Policy” means the specific rules, regulations, terms, and conditions set by each individual airline governing their flight operations, ticketing, cancellations, refunds, baggage allowances, check-in procedures, and any other aspects of their services.</p>
+    <p>“Booking” means a valid reservation for flight(s) purchased through Tumafly’s platform.</p>
+    <p>“Client” or “Passenger” means any person who books flights through Tumafly.</p>
+    <p>“Flight” means any domestic or international air transport service booked through Tumafly’s platform</p>
+    <p>“Payment service provider” means Paystack Payments Kenya Limited (for card payments), Safaricom PLC via Daraja API (for M-Pesa payments) or such other payments service provider engaged by Tumafly from time to time.</p>
+    <p>“Service” means the flight booking and related services provided by Tumafly</p>
+    <p>“Tumafly” means the ticketing platform operated by Tumalink Digital Solutions Limited, a limited liability company registered in Kenya.</p>
+    <h2 id="section-the-terms-and-conditions">The Terms And Conditions</h2>
+    <ol type="a">
+        <li><p>All services rendered by or on behalf of Tumafly to the Client/s are subject to the terms and conditions (‘the Conditions’) set out below. These Terms and Conditions shall be binding on you, your personal representatives and assigns.</p></li>
+        <li><p>The following Terms and Conditions should be read and understood prior to confirming your travel. Do not confirm any booking unless you understand and agree with the following terms and conditions.</p></li>
+        <li><p>By clicking on the “I have read and understood the terms and conditions” option during the purchasing process, you are deemed to have read, understood, and accepted these Terms and Conditions and agree to adhere to them.</p></li>
+        <li><p>Further by proceeding to book You agree and accept the Terms and Conditions of the Tumafly Website and its travel Partners. You further acknowledge that Tumafly operates as a reseller of flights and all content that appears on our website is sourced from a GDS (Global Distribution Service) or from the Airline Directly via an Application Programming Interface (API).</p></li>
+        <li><p>Whilst every effort is made to ensure that systems are updated to take into account any travel restrictions that may exist at the time of booking, it may be possible that there is a delay in the GDS or Airline system updating to accommodate all travel restrictions that may be imposed.</p></li>
+        <li><p>By booking the selected flight with us, you confirm that you have checked that there are no travel restrictions, in both your country of departure, transit and arrival, that may affect your booking and that you have satisfied yourself on behalf of all travelers in the booking that you can proceed with the booking. Please also check the entry requirements of your destination country as a quarantine period or testing might be a requirement when flying in from Kenya.</p></li>
+        <li><p>Tumafly cannot be held liable for any operational changes, cancellations or consequential damages incurred by you, or any passenger in the booking, in the event that flights are not able to operate as planned, including any disruptions, cancellations or changes to planned schedules</p></li>
+        <li><p>In the event that a flight is disrupted or cancelled due to travel restrictions being imposed that each airline will have their own policy in this regard, which will apply to your booking</p></li>
+    </ol>
+    <h2 id="section-services-rendered">Services Rendered</h2>
+    <p>Tumafly renders the service of hosting an online search and booking portal, with its primary focus on the travel and accommodation industries (‘the Services’) pursuant to which the general public shall:</p>
+    <ol type="a">
+        <li><blockquote>
+            <p>have access to the portal;</p>
+        </blockquote></li>
+        <li><blockquote>
+            <p>be entitled to set certain travel, accommodation and/or other service criteria based on information gleaned from the internet;</p>
+        </blockquote></li>
+        <li><blockquote>
+            <p>request quotations; and</p>
+        </blockquote></li>
+        <li><blockquote>
+            <p>be entitled to confirm bookings and place reservations relating to travel, accommodation and/or other service requirements.</p>
+        </blockquote></li>
+    </ol>
+    <p>For the avoidance of doubt, the services do not include any advisory or consultancy services.</p>
+    <h2 id="section-third-party-service-providers">Third Party Service Providers</h2>
+    <ol type="a">
+        <li><p>Tumafly provides Clients with the services either itself or acting on behalf of Principals engaged in or associated with the travel and/or accommodation industries, such as airlines, hotels and/or other service providers or suppliers (collectively referred to as ‘the Principal’). Tumafly represents the Principal as agents only.</p></li>
+        <li><p>Tumafly accordingly accepts no liability for any loss, damage (including loss of profits or consequential or special damages), injury, illness, harm or death (except if such loss or damage arises from the gross negligence or wilful misconduct of Tumafly or any person acting for or controlled by Tumafly), which any Client may suffer as a result of any act or omission on the part of or the failure of the Principal to fulfil their obligations, whether in relation to travel arrangements, accommodation or otherwise.</p></li>
+        <li><p> When you make a booking with us, you acknowledge and agree that we act only as an agent for the third party service provider, which is solely responsible to provide you with the travel or service which you have booked. The contract in use by the Principal (which is often constituted by the ticket issued by the Principal), shall constitute the sole contract between the Principal and the Client and any right of recourse the Client may have, will be solely against the Principal. Tumafly shall, as soon as possible after the confirmation of the Client’s booking, provide to the Client the identity of the Principal.</p></li>
+        <li><p>Please be aware that Third Party Service Providers (Airlines) may charge extra for certain items such as: seating, special meal requests or printing boarding passes. This is subject to change without notice to you. By agreeing to these terms and conditions upon making your booking you agree to accept this condition.</p></li>
+        <li><p>It is the Client’s responsibility to familiarise themselves with such terms and conditions (‘the Principal’s Conditions’). The specific airline's or third parties' terms and conditions may apply</p></li>
+    </ol>
+    <h2 id="section-booking-process">Booking Process</h2>
+    <ol type="a">
+        <li><p>Once the Client has completed all applicable fields to initiate an enquiry regarding a particular destination, trip, tour, mode of travel, or other service on Tumafly website <a href="http://www.tumafly.com">www.tumafly.com</a> or Mobile Application (together, ‘the Sites’), or initiated such an enquiry with Tumafly by any other means of communication including by means of access to the Sites via booking kiosks, if applicable, (collectively referred to as ‘the Enquiry’), the Sites will prepare and provide the Client with the projected total cost of the Enquiry (online, by e-mail, by SMS or telephonically) (‘the Quote’). </p></li>
+        <li><p>Quotes are provided at the ruling daily exchange rate. Until Tumafly has received Payment, we <strong>RESERVE THE RIGHT</strong> to amend any Quote.</p></li>
+        <li><p><strong>THE QUOTE IS ACCEPTED</strong> by the Client when the Client proceeds with the steps as specified on the Sites or accepts the Quote telephonically or via email. Full payment of the total value of the Quote (‘the Payment’) is required in order to confirm reservations with the relevant Principals (‘the Booking’).</p></li>
+        <li><p>Once the online Booking or Booking affected by Tumafly has been completed and the Client has authorized Tumafly to process the payment by submitting the Booking for reservation, the Client will be supplied with an email that will contain the final details of the Booking (‘the Booking Confirmation Form’). </p></li>
+        <li><p>By placing a Booking through Tumafly, the Client represents and warrants that they are at least eighteen (18) years of age or, if under the age of eighteen (18) years, have obtained the requisite consent and authority of a parent or legal guardian to make the Booking. Tumafly does not verify the age or authority of the person making a Booking and shall not be liable for any Booking made without the requisite legal capacity or authorisation.</p></li>
+        <li><p>By providing payment details at Booking, the Client represents and warrants that they are authorised to use the payment method provided and that sufficient funds or credit are available to complete the transaction.</p></li>
+        <li><p>For all air tickets <strong>FULL PAYMENT FOR THE BOOKING NEEDS TO BE MADE</strong>  in order to guarantee the fare quoted according to the Booking Confirmation Form.</p></li>
+        <li><p>Note that all tickets carry different fare conditions as imposed by the relevant airline. The ticket you are purchasing may only be partially or non-refundable. To verify this before booking online please contact our offices.</p></li>
+        <li><p>Fare offers displayed on the Sites are subject to availability and the validity periods prescribed by the applicable Airline or Tumafly's inventory provider. Where a fare expires before Payment is successfully completed, the relevant Booking shall not be confirmed, and the Client shall be required to initiate a new search. Any fare subsequently available may differ from the fare originally displayed.</p></li>
+        <li><p>Fares for children (aged two (2) to eleven (11) years at the date of travel) and infants (under two (2) years at the date of travel) shall be determined in accordance with the applicable Airline's fare rules. Infants may, subject to the Airline's policies, travel on an accompanying adult's lap without a separate seat, provided that no more than one (1) infant accompanies each adult traveler.</p></li>
+        <li><p>Where a Traveller’s age category (Child, Adult or Infant) may change during a trip and Tumafly displays a warning before Booking, the Client accepts responsibility for selecting the correct age category and any consequences arising from the Airline’s determination, including denied boarding, fare differences, airport upgrades or additional fees. Tumafly’s obligation is limited to displaying the warning, and the Client bears sole responsibility for the selected age category and its consequences.</p></li>
+        <li><p>Upon successful ticket issuance, Tumafly shall send an eTicket confirmation to the email address provided by the Client at the time of Booking. The confirmation shall include the Airline reservation code (PNR), passenger details, and fare summary. The Client is responsible for retaining the eTicket confirmation for check-in and travel purposes. If the Client does not receive the confirmation within twenty-four (24) hours of Booking, the Client shall first check their spam or junk folder and, if still not received, promptly contact Tumafly at <a href="mailto:hello@tumafly.com">hello@tumafly.com</a> or WhatsApp Number <strong>+254 113 165503</strong></p></li>
+    </ol>
+    <h2 id="section-payment-and-payment-terms">Payment And Payment Terms</h2>
+    <ol type="a">
+        <li><p>All Payments are captured immediately at the point of Booking through Tumafly’s Payment service provider. Payment shall be collected in full at the time a Booking is initiated through Tumafly's designated Payment service provider. A Booking shall not be deemed confirmed, nor shall any reservation be created or held, unless and until the applicable Payment has been successfully authorised and processed. Where a Payment is declined, fails, or is otherwise not successfully completed for any reason, no Booking shall be created or confirmed, and Tumafly shall have no obligation to reserve or hold the requested travel arrangement. In such event, the Client may submit a new Booking by initiating a fresh transaction and completing the applicable Payment process.</p></li>
+        <li><p>Prices displayed on the Sites may be shown in Kenyan Shillings (KES) or United States Dollars (USD) at the Client's election. Notwithstanding the selected display currency, <strong>ALL PAYMENTS</strong> shall be processed and charged in <strong>Kenyan Shillings (KES)</strong> through Tumafly's payment service provider. Any price displayed in USD is provided for convenience only and is calculated using the exchange rate applicable at the time of the search. The KES amount displayed at the time of Payment shall constitute the final amount payable by the Client.</p></li>
+        <li><p>Airline fares are generally quoted to Tumafly in a foreign currency and converted into Kenyan Shillings (KES) for display, the fare displayed during the booking process is indicative only and is based on the exchange rate prevailing at the time of the Client's search. The final amount payable in Kenyan Shillings (KES), as confirmed at the time of Payment, may vary marginally due to exchange rate fluctuations occurring between the time of the search and the completion of Payment.</p></li>
+        <li><p>Further any payments done through the applicable Payment service provider may attract additional charges as driven by the global treasury of the applicable credit card and are impacted by the change in daily exchange rates. Tumafly shall therefore <strong>NOT BE HELD LIABLE</strong> for any additional charges levied by the applicable merchant, or bank pursuant to the confirmation of a Booking.</p></li>
+    </ol>
+    <h2 id="section-cancellation-and-refund-policy">Cancellation And Refund Policy</h2>
+    <ol type="a">
+        <li><p>Each booking is subject to the Airline’s cancellation and refund policies. Cancellation requests must be submitted in writing to <a href="mailto:hello@tumafly.com">hello@tumafly.com</a> <strong> </strong>or WhatsApp Number <strong>+254 113 165503</strong> within the timeframes specified by the Airline policy.</p></li>
+        <li><p>The Airline may reserve the <strong>RIGHT TO CANCEL</strong> any services prior to departure, in which event the Payment will be refunded by the Payment service provider to the Client without any further obligation on the part of Tumafly.</p></li>
+        <li><p>Any Refund payable in respect of a Booking shall be made only to the extent that the applicable fare or service is refundable under the relevant Airline's fare rules and shall be calculated on a net basis after deduction of: (i) any cancellation charges, penalties, administrative fees, or other amounts levied by the applicable Airline pursuant to its fare rules or conditions of carriage; (ii) Tumafly's Service Fee, which shall be non-refundable; and (iii) any transaction, payment processing, or similar charges retained by the applicable Payment service provider in accordance with its applicable terms and conditions. For the avoidance of doubt, Tumafly shall not levy any separate administrative or processing fee in connection with the processing of a Refund.</p></li>
+        <li><p>Eligible refunds by the Payment service providers will be subject to their respective terms and conditions. Payment service providers may charge refund fees above those stated here.</p></li>
+        <li><p>Some air tickets are completely non-refundable according to airline fare rules. Cancellations for any reason whatsoever, including medical reasons, death in the family, strikes, wars, weather, natural disasters, airline default or government travel warnings will not entitle you to any refund in the case of non-refundable tickets nor of waiving the cancellation penalties in the case that the tickets can be refunded.</p></li>
+        <li><p>If tickets can be refunded, cancellation penalties are imposed by the Airline. Trip cancellation and interruption insurance are therefore highly recommended. For the best coverage, travel insurance should be purchased at the same time as the airline tickets.</p></li>
+        <li><p>For the avoidance of doubt, Tumafly does not sell, arrange, or provide travel insurance. Clients are solely responsible for obtaining any travel insurance they consider appropriate. Tumafly shall have no liability for any loss, damage, expense, or claim arising from the Client's failure to obtain such insurance.</p></li>
+        <li><p>Refunds shall be processed only after the applicable Airline has remitted the refunded amount to Tumafly, which, in accordance with the Airline's fare rules, may take up to three (3) months. Upon receipt of the refunded amount, Tumafly shall initiate the Refund to the Client's original payment method through the Payment service provider used for the Booking. Refunds to payment cards processed through Paystack Payments Kenya Limited typically take two (2) to five (5) Business Days, while refunds to M-Pesa accounts processed through Safaricom typically take five (5) to ten (10) Business Days. These timelines are indicative only, and Tumafly shall not be liable for delays attributable to the Airline, the Payment service provider, Safaricom, the Client's financial institution, or any other third party.</p></li>
+        <li><p> Refund amounts are determined by Airline policies and may be subject to cancellation fees, no-show penalties, and service charges.</p></li>
+        <li><p>Passengers who fail to check in for their flights ("no-shows") shall be subject to Airline no-show policies. Tumafly is not responsible for Airline decisions regarding no-show penalties.</p></li>
+        <li><p>Where Tumafly is unable to fulfil a Booking after Payment has been successfully processed, including where the applicable Airline or Tumafly's inventory provider is unable to issue the ticket or the applicable fare expires prior to ticket issuance, Tumafly shall refund the Payment in accordance with the Cancellation and Refund Policy. For the avoidance of doubt, no Airline cancellation fees or fare-rule penalties shall apply where no ticket has been issued. The applicable refund timelines shall be as set out in the Cancellation and Refund Policy.</p></li>
+        <li><p>Where an Airline or Tumafly’s inventory provider rejects a Booking due to inaccurate, incomplete or inconsistent information provided by the Client, including the passenger’s name, date of birth or travel document details, the Booking shall be deemed a Client-initiated cancellation. Any Refund shall accordingly be subject to the applicable deductions under clause (c).</p></li>
+        <li><p>Ancillary services purchased in connection with a Booking, including seat selection and additional baggage allowance, are linked to the relevant flight leg. Once a flight leg has been flown, the associated ancillary services are non-refundable, irrespective of any subsequent cancellation of other legs. For cancelled and unflown legs, ancillary services may be refunded subject to the applicable Airline’s policies and the refund terms applicable to the fare for that leg.</p></li>
+    </ol>
+    <h2 id="section-airline-responsibilities">Airline Responsibilities</h2>
+    <ol type="a">
+        <li><p>Airlines may make changes to flight schedules, aircraft, routes, or services after bookings are confirmed. In case of schedule changes, alternatives or refunds will be offered according to Airline policies.</p></li>
+        <li><p>Airlines are solely responsible for flight operations, including delays and cancellations. Compensation for delays or cancellations is determined by Airline policies.</p></li>
+        <li><p>Baggage allowances, restrictions, and fees are set by Airlines and vary by route, fare class, and passenger status. Clients are responsible for reviewing and complying with the specific baggage policies of their booked Airline.</p></li>
+        <li><p>Claims for damaged, delayed, or lost baggage must be filed directly with the Airline according to their procedures.</p></li>
+    </ol>
+    <h2 id="section-client-responsibilities">Client Responsibilities</h2>
+    <ol type="a">
+        <li><p>Client is responsible for providing accurate passenger details including exact name spelling as shown on travel documents, date of birth, contact information, and special requirements.</p></li>
+        <li><p>Errors in passenger information may result in denied boarding, additional fees for corrections, or ticket invalidation. Client must verify all details upon receiving booking confirmations and report errors to Tumafly within 24 hours. Tumafly shall acknowledge and respond to such notification within one (1) Business Day and shall use reasonable endeavors to facilitate any permitted correction with the applicable Airline, subject to the Airline's fare rules, policies, and any applicable fees.</p></li>
+        <li><p>It is <strong>ENTIRELY THE CLIENT’S RESPONSIBILITY</strong> to ensure that all passports and visas are current, valid, obtained on time, have sufficient blank pages, will be valid for six months after return to their home country and that any vaccinations, inoculations, prophylactic (e.g. for malaria) and the like, where required, have been obtained.</p></li>
+        <li><p>The Client acknowledges that in doing so, Tumafly is not assuming any obligation or liability and the client indemnifies Tumafly against any consequences of the Client’s failure to comply with any such requirements. It is the <strong>CLIENT’S DUTY</strong> to familiarize him/herself with the inherent dangers of and mental and/or physical condition required for the proposed travel arrangements.</p></li>
+        <li><p>Client is <strong>STRONGLY ADVISED</strong> to check the relevant requirements for their destination and any transit countries before travelling. Tumafly will endeavor to assist the Client if requested, but such assistance will be at Tumafly’s discretion (since this service does not fall within the scope of the Service.</p></li>
+        <li><p>Tumafly is not liable for denied boarding or entry due to insufficient or invalid travel documentation. Clients must notify Tumafly immediately of any changes in contact information or travel plans in accordance with Airline policies.</p></li>
+        <li><p> Clients are responsible for adhering to airline check-in deadlines and procedures. Online check-in should be completed within the timeframe specified by the Airline.</p></li>
+        <li><p>Tumafly does not facilitate Bookings for <strong>UNACCOMPANIED MINORS</strong>. Where a traveler under the age of eighteen (18) years intends to travel unaccompanied, the Client shall contact the applicable Airline directly to arrange any available unaccompanied minor service. Such services are subject to the Airline's policies and may require separate enrolment, additional fees, and compliance with the Airline's check-in, handover, and collection procedures.</p></li>
+        <li><p>For Child and Infant passengers, the Client shall solely be responsible for ensuring that all required travel documentation, including any birth certificates, parental consents, or other documents required by applicable law or the Airline, is obtained and presented.</p></li>
+    </ol>
+    <h2 id="section-liability">Liability</h2>
+    <ol type="a">
+        <li><p>Airlines are solely responsible for flight operations, safety, and service quality. Claims regarding flight operations, service quality, or passenger rights should be directed to the operating Airline.</p></li>
+        <li><p>Tumafly's responsibility is limited to the accurate processing of flight bookings. Tumafly shall not be liable for denied boarding for any reason, including but not limited to Airline overbooking or passenger documentation issue, quality of airline services, facilities, or client lost, damaged, or delayed baggage and consequences of missed flights or connections</p></li>
+        <li><p>Tumafly, its officers, directors, servants or agents shall under no circumstances be liable for any claim, loss, damage or injury suffered by any person whether to their person or property, howsoever caused whether or not arising from any act, omission, default, or negligence on the part of Tumafly, unless such claim is due to the gross negligence or wilful conduct of Tumafly and such claim is lodged in writing with Tumafly within thirty (30) days after the date on which the booking is made.</p></li>
+        <li><p>Such liability will be subject to a limitation of the total amount paid by a Client for the flight booking and under no circumstances will Tumafly be liable for any indirect or consequential loss or damage.</p></li>
+    </ol>
+    <h2 id="section-force-majeure">Force Majeure</h2>
+    <ol type="a">
+        <li><p>Tumafly shall not be liable for any delay, failure, or inability to perform its obligations under these Terms where such delay, failure, or inability results from any event or circumstance beyond its reasonable control, including but not limited to acts of God, natural disasters, epidemics, pandemics, war, terrorism, civil unrest, riots, strikes or other labour disputes, governmental or regulatory actions, sanctions, airport or airspace closures, adverse weather conditions, interruptions to telecommunications or internet services, cyberattacks, failures of payment systems, or the failure, suspension, or disruption of services provided by an Airline, inventory provider, or other third-party service provider (each, a "<strong>Force Majeure Event</strong>").</p></li>
+        <li><p>During the continuance of a Force Majeure Event, Tumafly's affected obligations shall be suspended to the extent and for the duration of the Force Majeure Event. Tumafly shall use reasonable endeavors to resume performance as soon as reasonably practicable.</p></li>
+        <li><p>Where a Force Majeure Event affects the operation of a flight, any cancellation, delay, schedule change, re-routing, travel credit, or refund shall be governed by the applicable Airline's conditions of carriage and fare rules. Tumafly shall, upon request, use reasonable efforts to facilitate the Client's communication with the Airline and the processing of any refund or alternative travel arrangements but does not guarantee the availability, amount, or timing of any refund or compensation.</p></li>
+        <li><p>Where a Refund is approved by the applicable Airline following a Force Majeure Event, Tumafly shall process the Refund in accordance with these Terms and the Cancellation and Refund Policy upon receipt of the refunded amount from the Airline. Any refund shall remain subject to the applicable Airline's fare rules, including any applicable deductions, restrictions, or non-refundable fare conditions.</p></li>
+        <li><p>To the fullest extent permitted by applicable law, Tumafly shall not be liable for any loss, damage, cost, expense, missed connection, consequential loss, or other claim arising directly or indirectly from a Force Majeure Event or from any act or omission of an Airline or other third party affected by such Force Majeure Event.</p></li>
+        <li><p>Nothing in this Clause shall exclude or limit any rights or remedies that cannot lawfully be excluded or restricted under applicable law.</p></li>
+    </ol>
+    <h2 id="section-marketing-communications-and-notifications">Marketing Communications And Notifications</h2>
+    <ol type="a">
+        <li><p>The Client agrees that Tumafly may send service-related communications concerning the Client's <strong>Bookings</strong>, account, transactions, and other information necessary for the provision of the Services.</p></li>
+        <li><p>Subject to the Client's marketing preferences and applicable law, Tumafly may also send promotional communications relating to its products, services, offers, and other marketing content. The Client may withdraw consent to receive marketing communications at any time by using the unsubscribe link included in such communications, updating their account preferences (where available), or contacting Tumafly at <a href="mailto:hello@tumafly.com">hello@tumafly.com</a> or their WhatsApp number <strong>+254 113 165503</strong></p></li>
+        <li><p>Withdrawal of consent shall not affect the delivery of transactional, operational, or other communications necessary for the administration of the Client's Bookings, compliance with applicable law, or the performance of these Terms.</p></li>
+    </ol>
+    <h2 id="section-privacy-and-data-protection">Privacy And Data Protection</h2>
+    <ol type="a">
+        <li><p>The Client understands and agrees to the collection, processing, and storage of your personal information in accordance with Tumafly's Privacy Policy. Personal data will be processed in compliance with applicable data protection laws.</p></li>
+        <li><p>Client information may be shared with airlines, immigration authorities, and security agencies as required by law.</p></li>
+    </ol>
+    <h2 id="section-confidentiality">Confidentiality</h2>
+    <ol type="a">
+        <li><p>In the course of providing the Services, each Party may receive or have access to confidential or proprietary information of the other Party, including business, commercial, technical, operational, financial, or personal information ("Confidential Information"). Confidential Information shall not include information that: (i) is or becomes publicly available other than through a breach of these Terms; (ii) was lawfully in the receiving Party's possession before disclosure; (iii) is lawfully received from a third party without restriction; or (iv) is independently developed without reference to the disclosed information.</p></li>
+        <li><p>Each Party shall keep the Confidential Information of the other Party strictly confidential and shall not use or disclose such Confidential Information except as necessary to perform its obligations under these Terms, exercise its rights under these Terms, or as otherwise permitted by these Terms or required by applicable law</p></li>
+        <li><p>Tumafly shall process the Client's personal information in accordance with its Privacy Notice. The Client acknowledges and agrees that such information may be disclosed to Airlines, Tumafly's inventory provider, payment service providers, competent regulatory, immigration, security, or law enforcement authorities, and other third-party service providers to the extent reasonably necessary for Booking fulfilment, ticket issuance, payment processing, platform security, compliance with applicable law, or the operation of Tumafly's business.</p></li>
+        <li><p>The Client shall keep all ticket identifiers, booking references (PNRs), access codes, and other credentials issued in connection with a Booking confidential and shall not sell, transfer, assign, or otherwise use or permit their use for any commercial purpose. Nothing in this Clause shall prevent the Client from sharing such information with fellow travelers included in the Booking, family members, or duly authorised representatives where reasonably necessary for the purposes of the relevant travel arrangements.</p></li>
+        <li><p>Where a Party is required by law, regulation, court order, or a competent governmental authority to disclose Confidential Information, that Party may make such disclosure to the extent legally required.</p></li>
+        <li><p>The obligations set out in this Clause shall survive the completion, cancellation, or termination of any Booking and these Terms to the extent permitted by applicable law.</p></li>
+    </ol>
+    <h2 id="section-intellectual-property">Intellectual Property</h2>
+    <p>The Sites are owned by Tumafly and the domain names are registered in the name of Tumafly. All intellectual property rights in and to the aforementioned vests in Tumafly. None of the content or data found on the Sites may be reproduced, sold, transferred, or modified without the express written permission of Tumafly.</p>
+    <h3 id="h3-changes-amp-modifications-of-these-terms-and-conditions">CHANGES &amp; MODIFICATIONS OF THESE TERMS AND CONDITIONS</h3>
+    <p>Tumafly may make future changes, deletions or modifications to the Online Conditions, information, graphics, products, features, functionality, services, and links at any time without notice and the Client’s subsequent viewing or use of the Sites and/or the conclusion of a transaction with Tumafly will constitute the client’s agreement to such changes, deletions and modifications, as the case may be. The client agrees to accept and be bound by the Online Conditions and notices which are in effect at the time of the Client’s use of the Sites and facilities.</p>
+    <h2 id="section-severability">Severability</h2>
+    <p>If any provision of these Terms is held to be invalid, illegal or unenforceable in any jurisdiction, such provision shall, to the extent permitted by law, be severed or modified to the minimum extent necessary, without affecting the validity or enforceability of the remaining provisions. Tumafly and the Client shall negotiate in good faith to replace the affected provision with a valid provision that most closely reflects its original intent.</p>
+    <h2 id="section-entire-contract">Entire Contract</h2>
+    <p>All the terms and conditions displayed on the Sites constitute the entire terms of the relationship between the parties. There exist no other terms, conditions, warranties, representations, guarantees, promises, undertaking or inducements of any nature whatsoever (whether verbal, written or electronic) regulating the relationship and the <strong>CLIENT ACKNOWLEDGES</strong> that he/she has not relied on any matter or thing stated on behalf of Tumafly or otherwise that is not included herein.</p>
+    <h2 id="section-governing-law">Governing Law</h2>
+    <p>These Terms and Conditions shall be governed in all aspects in accordance with the Laws of Kenya.</p>
+    <h2 id="section-dispute-resolution">Dispute Resolution</h2>
+    <ol type="a">
+        <li><p>The Parties shall use their reasonable endeavors to resolve any dispute, controversy, or claim arising out of or in connection with these Terms, including any question regarding their existence, validity, interpretation, performance, or termination ("<strong>Dispute</strong>"), through good faith negotiations.</p></li>
+        <li><p>If a Dispute is not resolved within fourteen (14) days of written notice of the Dispute, either Party may refer the Dispute to mediation. The mediation shall be conducted in Nairobi, Kenya, by a mutually agreed mediator. If the Parties fail to agree on the appointment of a mediator within seven (7) days, the mediator shall be appointed by the Chairperson of the Chartered Institute of Arbitrators (Kenya Branch). The mediation shall be conducted in accordance with the Mediation Rules of the Chartered Institute of Arbitrators (Kenya Branch).</p></li>
+        <li><p>If the Dispute is not resolved through mediation within thirty (30) days of the appointment of the mediator, or such longer period as the Parties may agree in writing, the Dispute shall be finally resolved by arbitration in Nairobi, Kenya, in accordance with the Arbitration Act, 1995 (as amended) and the Arbitration Rules of the Chartered Institute of Arbitrators (Kenya Branch). The arbitration shall be conducted by a sole arbitrator appointed by agreement of the Parties or, failing such agreement, by the Chairperson of the Chartered Institute of Arbitrators (Kenya Branch). The language of the arbitration shall be English, and the arbitral award shall be final and binding on the Parties.</p></li>
+        <li><p>Nothing in this Clause shall prevent either Party from seeking interim, conservatory, or injunctive relief from a court of competent jurisdiction where such relief is necessary to protect its rights pending the final determination of the Dispute.</p></li>
+    </ol>
+</article>
+
+<footer class="legal-page-footer">
+    <div>© 2026 Tumalink Digital Solutions Limited</div>
+    <div>
+        <a href="/legal/terms">Terms</a>
+        <a href="/legal/privacy">Privacy</a>
+        <a href="/legal/cookies">Cookies</a>
+    </div>
+</footer>
+
+</body>
+</html>

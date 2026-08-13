@@ -7362,7 +7362,7 @@
      Content mirrors Priceline's mobile menu (screenshot #5):
        • X close button + logo in a header row
        • Sign-in row (or signed-in "Account / My trips / Sign out" rows)
-       • Menu items (Home, Find my trip, Help, T&C, Privacy)
+       • Menu items (Home, Find my trip, Help, T&C, Privacy, Cookies)
        • Currency toggle at the bottom (mobile-only home for it — the
          nav-level currency toggle is hidden on mobile so this is the
          only way to switch KES/USD on phones)
@@ -7463,6 +7463,18 @@
         </svg>
       </span>
             <span>Privacy Policy</span>
+        </button>
+        <button class="mobile-tray-item" onclick="_trayNav('cookies')" type="button">
+      <span class="mobile-tray-icon">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+          <circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="1.7"/>
+          <circle cx="9" cy="9.5" r="1" fill="currentColor"/>
+          <circle cx="15" cy="10.5" r="1" fill="currentColor"/>
+          <circle cx="10" cy="14.5" r="1" fill="currentColor"/>
+          <circle cx="14.5" cy="14.5" r="1" fill="currentColor"/>
+        </svg>
+      </span>
+            <span>Cookie Policy</span>
         </button>
 
         <button class="mobile-tray-item hidden mobile-tray-authed mobile-tray-signout" onclick="_trayNav('sign-out')" type="button">
@@ -8519,9 +8531,10 @@
     <div class="footer-inner">
         <div>© TumaFly · Nairobi</div>
         <div>
-            <a href="/terms.html">Terms</a>
-            <a href="/privacy.html">Privacy</a>
-            <a href="mailto:support@tumafly.com">Support</a>
+            <a href="/legal/terms">Terms</a>
+            <a href="/legal/privacy">Privacy</a>
+            <a href="/legal/cookies">Cookies</a>
+            <a href="mailto:hello@tumafly.com">Support</a>
             <a href="https://www.iatatravelcentre.com" target="_blank" rel="noopener">Travel requirements</a>
         </div>
     </div>
@@ -21017,7 +21030,7 @@
           </p>
           <p style="color:var(--text-2);max-width:48ch;margin:12px auto 0;font-size:13px;">
             If you have questions, message us on WhatsApp or email
-            support@tumafly.com.
+            hello@tumafly.com.
           </p>
           <div class="success-ref" id="success-ref" style="margin-top:14px;">${escapeHtml(mref)}</div>
           <div style="margin-top:18px;display:flex;gap:10px;justify-content:center;flex-wrap:wrap;">
@@ -22106,6 +22119,9 @@
           break;
         case 'privacy':
           window.open('/legal/privacy', '_blank', 'noopener');
+          break;
+        case 'cookies':
+          window.open('/legal/cookies', '_blank', 'noopener');
           break;
       }
     }
