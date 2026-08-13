@@ -7,7 +7,7 @@
 // Per-phone dimension enforced downstream in the send-otp hook (S-07c).
 
 const SUPABASE_URL          = Deno.env.get("SUPABASE_URL")!;
-const SUPABASE_SERVICE_ROLE = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
+const SUPABASE_SERVICE_ROLE = Deno.env.get("SERVICE_ROLE_KEY")!;
 
 // S-07b.1 diagnostic: log env-var presence at boot (length only, never values)
 console.log(`[otp-precheck] boot — SUPABASE_URL: ${SUPABASE_URL ? "set" : "MISSING"}, SUPABASE_SERVICE_ROLE_KEY length: ${SUPABASE_SERVICE_ROLE?.length ?? 0}`);

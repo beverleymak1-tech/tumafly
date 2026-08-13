@@ -12,7 +12,7 @@ const AT_BASE_URL = Deno.env.get("AT_ENV") === "production"
   : "https://api.sandbox.africastalking.com/version1/messaging";
 
 const SUPABASE_URL          = Deno.env.get("SUPABASE_URL")!;
-const SUPABASE_SERVICE_ROLE = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
+const SUPABASE_SERVICE_ROLE = Deno.env.get("SERVICE_ROLE_KEY")!;
 
 // Hook secret — set this in Supabase Edge Function secrets.
 // Format from Supabase: "v1,whsec_<base64>" — strip the "v1,whsec_" prefix.
