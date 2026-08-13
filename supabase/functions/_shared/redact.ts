@@ -31,6 +31,25 @@ const ALLOWLIST_KEYS = new Set([
   "http_status", "timestamp",
   "retry_count", "attempt_number",
   "received_alert_type",  // S-02 fallback: preserve which unknown type came in
+  // S-06 dispute-lifecycle operational fields (non-PII, non-secret) ─────
+  "dispute_code",          // Paystack DISP_xxx identifier
+  "dispute_reason",        // e.g. "unauthorized", "duplicate", "product-not-received"
+  "dispute_outcome",       // "won" | "lost"
+  "prior_status",          // bookings.status before the transition
+  "flown",                 // boolean: has the flight already flown?
+  "verify_status",         // Paystack verify endpoint status echo
+  "verify_gateway_response",  // Paystack gateway_response echo
+  "event_type",            // Paystack webhook event name (already used in refund alerts)
+  "reference",             // Paystack transaction reference (echo of merchant_ref)
+  "expected_kes",          // AMOUNT_MISMATCH context
+  "received_kes",          // AMOUNT_MISMATCH context
+  "webhook_amount_kes",    // AMOUNT_MISMATCH context
+  "resend_error",          // S-02 email-failure branch preserves this
+  "body_length",           // PAYSTACK_MALFORMED_WEBHOOK context
+  "signature_header_present",  // PAYSTACK_SIGNATURE_FAILURE context
+  "reason",                // generic reason string in many alerts
+  "message",               // generic message string in many alerts
+  "payload",               // nested payload (recursion will redact PII inside)
 ]);
 
 export function redactContext(input: unknown): unknown {

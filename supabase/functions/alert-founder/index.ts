@@ -44,6 +44,11 @@ type AlertType =
   | "PROCESS_DUFFEL_UNHANDLED_ERROR"       // try/catch at handler top in process-duffel-booking
   | "DUFFEL_ORDER_ACCEPTED_ASYNC"          // Duffel 202 — rare, informational, reconciler will finish
   | "CONFIRMATION_EMAIL_FAILED"            // send-confirmation returned non-2xx or threw; reconciler retries
+  // S-06 chargeback lifecycle (Paystack dispute events) ──────────────────
+  | "CHARGEBACK_OPENED"                    // charge.dispute.create — new dispute filed by customer's bank
+  | "CHARGEBACK_REMINDER"                  // charge.dispute.remind — Paystack reminder, response deadline near
+  | "CHARGEBACK_RESOLVED_WON"              // charge.dispute.resolve — outcome merchant-won, funds stay with us
+  | "CHARGEBACK_RESOLVED_LOST"             // charge.dispute.resolve — outcome merchant-lost, funds pulled back
   | "UNKNOWN_ALERT_TYPE";                  // S-02 fallback — unregistered alert_type received, rendered synthetically to avoid silent-drop
 
 const ALERT_CONFIG: Record<AlertType, { severity: string; subject: string; action: string }> = {
@@ -170,6 +175,27 @@ const ALERT_CONFIG: Record<AlertType, { severity: string; subject: string; actio
           severity: "⚠️ HIGH",
           subject: "send-confirmation returned non-2xx or threw",
           action: "Booking is safe — customer is 'booked' in DB and at Duffel. Only the confirmation email failed. retry-stuck-bookings (#9) sweeps 'booked' rows with NULL confirmation_email_sent_at and retries. If this fires more than once for the same row, investigate send-confirmation and RESEND_API_KEY. Customer will not have their e-ticket until email delivers — WhatsApp them their PNR + ticket numbers if 15+ minutes have passed since booking.",
+        },
+        // ── S-06 chargeback lifecycle (Paystack dispute events) ────────────────
+        CHARGEBACK_OPENED: {
+          severity: "🚨 CRITICAL",
+          subject: "Chargeback opened — customer disputed a payment",
+          action: "Customer's bank filed a chargeback. Response deadline is typically 7-14 days depending on card scheme. Check prior_status + flown fields in context: (a) prior_status='confirmed' + flown=false = normal in-flight booking dispute, gather evidence (booking record, comms, PNR); (b) prior_status='confirmed' + flown=true = FRIENDLY FRAUD (customer flew then disputed), high-priority; (c) prior_status != 'confirmed' = PRE-EXISTING CANCEL STATE, potential double-loss, investigate immediately. Respond via Paystack dashboard → Disputes.",
+        },
+        CHARGEBACK_REMINDER: {
+          severity: "⚠️ HIGH",
+          subject: "Chargeback response deadline approaching",
+          action: "Paystack has re-notified us that a dispute response is still outstanding. Deadline is typically 48-72 hours away. If we haven't responded yet, drop everything — miss the deadline and the dispute auto-loses. Respond via Paystack dashboard → Disputes.",
+        },
+        CHARGEBACK_RESOLVED_WON: {
+          severity: "ℹ️ INFO",
+          subject: "Chargeback resolved — merchant won",
+          action: "Dispute closed in our favor. Funds stay with us. Booking transitioned to chargeback_won (internal state; customer-facing UX unchanged from confirmed). No action required — log for records.",
+        },
+        CHARGEBACK_RESOLVED_LOST: {
+          severity: "🚨 CRITICAL",
+          subject: "Chargeback resolved — merchant lost, funds pulled back",
+          action: "Dispute closed against us. Paystack has withdrawn the disputed amount. Booking transitioned to chargeback_lost. Check flown field: (a) flown=false = ticket still valid at Duffel, consider cancelling via Duffel dashboard to avoid double-loss (no refund from airline but frees the seat); (b) flown=true = friendly fraud, no recovery path, add customer to internal block-list for future consideration. Check prior_status: if != 'confirmed', this is a double-loss (we refunded AND lost the chargeback), escalate.",
         },
         // ── S-02 fallback: unregistered alert types render here (never silently dropped) ──
         UNKNOWN_ALERT_TYPE: {

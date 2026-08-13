@@ -214,6 +214,193 @@ async function handleRefundEvent(eventType: string, event: any, supabase: any): 
   return new Response("ok", { status: 200, headers: CORS_HEADERS });
 }
 
+// ── Dispute event handler (S-06) ─────────────────────────────────────────
+// Handles charge.dispute.create / .remind / .resolve events from Paystack.
+// Lookup: merchant_ref (echoed on data.transaction.reference) → pending_bookings
+// → booking_id → bookings. State transitions gated on prior_status per Rule 1;
+// alert context always carries flown boolean per Rule 2. Rule 3 (customer-facing
+// UX) is honored downstream by the frontend rendering on booking.status alone —
+// nothing customer-facing changes as a result of these alerts.
+async function handleDisputeEvent(eventType: string, event: any, supabase: any): Promise<Response> {
+  const data = event?.data || {};
+
+  // Paystack sends transaction as either an object (with .reference/.id) or as an id.
+  // Mirror the pattern used in handleRefundEvent.
+  const reference =
+    (typeof data.transaction === "object" && data.transaction ? data.transaction.reference : null) ||
+    data.reference ||
+    "";
+  const paystackTxId = String(
+    (typeof data.transaction === "object" && data.transaction ? data.transaction.id : data.transaction) || ""
+  );
+  const disputeCode = data.id ? String(data.id) : "";
+  const disputeReason = data.reason || "";
+  const resolution = data.resolution || "";
+
+  if (!reference) {
+    console.error(`[handleDisputeEvent] ${eventType} with no reference`);
+    await alertFounder("UNHANDLED_ERROR", {
+      message: `Dispute event ${eventType} received with no transaction reference`,
+      event_type: eventType,
+      dispute_code: disputeCode,
+    });
+    return new Response("ok", { status: 200, headers: CORS_HEADERS });
+  }
+
+  // Look up via pending_bookings.merchant_ref → booking_id
+  const { data: pending, error: pendingErr } = await supabase
+    .from("pending_bookings")
+    .select("id, booking_id, merchant_ref")
+    .eq("merchant_ref", reference)
+    .maybeSingle();
+
+  const isRemind = eventType === "charge.dispute.remind";
+  const isResolve = eventType === "charge.dispute.resolve";
+  const openedOrRemindAlert = isRemind ? "CHARGEBACK_REMINDER" : "CHARGEBACK_OPENED";
+
+  if (pendingErr || !pending) {
+    // No pending_booking for this reference — dispute against something we don't
+    // track. Still alert; support reconciles by hand.
+    console.error(`[handleDisputeEvent] No pending_booking for reference ${reference}`);
+    await alertFounder(isResolve ? "CHARGEBACK_RESOLVED_LOST" : openedOrRemindAlert, {
+      event_type: eventType,
+      reference,
+      paystack_tx_id: paystackTxId,
+      dispute_code: disputeCode,
+      dispute_reason: disputeReason,
+      message: "No matching pending_booking found — dispute cannot be linked to a booking",
+    });
+    return new Response("ok", { status: 200, headers: CORS_HEADERS });
+  }
+
+  if (!pending.booking_id) {
+    // Dispute on a payment that never became a full booking (e.g. paid_booking_failed
+    // where we kept the service fee). Alert only — no bookings row to transition.
+    await alertFounder(isResolve ? "CHARGEBACK_RESOLVED_LOST" : openedOrRemindAlert, {
+      event_type: eventType,
+      merchant_ref: reference,
+      pending_booking_id: pending.id,
+      paystack_tx_id: paystackTxId,
+      dispute_code: disputeCode,
+      dispute_reason: disputeReason,
+      message: "Dispute for a pending_booking that never became a full booking (e.g. paid_booking_failed retained service fee)",
+    });
+    return new Response("ok", { status: 200, headers: CORS_HEADERS });
+  }
+
+  // Full booking lookup
+  const { data: booking, error: bookingErr } = await supabase
+    .from("bookings")
+    .select("id, booking_reference, status, slices")
+    .eq("id", pending.booking_id)
+    .maybeSingle();
+
+  if (bookingErr || !booking) {
+    await alertFounder("UNHANDLED_ERROR", {
+      message: "handleDisputeEvent could not fetch booking row",
+      event_type: eventType,
+      pending_booking_id: pending.id,
+      booking_id: pending.booking_id,
+    });
+    return new Response("ok", { status: 200, headers: CORS_HEADERS });
+  }
+
+  // Rule 2 — compute flown boolean from last-slice arriving_at with fallbacks.
+  // If schema shape changes and none of the paths work, flown stays false (safe).
+  let flown = false;
+  try {
+    const slices = Array.isArray(booking.slices) ? booking.slices : [];
+    if (slices.length > 0) {
+      const lastSlice = slices[slices.length - 1];
+      const segments = Array.isArray(lastSlice?.segments) ? lastSlice.segments : [];
+      const lastSegment = segments[segments.length - 1];
+      const flightEndTs =
+        lastSegment?.arriving_at ||
+        lastSlice?.arriving_at ||
+        lastSegment?.departing_at ||
+        lastSlice?.departing_at ||
+        null;
+      if (flightEndTs) {
+        flown = new Date(flightEndTs).getTime() < Date.now();
+      }
+    }
+  } catch (_) { /* flown stays false */ }
+
+  const priorStatus = booking.status;
+
+  // ── Route by event type ──
+  if (eventType === "charge.dispute.create") {
+    // Rule 1: transition only from 'confirmed'. Pre-existing cancel states preserved.
+    if (priorStatus === "confirmed") {
+      await supabase.from("bookings").update({ status: "disputed" }).eq("id", booking.id);
+    }
+    await alertFounder("CHARGEBACK_OPENED", {
+      event_type: eventType,
+      merchant_ref: reference,
+      booking_reference: booking.booking_reference,
+      booking_id: booking.id,
+      paystack_tx_id: paystackTxId,
+      dispute_code: disputeCode,
+      dispute_reason: disputeReason,
+      prior_status: priorStatus,
+      flown,
+    });
+    return new Response("ok", { status: 200, headers: CORS_HEADERS });
+  }
+
+  if (isRemind) {
+    // No state change — reminders don't move state.
+    await alertFounder("CHARGEBACK_REMINDER", {
+      event_type: eventType,
+      merchant_ref: reference,
+      booking_reference: booking.booking_reference,
+      booking_id: booking.id,
+      paystack_tx_id: paystackTxId,
+      dispute_code: disputeCode,
+      dispute_reason: disputeReason,
+      prior_status: priorStatus,
+      flown,
+    });
+    return new Response("ok", { status: 200, headers: CORS_HEADERS });
+  }
+
+  if (isResolve) {
+    // Paystack resolution values are inconsistent across docs/versions. Conservative:
+    // treat these as WON: 'won', 'merchant-won', 'resolved-merchant'. Anything else
+    // (including empty, 'merchant-accepted', 'declined') → LOST. Raw resolution
+    // string is passed through in the alert so operators can spot mis-parse.
+    const wonResolution = /^(won|merchant-won|resolved-merchant)$/i.test(resolution);
+    const outcome = wonResolution ? "won" : "lost";
+    const alertType = wonResolution ? "CHARGEBACK_RESOLVED_WON" : "CHARGEBACK_RESOLVED_LOST";
+
+    // Rule 1: transition only from 'disputed' (i.e., we moved it on create).
+    // Pre-existing cancel states preserved.
+    if (priorStatus === "disputed") {
+      const newStatus = wonResolution ? "chargeback_won" : "chargeback_lost";
+      await supabase.from("bookings").update({ status: newStatus }).eq("id", booking.id);
+    }
+
+    await alertFounder(alertType, {
+      event_type: eventType,
+      merchant_ref: reference,
+      booking_reference: booking.booking_reference,
+      booking_id: booking.id,
+      paystack_tx_id: paystackTxId,
+      dispute_code: disputeCode,
+      dispute_reason: disputeReason,
+      dispute_outcome: outcome,
+      prior_status: priorStatus,
+      flown,
+      reason: resolution || "(paystack sent no resolution string)",
+    });
+    return new Response("ok", { status: 200, headers: CORS_HEADERS });
+  }
+
+  // Unknown dispute event subtype (future Paystack additions)
+  console.log(`[handleDisputeEvent] Unknown dispute event: ${eventType}`);
+  return new Response("ok", { status: 200, headers: CORS_HEADERS });
+}
+
 serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response("ok", { headers: CORS_HEADERS });
@@ -265,14 +452,20 @@ serve(async (req) => {
 
   // ── Event routing ──────────────────────────────────────────────────────
   // Paystack sends many event types. We act on:
-  //   - charge.success                   → book with Duffel + save booking
-  //   - refund.pending/processed/failed  → update refunds table + cascade
-  // Others (charge.dispute.*, transfer.*, subscription.*, etc.) get 200 OK.
+  //   - charge.success                          → book with Duffel + save booking
+  //   - refund.pending/processed/failed         → update refunds table + cascade
+  //   - charge.dispute.create/remind/resolve    → S-06 handleDisputeEvent (alert + gated state transition)
+  // Others (transfer.*, subscription.*, etc.) get 200 OK.
   const eventType = event?.event || "";
 
   // Refund events go to the dedicated handler.
   if (eventType === "refund.pending" || eventType === "refund.processed" || eventType === "refund.failed") {
     return await handleRefundEvent(eventType, event, supabase);
+  }
+
+  // S-06: Dispute events go to the dedicated handler.
+  if (eventType === "charge.dispute.create" || eventType === "charge.dispute.remind" || eventType === "charge.dispute.resolve") {
+    return await handleDisputeEvent(eventType, event, supabase);
   }
 
   if (eventType !== "charge.success") {

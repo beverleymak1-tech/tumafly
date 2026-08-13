@@ -23327,6 +23327,11 @@
         'refunded',
         'paid_booking_failed',
         'paid_offer_expired',
+        // S-06: chargeback_lost renders in the Cancelled tab (money is back
+        // with the customer via chargeback). chargeback_won stays out
+        // (booking is valid) and disputed stays out (in-flight dispute —
+        // customer initiated it and knows).
+        'chargeback_lost',
       ]);
       return trips.filter(t => {
         const isCancelled = CANCELLED_STATES.has((t.status || '').toLowerCase());
@@ -23422,13 +23427,19 @@
               : '');
         const statusKey = (t.status || 'booked').toLowerCase();
         let badge;
-        if (statusKey === 'cancelled') {
+        if (statusKey === 'cancelled' || statusKey === 'chargeback_lost') {
+          // S-06: chargeback_lost renders as generic "Cancelled" on the trip
+          // card — money is back with the customer via chargeback, functionally
+          // equivalent from their POV. Merchant-side email carries the specifics.
           badge = '<span class="trip-status-badge cancelled">Cancelled</span>';
         } else if (statusKey === 'refunded') {
           badge = '<span class="trip-status-badge cancelled">Refunded</span>';
         } else if (statusKey === 'refund_pending' || statusKey === 'paid_booking_failed' || statusKey === 'paid_offer_expired') {
           badge = '<span class="trip-status-badge cancelled">Refund pending</span>';
-        } else if (statusKey === 'booked' || statusKey === 'confirmed') {
+        } else if (statusKey === 'booked' || statusKey === 'confirmed' || statusKey === 'disputed' || statusKey === 'chargeback_won') {
+          // S-06: disputed + chargeback_won render as Confirmed to customer.
+          // disputed: customer initiated the chargeback and knows.
+          // chargeback_won: booking is fully valid, no change from confirmed.
           badge = '<span class="trip-status-badge booked">Confirmed</span>';
         } else {
           badge = '<span class="trip-status-badge pending">Pending</span>';
@@ -23789,14 +23800,24 @@
       const _isRefundPending   = _statusLower === 'refund_pending';
       const _isRefunded        = _statusLower === 'refunded';
       const _isBookingFailed   = _statusLower === 'paid_booking_failed' || _statusLower === 'paid_offer_expired';
-      const _hideCancelButton  = _isCancelled || _isRefundPending || _isRefunded || _isBookingFailed;
+      // S-06: dispute-lifecycle states — Rule 3 customer-facing UX.
+      //   disputed         — no banner (render as confirmed); hide Cancel button (dispute IS the exit)
+      //   chargeback_won   — no banner + Cancel visible (no _isXxx needed here; falls through as confirmed)
+      //   chargeback_lost  — cancelled banner IF not flown (see if-condition below); hide Cancel button
+      // Cancel hidden for disputed + chargeback_lost regardless of flown state.
+      const _isDisputed        = _statusLower === 'disputed';
+      const _isChargebackLost  = _statusLower === 'chargeback_lost';
+      const _hideCancelButton  = _isCancelled || _isRefundPending || _isRefunded || _isBookingFailed || _isDisputed || _isChargebackLost;
 
       // Also hide for trips that have already flown (past)
       const _lastSliceDate = slices[slices.length - 1]?.departing_at;
       const _hasFlown = _lastSliceDate ? new Date(_lastSliceDate).getTime() < Date.now() : false;
 
       let _statusBanner = '';
-      if (_isCancelled) {
+      // S-06: chargeback_lost renders the cancelled banner IF flight hasn't
+      // flown. Past-flown chargeback_lost → no banner (customer flew; a
+      // cancelled banner would be wrong).
+      if (_isCancelled || (_isChargebackLost && !_hasFlown)) {
         _statusBanner = `
           <div class="itin-status-banner muted" role="status">
             <div>
