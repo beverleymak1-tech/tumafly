@@ -10488,8 +10488,9 @@
       // with the real countdown once get-offer resolves. Bar stays in the same
       // place; only the number swaps in — no jarring appear-out-of-nowhere.
       try {
-        const raw = sessionStorage.getItem(BOOKING_PASSENGER_SHADOW_KEY);
-        const stashedExp = raw ? (JSON.parse(raw)?.fare_expires_at_ms || 0) : 0;
+        // S-05: readShadowIfFresh — TTL-checked read (2h from write).
+        const stashed = readShadowIfFresh(BOOKING_PASSENGER_SHADOW_KEY);
+        const stashedExp = stashed?.fare_expires_at_ms || 0;
         if (stashedExp && stashedExp > Date.now()) {
           fareTimerExpiresAtMs = stashedExp;
           fareTimerExpired = false;
@@ -10714,8 +10715,8 @@
       // check below fails (1 !== 2) and falls through to the wipe path,
       // mis-labelling slot headers for mixed-pax bookings.
       try {
-        const raw = sessionStorage.getItem(BOOKING_PASSENGER_SHADOW_KEY);
-        const stashed = raw ? JSON.parse(raw) : null;
+        // S-05: readShadowIfFresh — TTL-checked read (2h from write).
+        const stashed = readShadowIfFresh(BOOKING_PASSENGER_SHADOW_KEY);
         const pb = stashed?.pickerBreakdown;
         if (pb && typeof pb === 'object') {
           if (Number.isFinite(pb.adults))      travelers.adults      = pb.adults;
@@ -11105,6 +11106,36 @@
     //   { travelers: [{born_on, passport: {country, number, expires}}, ...] }
     const BOOKING_SECURE_SHADOW_KEY = 'tf_booking_secure_v1';
 
+    // S-05: 2-hour read-time expiry on both shadows.
+    // Writers stamp ts: Date.now(); readers reject payloads older than this.
+    // Applies to sensitive AND non-sensitive shadow for symmetry.
+    // The secure shadow is currently write-only (no readers post Session 28e
+    // modal refactor). TTL here is preventative — future readers automatically
+    // benefit; today's benefit is bounding sessionStorage residence time on
+    // long-open tabs.
+    const BOOKING_SHADOW_TTL_MS = 2 * 60 * 60 * 1000;
+
+    // Central reader for both shadows. Any caller doing getItem() should
+    // route through this so TTL enforcement is single-source-of-truth.
+    // Returns the parsed payload, or null if: missing / malformed / expired.
+    // On expiry, also removes the sessionStorage entry so a stale record
+    // doesn't linger.
+    function readShadowIfFresh(key) {
+      try {
+        const raw = sessionStorage.getItem(key);
+        if (!raw) return null;
+        const payload = JSON.parse(raw);
+        if (!payload || typeof payload !== 'object') return null;
+        if (typeof payload.ts !== 'number' || Date.now() - payload.ts > BOOKING_SHADOW_TTL_MS) {
+          try { sessionStorage.removeItem(key); } catch (_) {}
+          return null;
+        }
+        return payload;
+      } catch (_) {
+        return null;
+      }
+    }
+
   // Extracted wiring so both proceedToBooking (offer-click entry) and
     // restoreBooking (F5 restore) attach the contact-field listeners.
     // Guarded by a dataset flag so repeat calls are safe no-ops.
@@ -11199,6 +11230,7 @@
             phone_dial_iso: countryPickerState?.['contact']?.iso || '',
           },
           fare_expires_at_ms: expMs || 0,
+          ts: Date.now(),
         };
         sessionStorage.setItem(BOOKING_PASSENGER_SHADOW_KEY, JSON.stringify(payload));
         // Secure shadow — born_on + passport. Written every time the
@@ -11213,19 +11245,17 @@
               expires: s?.data?.passport?.expires || '',
             },
           })),
+          ts: Date.now(),
         };
         sessionStorage.setItem(BOOKING_SECURE_SHADOW_KEY, JSON.stringify(securePayload));
       } catch (_) { /* sessionStorage disabled — silent no-op */ }
     }
 
     function restoreBookingPassengers() {
-      let payload = null;
-      try {
-        const raw = sessionStorage.getItem(BOOKING_PASSENGER_SHADOW_KEY);
-        if (!raw) return false;
-        payload = JSON.parse(raw);
-      } catch (_) { return false; }
-      if (!payload || typeof payload !== 'object') return false;
+      // S-05: readShadowIfFresh centralises the TTL enforcement (2h from write).
+      // Expired payloads are removed from sessionStorage and null is returned.
+      const payload = readShadowIfFresh(BOOKING_PASSENGER_SHADOW_KEY);
+      if (!payload) return false;
 
       // Travelers — pair by index. Extra shadow entries are silently dropped;
       // extra live entries (e.g. new higher pax count than the shadow) are
@@ -14844,9 +14874,11 @@
                            ? travelers.childDobs.slice(0, travelers?.children || 0)
                            : [],
           },
+          ts: Date.now(),
         }));
         sessionStorage.setItem(BOOKING_SECURE_SHADOW_KEY, JSON.stringify({
           travelers: [],
+          ts: Date.now(),
         }));
         // Signal to the child's HEAD-script guard that this tab is a
         // committed booking (hides "← Back to results" buttons).
