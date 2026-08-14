@@ -28,7 +28,10 @@ import { serve } from 'https://deno.land/std@0.208.0/http/server.ts';
 const DUFFEL_API_KEY = Deno.env.get('DUFFEL_API_KEY') || '';
 const DUFFEL_MODE = (Deno.env.get('DUFFEL_MODE') || '').toLowerCase();
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL') || '';
-const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') || '';
+// Session 35b: was SUPABASE_SERVICE_ROLE_KEY (Supabase-auto-injected, wrong for our
+// alert-founder auth per SOP §1.1). All DUFFEL_MODE_KEY_MISMATCH alerts fired from
+// this EF were silently 401'd by alert-founder — Session 34 regression grep miss.
+const SERVICE_ROLE_KEY = Deno.env.get('SERVICE_ROLE_KEY') || '';
 
 const CORS_HEADERS = {
   'Access-Control-Allow-Origin': '*',
@@ -70,7 +73,7 @@ async function alertFounder(alertType: string, context: Record<string, unknown>)
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'Authorization': `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`,
+        'Authorization': `Bearer ${SERVICE_ROLE_KEY}`,
       },
       body: JSON.stringify({ alert_type: alertType, context }),
     });
