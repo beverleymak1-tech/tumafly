@@ -49,6 +49,8 @@ type AlertType =
   | "CHARGEBACK_REMINDER"                  // charge.dispute.remind — Paystack reminder, response deadline near
   | "CHARGEBACK_RESOLVED_WON"              // charge.dispute.resolve — outcome merchant-won, funds stay with us
   | "CHARGEBACK_RESOLVED_LOST"             // charge.dispute.resolve — outcome merchant-lost, funds pulled back
+  // S-07 OTP throttle enforcement (per-IP in otp-precheck EF; per-phone in send-otp EF)
+  | "OTP_THROTTLE_HIT"                     // OTP request rate limit exceeded (per-phone 3/15min or 10/24h OR per-IP 10/15min)
   | "UNKNOWN_ALERT_TYPE";                  // S-02 fallback — unregistered alert_type received, rendered synthetically to avoid silent-drop
 
 const ALERT_CONFIG: Record<AlertType, { severity: string; subject: string; action: string }> = {
@@ -193,11 +195,17 @@ const ALERT_CONFIG: Record<AlertType, { severity: string; subject: string; actio
           action: "Dispute closed in our favor. Funds stay with us. Booking transitioned to chargeback_won (internal state; customer-facing UX unchanged from confirmed). No action required — log for records.",
         },
         CHARGEBACK_RESOLVED_LOST: {
-          severity: "🚨 CRITICAL",
-          subject: "Chargeback resolved — merchant lost, funds pulled back",
-          action: "Dispute closed against us. Paystack has withdrawn the disputed amount. Booking transitioned to chargeback_lost. Check flown field: (a) flown=false = ticket still valid at Duffel, consider cancelling via Duffel dashboard to avoid double-loss (no refund from airline but frees the seat); (b) flown=true = friendly fraud, no recovery path, add customer to internal block-list for future consideration. Check prior_status: if != 'confirmed', this is a double-loss (we refunded AND lost the chargeback), escalate.",
-        },
-        // ── S-02 fallback: unregistered alert types render here (never silently dropped) ──
+                  severity: "🚨 CRITICAL",
+                  subject: "Chargeback resolved — merchant lost, funds pulled back",
+                  action: "Dispute closed against us. Paystack has withdrawn the disputed amount. Booking transitioned to chargeback_lost. Check flown field: (a) flown=false = ticket still valid at Duffel, consider cancelling via Duffel dashboard to avoid double-loss (no refund from airline but frees the seat); (b) flown=true = friendly fraud, no recovery path, add customer to internal block-list for future consideration. Check prior_status: if != 'confirmed', this is a double-loss (we refunded AND lost the chargeback), escalate.",
+                },
+                // ── S-07 OTP throttle enforcement (per-IP from otp-precheck; per-phone from send-otp) ──
+                OTP_THROTTLE_HIT: {
+                  severity: "⚠️ WARN",
+                  subject: "OTP throttle hit — possible abuse",
+                  action: "Rate limit exceeded on OTP requests. Check context for scope (phone or ip) and scope_value_sha256. If ip scope: could be benign burst (shared NAT, corporate proxy) OR bot probing — check otp_attempts table for pattern and adjacent phone activity. If phone scope: possible SMS-bomb targeting a specific user — check if hash matches a real user via SELECT encode(digest(phone,'sha256'),'hex') FROM auth.users. If pattern persists or targets a real user, add IP to Cloudflare WAF block list (S-13) or reach out to affected user via WhatsApp fallback.",
+                },
+                // ── S-02 fallback: unregistered alert types render here (never silently dropped) ──
         UNKNOWN_ALERT_TYPE: {
           severity: "🟡 UNKNOWN",
           subject: "Unregistered alert type received",

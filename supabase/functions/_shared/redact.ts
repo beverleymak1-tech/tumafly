@@ -48,9 +48,15 @@ const ALLOWLIST_KEYS = new Set([
   "body_length",           // PAYSTACK_MALFORMED_WEBHOOK context
   "signature_header_present",  // PAYSTACK_SIGNATURE_FAILURE context
   "reason",                // generic reason string in many alerts
-  "message",               // generic message string in many alerts
-  "payload",               // nested payload (recursion will redact PII inside)
-]);
+    "message",               // generic message string in many alerts
+    "payload",               // nested payload (recursion will redact PII inside)
+    // S-07 OTP throttle context (non-PII operational fields; hash is irreversible) ─
+    "scope",                 // "phone" | "ip"
+    "scope_value_sha256",    // SHA256 hash of phone or IP (irreversible)
+    "window_minutes",        // rolling window size (integer)
+    "limit",                 // throttle threshold (integer)
+    "observed_count",        // count at time of trip (integer)
+  ]);
 
 export function redactContext(input: unknown): unknown {
   if (input === null || input === undefined) return input;
