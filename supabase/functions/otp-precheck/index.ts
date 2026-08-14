@@ -47,7 +47,7 @@ async function sha256Hex(input: string): Promise<string> {
     .join("");
 }
 
-async function alertFounderTyped(alert_type: string, context: Record<string, unknown>) {
+async function alertFounderTyped(alert_type: string, context: Record<string, unknown>, dedup_key?: string) {
   try {
     const res = await fetch(`${SUPABASE_URL}/functions/v1/alert-founder`, {
       method:  "POST",
@@ -55,7 +55,7 @@ async function alertFounderTyped(alert_type: string, context: Record<string, unk
         "Content-Type":  "application/json",
         "Authorization": `Bearer ${SUPABASE_SERVICE_ROLE}`,
       },
-      body: JSON.stringify({ alert_type, context }),
+      body: JSON.stringify({ alert_type, context, dedup_key }),
     });
     if (!res.ok) {
       const body = await res.text();
