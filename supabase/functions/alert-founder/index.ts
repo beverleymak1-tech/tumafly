@@ -8,6 +8,10 @@ const RESEND_API_KEY = Deno.env.get("RESEND_API_KEY")!;
 const FOUNDER_EMAIL = Deno.env.get("FOUNDER_EMAIL")!; // e.g. founder@tumafly.com
 const FOUNDER_NAME = Deno.env.get("FOUNDER_NAME") || "TumaFly Founder";
 
+// Module-scope Supabase client (S-34 cleanup — was instantiated per-request).
+// Reused across handler invocations within the same Edge Function isolate.
+const supabase = createClient(SUPABASE_URL, SERVICE_ROLE_KEY);
+
 const CORS_HEADERS = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers": "authorization, content-type",
@@ -51,6 +55,9 @@ type AlertType =
   | "CHARGEBACK_RESOLVED_LOST"             // charge.dispute.resolve — outcome merchant-lost, funds pulled back
   // S-07 OTP throttle enforcement (per-IP in otp-precheck EF; per-phone in send-otp EF)
   | "OTP_THROTTLE_HIT"                     // OTP request rate limit exceeded (per-phone 3/15min or 10/24h OR per-IP 10/15min)
+  // S-34 cleanup: send-otp legacy alerts migrated to typed contract
+  | "OTP_DELIVERY_FAILED"                  // Africa's Talking HTTP request failed (network/500/timeout); OTP not sent
+  | "OTP_STATUS_NON_SUCCESS"               // AT accepted request but returned non-Success for individual recipient; OTP undelivered
   // S-11 guest-token brute-force threshold (mint-guest-token EF)
   | "GUEST_TOKEN_ATTEMPT_THRESHOLD"        // pending_bookings.guest_token_attempts crossed MAX_ATTEMPTS (20) on this request
   | "UNKNOWN_ALERT_TYPE";                  // S-02 fallback — unregistered alert_type received, rendered synthetically to avoid silent-drop
@@ -173,7 +180,7 @@ const ALERT_CONFIG: Record<AlertType, { severity: string; subject: string; actio
         DUFFEL_ORDER_ACCEPTED_ASYNC: {
           severity: "ℹ️ INFO",
           subject: "Duffel returned 202 async accepted",
-          action: "Rare with type:instant — Duffel accepted the order but hasn't created it synchronously. Row stays at duffel_pending. retry-stuck-bookings (#9) will poll GET /air/orders?duffel_idempotency_key=<pending.id> and complete the transition. No action needed unless it stays stuck > 10 minutes.",
+          action: "Rare with type:instant — Duffel accepted the order but hasn't created it synchronously. Row stays at duffel_pending. retry-stuck-bookings (#9) will poll GET /air/orders?duffel_idempotency_key={pending.id} and complete the transition. No action needed unless it stays stuck > 10 minutes.",
         },
         CONFIRMATION_EMAIL_FAILED: {
           severity: "⚠️ HIGH",
@@ -207,6 +214,19 @@ const ALERT_CONFIG: Record<AlertType, { severity: string; subject: string; actio
                           subject: "OTP throttle hit — possible abuse",
                           action: "Rate limit exceeded on OTP requests. Check context for scope (phone or ip) and scope_value_sha256. If ip scope: could be benign burst (shared NAT, corporate proxy) OR bot probing — check otp_attempts table for pattern and adjacent phone activity. If phone scope: possible SMS-bomb targeting a specific user — check if hash matches a real user via SELECT encode(digest(phone,'sha256'),'hex') FROM auth.users. If pattern persists or targets a real user, add IP to Cloudflare WAF block list (S-13) or reach out to affected user via WhatsApp fallback.",
                           dedup_cooldown_minutes: 60,  // one alert per scope_value per hour
+                        },
+                        // ── S-34 cleanup: send-otp AT delivery-failure alerts (migrated from legacy alertFounder helper) ──
+                        OTP_DELIVERY_FAILED: {
+                          severity: "⚠️ HIGH",
+                          subject: "OTP SMS delivery failed at Africa's Talking",
+                          action: "Africa's Talking API returned non-2xx for an OTP send request. Customer did NOT receive their OTP; they'll be stuck at the sign-in screen. Check context: phone_sha256, at_http_status, at_message. If at_http_status is 5xx: likely AT outage — check status.africastalking.com. If 4xx: likely AT_API_KEY or account-balance issue — check AT dashboard for account balance + key validity. If pattern persists, reach out to affected user via WhatsApp fallback with a magic-link workaround (currently manual — future enhancement in send-otp).",
+                          // No dedup — each failure is distinct + intermittent; want visibility on all.
+                        },
+                        OTP_STATUS_NON_SUCCESS: {
+                          severity: "⚠️ HIGH",
+                          subject: "OTP send succeeded but AT reported per-recipient failure",
+                          action: "AT accepted the OTP send request but returned a non-Success status for one or more recipients. Customer may not have received their OTP. Check context: phone_sha256, at_status_code, at_message. Common at_status_code values: 401 (invalid number format), 402 (insufficient AT credit — TOP UP), 403 (blacklisted by carrier). If credit-related, top up AT account at dashboard.africastalking.com immediately. If number-related, reach out to affected user via WhatsApp fallback.",
+                          // No dedup — each failure is distinct + intermittent.
                         },
                         // ── S-11 guest-token brute-force threshold (mint-guest-token) ──
                         GUEST_TOKEN_ATTEMPT_THRESHOLD: {
@@ -318,7 +338,7 @@ serve(async (req) => {
         // Effective dedup_key: caller-provided > default = null (no dedup).
         // Dedup only engages if cfg.dedup_cooldown_minutes IS set AND we have a
         // dedup_key. Audit row is inserted either way (compliance, dashboarding).
-        const supabase = createClient(SUPABASE_URL, SERVICE_ROLE_KEY);
+        // Note: `supabase` is the module-scope singleton declared at top of file.
         const effectiveDedupKey: string | null = providedDedupKey || null;
         let suppressed = false;
         let suppressionReason: string | null = null;

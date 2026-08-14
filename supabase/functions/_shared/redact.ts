@@ -59,7 +59,12 @@ const ALLOWLIST_KEYS = new Set([
       // S-11 guest-token threshold context (non-PII operational fields) ─
       "attempt_count",         // guest_token_attempts value at threshold crossing (integer)
       "source_ip_hash",        // SHA256 hash of source IP (irreversible)
-    ]);
+      // S-34 cleanup: send-otp AT delivery-failure alerts (typed contract) ─
+      "phone_sha256",          // SHA256 hash of phone number (irreversible; distinct from scope_value_sha256 for clarity)
+      "at_http_status",        // Africa's Talking HTTP status code (integer)
+      "at_status_code",        // AT per-recipient status code (integer)
+      "at_message",            // AT status message string (short, non-PII)
+]);
 
 export function redactContext(input: unknown): unknown {
   if (input === null || input === undefined) return input;

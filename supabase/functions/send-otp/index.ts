@@ -106,21 +106,11 @@ async function recordPhoneAttempt(phone: string): Promise<void> {
   }
 }
 
-// ─── Legacy alert-founder helper (pre-existing, kept for existing callers) ───
-async function alertFounder(subject: string, body: string) {
-  try {
-    await fetch(`${SUPABASE_URL}/functions/v1/alert-founder`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "Authorization": `Bearer ${SUPABASE_SERVICE_ROLE}`,
-      },
-      body: JSON.stringify({ subject, body }),
-    });
-  } catch (e) {
-    console.error("[send-otp] alertFounder failed:", e);
-  }
-}
+// ─── Legacy alertFounder(subject, body) helper removed Session 34 cleanup ────
+// All call sites migrated to alertFounderTyped(alert_type, context) above.
+// New alert types registered in alert-founder: OTP_DELIVERY_FAILED,
+// OTP_STATUS_NON_SUCCESS. See TumaFly_SOP_Master.md §1.1 for the SERVICE_ROLE_KEY
+// canonical convention that motivated this migration.
 
 const OK = () =>
   new Response(JSON.stringify({}), {
@@ -229,18 +219,25 @@ Deno.serve(async (req) => {
     console.log("[send-otp] AT response:", JSON.stringify(result));
 
     if (!atResponse.ok) {
-      const msg = `Africa's Talking SMS delivery failed (${atResponse.status}).\nPhone: ${phone}\nResponse: ${JSON.stringify(result)}`;
-      console.error("[send-otp]", msg);
-      await alertFounder("⚠️ TumaFly OTP delivery failed", msg);
-      return OK();
+          console.error(`[send-otp] AT delivery failed status=${atResponse.status} response=${JSON.stringify(result).substring(0, 300)}`);
+          await alertFounderTyped("OTP_DELIVERY_FAILED", {
+            phone_sha256:   await sha256Hex(phone),
+            at_http_status: atResponse.status,
+            at_message:     typeof result?.SMSMessageData?.Message === "string" ? result.SMSMessageData.Message.substring(0, 200) : "no-message",
+          });
+          return OK();
     }
 
     const recipients = result?.SMSMessageData?.Recipients ?? [];
     const failed = recipients.filter((r: { status: string }) => r.status !== "Success");
     if (failed.length > 0) {
-      const msg = `AT returned non-Success status for OTP.\nPhone: ${phone}\nFailed recipients: ${JSON.stringify(failed)}`;
-      console.error("[send-otp]", msg);
-      await alertFounder("⚠️ TumaFly OTP status non-Success", msg);
+        const firstFailed = failed[0] as { status?: string; statusCode?: number };
+        console.error(`[send-otp] AT non-Success failed_count=${failed.length} first_status=${firstFailed?.status ?? "unknown"}`);
+        await alertFounderTyped("OTP_STATUS_NON_SUCCESS", {
+            phone_sha256:   await sha256Hex(phone),
+            at_status_code: firstFailed?.statusCode ?? 0,
+            at_message:     typeof firstFailed?.status === "string" ? firstFailed.status.substring(0, 200) : "no-status",
+        });
     }
 
     return OK();
