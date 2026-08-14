@@ -53,7 +53,7 @@ type AlertType =
   | "OTP_THROTTLE_HIT"                     // OTP request rate limit exceeded (per-phone 3/15min or 10/24h OR per-IP 10/15min)
   | "UNKNOWN_ALERT_TYPE";                  // S-02 fallback — unregistered alert_type received, rendered synthetically to avoid silent-drop
 
-const ALERT_CONFIG: Record<AlertType, { severity: string; subject: string; action: string }> = {
+const ALERT_CONFIG: Record<AlertType, { severity: string; subject: string; action: string; dedup_cooldown_minutes?: number }> = {
   PAID_NO_OFFER: {
     severity: "🚨 CRITICAL",
     subject: "Customer paid but Duffel offer expired",
@@ -200,11 +200,12 @@ const ALERT_CONFIG: Record<AlertType, { severity: string; subject: string; actio
                   action: "Dispute closed against us. Paystack has withdrawn the disputed amount. Booking transitioned to chargeback_lost. Check flown field: (a) flown=false = ticket still valid at Duffel, consider cancelling via Duffel dashboard to avoid double-loss (no refund from airline but frees the seat); (b) flown=true = friendly fraud, no recovery path, add customer to internal block-list for future consideration. Check prior_status: if != 'confirmed', this is a double-loss (we refunded AND lost the chargeback), escalate.",
                 },
                 // ── S-07 OTP throttle enforcement (per-IP from otp-precheck; per-phone from send-otp) ──
-                OTP_THROTTLE_HIT: {
-                  severity: "⚠️ WARN",
-                  subject: "OTP throttle hit — possible abuse",
-                  action: "Rate limit exceeded on OTP requests. Check context for scope (phone or ip) and scope_value_sha256. If ip scope: could be benign burst (shared NAT, corporate proxy) OR bot probing — check otp_attempts table for pattern and adjacent phone activity. If phone scope: possible SMS-bomb targeting a specific user — check if hash matches a real user via SELECT encode(digest(phone,'sha256'),'hex') FROM auth.users. If pattern persists or targets a real user, add IP to Cloudflare WAF block list (S-13) or reach out to affected user via WhatsApp fallback.",
-                },
+                        OTP_THROTTLE_HIT: {
+                          severity: "⚠️ WARN",
+                          subject: "OTP throttle hit — possible abuse",
+                          action: "Rate limit exceeded on OTP requests. Check context for scope (phone or ip) and scope_value_sha256. If ip scope: could be benign burst (shared NAT, corporate proxy) OR bot probing — check otp_attempts table for pattern and adjacent phone activity. If phone scope: possible SMS-bomb targeting a specific user — check if hash matches a real user via SELECT encode(digest(phone,'sha256'),'hex') FROM auth.users. If pattern persists or targets a real user, add IP to Cloudflare WAF block list (S-13) or reach out to affected user via WhatsApp fallback.",
+                          dedup_cooldown_minutes: 60,  // one alert per scope_value per hour
+                        },
                 // ── S-02 fallback: unregistered alert types render here (never silently dropped) ──
         UNKNOWN_ALERT_TYPE: {
           severity: "🟡 UNKNOWN",
@@ -274,7 +275,7 @@ serve(async (req) => {
   }
 
   try {
-    const { alert_type, context } = await req.json();
+      const { alert_type, context, dedup_key: providedDedupKey } = await req.json();
 
     // Hard-guard: alert_type must be present. Empty is a caller bug, not an
     // unknown-type (which S-02 now handles gracefully below).
@@ -303,54 +304,92 @@ serve(async (req) => {
       : { received_alert_type: alert_type, ...safeContext };
 
     const cfg = ALERT_CONFIG[effectiveType];
-    const html = buildEmailHtml(effectiveType, contextForEmail);
 
-    // Send email via Resend
-    const emailRes = await fetch("https://api.resend.com/emails", {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${RESEND_API_KEY}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        from: "TumaFly Alerts <alerts@tumafly.com>",
-        to: [FOUNDER_EMAIL],
-        subject: isKnown ? `${cfg.severity} ${cfg.subject}` : `${cfg.severity} ${cfg.subject} — ${alert_type}`,
-        html,
-      }),
-    });
+        // ── S-07c-alerts: dedup check ────────────────────────────────────────────
+        // Effective dedup_key: caller-provided > default = null (no dedup).
+        // Dedup only engages if cfg.dedup_cooldown_minutes IS set AND we have a
+        // dedup_key. Audit row is inserted either way (compliance, dashboarding).
+        const supabase = createClient(SUPABASE_URL, SERVICE_ROLE_KEY);
+        const effectiveDedupKey: string | null = providedDedupKey || null;
+        let suppressed = false;
+        let suppressionReason: string | null = null;
 
-    const emailData = await emailRes.json();
+        if (cfg.dedup_cooldown_minutes && effectiveDedupKey) {
+          const windowStart = new Date(Date.now() - cfg.dedup_cooldown_minutes * 60 * 1000).toISOString();
+          const { data: recent, error: dedupErr } = await supabase
+            .from("alerts")
+            .select("id")
+            .eq("alert_type", effectiveType)
+            .eq("dedup_key", effectiveDedupKey)
+            .gte("created_at", windowStart)
+            .limit(1);
+          if (dedupErr) {
+            console.error("[alert-founder] dedup query failed (proceeding):", dedupErr.message);
+            // Fail-open on dedup query error: fire the email anyway (don't miss a real alert).
+          } else if (recent && recent.length > 0) {
+            suppressed = true;
+            suppressionReason = "cooldown_active";
+            console.log(`[alert-founder] SUPPRESSED (cooldown): type=${effectiveType} dedup_key=${effectiveDedupKey}`);
+          }
+        }
 
-    // Log Resend failures so we know exactly what went wrong (previously silent)
-    if (!emailRes.ok) {
-      console.error("Resend email failed:", JSON.stringify(emailData));
-    }
+        // ── Dispatch (only if not suppressed) ────────────────────────────────────
+        let emailRes: Response | null = null;
+        let emailData: { id?: string; [k: string]: unknown } = {};
 
-    // Also log the alert to a table for audit/dashboard later.
-    // S-02: use `contextForEmail` (already redacted + provenance-tagged) for
-    // the stored payload; use `effectiveType` so unknown types land as
-    // UNKNOWN_ALERT_TYPE rather than the raw string (which may not be in the
-    // DB enum, if the column is enum-typed).
-    const supabase = createClient(SUPABASE_URL, SERVICE_ROLE_KEY);
-    await supabase.from("alerts").insert({
-      alert_type: effectiveType,
-      severity: cfg.severity.replace(/[^A-Z]/g, ""),
-      context: contextForEmail,
-      sent_to: FOUNDER_EMAIL,
-      email_id: emailData.id || null,
-      email_status: emailRes.ok ? "sent" : "failed",
-      ...(emailRes.ok ? {} : { context: { ...contextForEmail, resend_error: emailData } }),
-    });
+        if (!suppressed) {
+          const html = buildEmailHtml(effectiveType, contextForEmail);
+          emailRes = await fetch("https://api.resend.com/emails", {
+            method: "POST",
+            headers: {
+              Authorization: `Bearer ${RESEND_API_KEY}`,
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({
+              from: "TumaFly Alerts <alerts@tumafly.com>",
+              to: [FOUNDER_EMAIL],
+              subject: isKnown ? `${cfg.severity} ${cfg.subject}` : `${cfg.severity} ${cfg.subject} — ${alert_type}`,
+              html,
+            }),
+          });
+          emailData = await emailRes.json();
+          if (!emailRes.ok) {
+            console.error("Resend email failed:", JSON.stringify(emailData));
+          }
+        }
 
-    return new Response(JSON.stringify({
-      success: true,
-      alert_type,
-      email_sent: emailRes.ok,
-      email_id: emailData.id || null,
-    }), {
-      headers: { ...CORS_HEADERS, "Content-Type": "application/json" },
-    });
+        // ── Audit insert (ALWAYS — dedup metadata + delivery outcome) ────────────
+        const emailStatus = suppressed
+          ? "suppressed"
+          : (emailRes?.ok ? "sent" : "failed");
+        const insertContext = suppressed
+          ? contextForEmail
+          : (emailRes?.ok
+              ? contextForEmail
+              : { ...contextForEmail, resend_error: emailData });
+
+        await supabase.from("alerts").insert({
+          alert_type:         effectiveType,
+          severity:           cfg.severity.replace(/[^A-Z]/g, ""),
+          context:            insertContext,
+          sent_to:            FOUNDER_EMAIL,
+          email_id:           emailData.id || null,
+          email_status:       emailStatus,
+          dedup_key:          effectiveDedupKey,
+          suppressed:         suppressed,
+          suppression_reason: suppressionReason,
+        });
+
+        return new Response(JSON.stringify({
+          success:      true,
+          alert_type,
+          email_sent:   !suppressed && !!emailRes?.ok,
+          suppressed:   suppressed,
+          suppression_reason: suppressionReason,
+          email_id:     emailData.id || null,
+        }), {
+          headers: { ...CORS_HEADERS, "Content-Type": "application/json" },
+        });
 
   } catch (err) {
     console.error("alert-founder error:", err);

@@ -484,3 +484,6 @@ verify_jwt = false
 
 [functions.check-offer-freshness]
 verify_jwt = false
+
+[functions.otp-precheck]
+verify_jwt = false

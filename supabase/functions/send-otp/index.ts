@@ -35,7 +35,7 @@ async function sha256Hex(input: string): Promise<string> {
 // Typed alert-founder call (S-02 shape). Use for all NEW alerts.
 // Legacy alertFounder(subject, body) below is pre-existing tech debt — do not
 // use for new work; migrate incrementally in S-04 log-hygiene sweep.
-async function alertFounderTyped(alert_type: string, context: Record<string, unknown>) {
+async function alertFounderTyped(alert_type: string, context: Record<string, unknown>, dedup_key?: string) {
   try {
     const res = await fetch(`${SUPABASE_URL}/functions/v1/alert-founder`, {
       method:  "POST",
@@ -43,7 +43,7 @@ async function alertFounderTyped(alert_type: string, context: Record<string, unk
         "Content-Type":  "application/json",
         "Authorization": `Bearer ${SUPABASE_SERVICE_ROLE}`,
       },
-      body: JSON.stringify({ alert_type, context }),
+      body: JSON.stringify({ alert_type, context, dedup_key }),
     });
     if (!res.ok) {
       const body = await res.text();
@@ -177,28 +177,28 @@ Deno.serve(async (req) => {
         if (count15m !== null && count15m >= PHONE_WINDOW_15M_LIMIT) {
           console.warn(`[send-otp] throttle HIT (15m window): phone_15m=${count15m} limit=${PHONE_WINDOW_15M_LIMIT}`);
           const hashedPhone = await sha256Hex(phone);
-          await alertFounderTyped("OTP_THROTTLE_HIT", {
-            scope:              "phone",
-            scope_value_sha256: hashedPhone,
-            window_minutes:     15,
-            limit:              PHONE_WINDOW_15M_LIMIT,
-            observed_count:     count15m,
-          });
-          return OK();
-        }
+                await alertFounderTyped("OTP_THROTTLE_HIT", {
+                  scope:              "phone",
+                  scope_value_sha256: hashedPhone,
+                  window_minutes:     15,
+                  limit:              PHONE_WINDOW_15M_LIMIT,
+                  observed_count:     count15m,
+                }, `phone:${hashedPhone}`);
+                return OK();
+              }
 
-        if (count24h !== null && count24h >= PHONE_WINDOW_24H_LIMIT) {
+              if (count24h !== null && count24h >= PHONE_WINDOW_24H_LIMIT) {
           console.warn(`[send-otp] throttle HIT (24h window): phone_24h=${count24h} limit=${PHONE_WINDOW_24H_LIMIT}`);
           const hashedPhone = await sha256Hex(phone);
-          await alertFounderTyped("OTP_THROTTLE_HIT", {
-            scope:              "phone",
-            scope_value_sha256: hashedPhone,
-            window_minutes:     60 * 24,
-            limit:              PHONE_WINDOW_24H_LIMIT,
-            observed_count:     count24h,
-          });
-          return OK();
-        }
+                await alertFounderTyped("OTP_THROTTLE_HIT", {
+                  scope:              "phone",
+                  scope_value_sha256: hashedPhone,
+                  window_minutes:     60 * 24,
+                  limit:              PHONE_WINDOW_24H_LIMIT,
+                  observed_count:     count24h,
+                }, `phone:${hashedPhone}`);
+                return OK();
+              }
 
         // Under both limits — record this attempt, then proceed to SMS send.
         await recordPhoneAttempt(phone);

@@ -115,13 +115,13 @@ Deno.serve(async (req) => {
           // Threshold hit — do NOT record another attempt (would extend the window)
           console.log(`[otp-precheck] throttle HIT: total=${total} limit=${IP_LIMIT} — firing alert`);
           const hashedIp = await sha256Hex(ip);
-          await alertFounderTyped("OTP_THROTTLE_HIT", {
-        scope:              "ip",
-        scope_value_sha256: hashedIp,
-        window_minutes:     IP_WINDOW_MINUTES,
-        limit:              IP_LIMIT,
-        observed_count:     total,
-      });
+                await alertFounderTyped("OTP_THROTTLE_HIT", {
+                  scope:              "ip",
+                  scope_value_sha256: hashedIp,
+                  window_minutes:     IP_WINDOW_MINUTES,
+                  limit:              IP_LIMIT,
+                  observed_count:     total,
+                }, `ip:${hashedIp}`);
       return json(
         { ok: false, throttled: true, retry_after_minutes: IP_WINDOW_MINUTES },
         429,
