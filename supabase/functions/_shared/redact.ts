@@ -50,6 +50,34 @@ const SECRET_KEYS = new Set([
 // Redacted in email path only. Preserved in audit path.
 // Includes aliases for Paystack/Turnstile/legacy shapes (first_name/last_name)
 // alongside Duffel's given_name/family_name.
+//
+// Semantically-loaded schema names — added Session 35b Phase 4 after real
+// LHR-LGW verification exposed passport-number leak via Duffel's schema:
+//   - unique_identifier is Duffel's field for passport/ID number when nested
+//     under identity_documents[]. Also used for TICKET numbers (electronic
+//     ticket documents), but callers who need those always transform to a
+//     ticket_numbers array before passing to alerts, so blanket-redaction
+//     here is safe.
+//   - account_number is the loyalty-programme identifier inside
+//     loyalty_programme_accounts[]. Not currently in any alert context but
+//     added defensively — future alerts dumping a full Duffel passenger
+//     object would leak it otherwise.
+//   - expires_on and issuing_country_code are the remaining identity_documents
+//     fields. Codebase-wide grep confirms both appear ONLY in identity_documents
+//     context (no offer.expires_on or other non-PII usage in this repo).
+//   - nationality and gender are passenger-level fields. Nationality is
+//     country-level PII (ODPC Article 25 minimisation applies); gender is a
+//     protected characteristic (ODPC §2 special-category-adjacent). Grep
+//     confirms nationality has zero other usages; gender appears only in
+//     passenger-mapping code.
+//
+// DELIBERATELY NOT added despite being passenger-level:
+//   - title: cross-cutting. Used for Duffel error tree titles ("Unexpected
+//     Airline Error") and Paystack error titles — actionable operational
+//     fields in real PAID_NO_TICKET emails. Scrubbing would cause CS regression.
+//   - type: cross-cutting. Used for passenger.type ("adult"), identity_document.type
+//     ("passport"), duffel_error.errors[].type ("airline_error"), and
+//     documents[].type ("electronic_ticket"). All operational.
 const PII_KEYS = new Set([
   "email", "phone", "phone_number",
   "contact_email", "contact_phone",
@@ -58,6 +86,12 @@ const PII_KEYS = new Set([
   "first_name", "last_name", "full_name",
   "passenger_name", "customer_name",
   "passport_number", "passport_no",
+  "unique_identifier",     // Duffel: passport/ID number inside identity_documents[]
+  "account_number",        // Duffel: loyalty programme identifier
+  "expires_on",            // Duffel: identity_document expiry date
+  "issuing_country_code",  // Duffel: identity_document issuing country
+  "nationality",           // Duffel: passenger nationality (country-level PII)
+  "gender",                // Duffel: passenger gender (protected characteristic)
   "born_on", "dob", "date_of_birth", "birthdate",
 ]);
 
