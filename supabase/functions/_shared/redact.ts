@@ -51,12 +51,15 @@ const ALLOWLIST_KEYS = new Set([
     "message",               // generic message string in many alerts
     "payload",               // nested payload (recursion will redact PII inside)
     // S-07 OTP throttle context (non-PII operational fields; hash is irreversible) ─
-    "scope",                 // "phone" | "ip"
-    "scope_value_sha256",    // SHA256 hash of phone or IP (irreversible)
-    "window_minutes",        // rolling window size (integer)
-    "limit",                 // throttle threshold (integer)
-    "observed_count",        // count at time of trip (integer)
-  ]);
+      "scope",                 // "phone" | "ip"
+      "scope_value_sha256",    // SHA256 hash of phone or IP (irreversible)
+      "window_minutes",        // rolling window size (integer)
+      "limit",                 // throttle threshold (integer)
+      "observed_count",        // count at time of trip (integer)
+      // S-11 guest-token threshold context (non-PII operational fields) ─
+      "attempt_count",         // guest_token_attempts value at threshold crossing (integer)
+      "source_ip_hash",        // SHA256 hash of source IP (irreversible)
+    ]);
 
 export function redactContext(input: unknown): unknown {
   if (input === null || input === undefined) return input;

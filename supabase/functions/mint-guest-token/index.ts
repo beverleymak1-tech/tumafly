@@ -83,6 +83,43 @@ function jsonResponse(status: number, body: Record<string, unknown>): Response {
   });
 }
 
+// ─── S-11 helpers: IP extraction + SHA256 + typed alert dispatch ─────────────
+function extractClientIp(req: Request): string {
+  const cfIp = req.headers.get("cf-connecting-ip");
+  if (cfIp) return cfIp.trim();
+  const xreal = req.headers.get("x-real-ip");
+  if (xreal) return xreal.trim();
+  const xff = req.headers.get("x-forwarded-for");
+  if (xff) return xff.split(",")[0].trim();
+  return "unknown";
+}
+
+async function sha256Hex(input: string): Promise<string> {
+  const buf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(input));
+  return Array.from(new Uint8Array(buf))
+    .map(b => b.toString(16).padStart(2, "0"))
+    .join("");
+}
+
+async function alertFounderTyped(alert_type: string, context: Record<string, unknown>, dedup_key?: string) {
+  try {
+    const res = await fetch(`${SUPABASE_URL}/functions/v1/alert-founder`, {
+      method:  "POST",
+      headers: {
+        "Content-Type":  "application/json",
+        "Authorization": `Bearer ${SERVICE_ROLE_KEY}`,
+      },
+      body: JSON.stringify({ alert_type, context, dedup_key }),
+    });
+    if (!res.ok) {
+      const body = await res.text();
+      console.error(`[mint-guest-token] alertFounderTyped non-2xx: status=${res.status} type=${alert_type} body=${body.substring(0, 300)}`);
+    }
+  } catch (e) {
+    console.error(`[mint-guest-token] alertFounderTyped threw for type=${alert_type}:`, e instanceof Error ? e.message : e);
+  }
+}
+
 serve(async (req) => {
   // CORS preflight
   if (req.method === "OPTIONS") {
@@ -145,22 +182,37 @@ serve(async (req) => {
   }
 
   // Constant-time comparison
-  if (!constantTimeEquals(guest_token, pending.guest_token)) {
-    // Increment counter. Use a raw increment via update — race conditions
-    // are fine here (worst case: two concurrent bad attempts increment by
-    // one instead of two; still bounded by MAX_ATTEMPTS on the next check).
-    const { error: updateErr } = await supabase
-      .from("pending_bookings")
-      .update({ guest_token_attempts: pending.guest_token_attempts + 1 })
-      .eq("id", pending_booking_id);
+    if (!constantTimeEquals(guest_token, pending.guest_token)) {
+      // Increment counter. Use a raw increment via update — race conditions
+      // are fine here (worst case: two concurrent bad attempts increment by
+      // one instead of two; still bounded by MAX_ATTEMPTS on the next check).
+      const newCount = pending.guest_token_attempts + 1;
+      const { error: updateErr } = await supabase
+        .from("pending_bookings")
+        .update({ guest_token_attempts: newCount })
+        .eq("id", pending_booking_id);
 
-    if (updateErr) {
-      console.error("[mint-guest-token] Failed to increment attempts counter:", updateErr);
-      // Don't fail the response — the 403 is still correct.
+      if (updateErr) {
+        console.error("[mint-guest-token] Failed to increment attempts counter:", updateErr);
+        // Don't fail the response — the 403 is still correct.
+      }
+
+      // S-11: threshold-crossing alert. Fires exactly once per booking (the
+      // request that pushes the counter from <20 to >=20). Subsequent requests
+      // hit the early 429 branch and never reach this code.
+      if (pending.guest_token_attempts < MAX_ATTEMPTS && newCount >= MAX_ATTEMPTS) {
+        console.warn(`[mint-guest-token] threshold CROSSED for pending_booking_id=${pending_booking_id} newCount=${newCount}`);
+        const sourceIp = extractClientIp(req);
+        const sourceIpHash = await sha256Hex(sourceIp);
+        await alertFounderTyped("GUEST_TOKEN_ATTEMPT_THRESHOLD", {
+          pending_booking_id: pending_booking_id,
+          attempt_count:      newCount,
+          source_ip_hash:     sourceIpHash,
+        }, `pending_booking_id:${pending_booking_id}`);
+      }
+
+      return jsonResponse(403, { error: "Invalid token" });
     }
-
-    return jsonResponse(403, { error: "Invalid token" });
-  }
 
   // Token matches — mint the JWT.
   const now = Math.floor(Date.now() / 1000);

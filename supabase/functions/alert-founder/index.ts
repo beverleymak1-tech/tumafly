@@ -51,6 +51,8 @@ type AlertType =
   | "CHARGEBACK_RESOLVED_LOST"             // charge.dispute.resolve — outcome merchant-lost, funds pulled back
   // S-07 OTP throttle enforcement (per-IP in otp-precheck EF; per-phone in send-otp EF)
   | "OTP_THROTTLE_HIT"                     // OTP request rate limit exceeded (per-phone 3/15min or 10/24h OR per-IP 10/15min)
+  // S-11 guest-token brute-force threshold (mint-guest-token EF)
+  | "GUEST_TOKEN_ATTEMPT_THRESHOLD"        // pending_bookings.guest_token_attempts crossed MAX_ATTEMPTS (20) on this request
   | "UNKNOWN_ALERT_TYPE";                  // S-02 fallback — unregistered alert_type received, rendered synthetically to avoid silent-drop
 
 const ALERT_CONFIG: Record<AlertType, { severity: string; subject: string; action: string; dedup_cooldown_minutes?: number }> = {
@@ -205,6 +207,13 @@ const ALERT_CONFIG: Record<AlertType, { severity: string; subject: string; actio
                           subject: "OTP throttle hit — possible abuse",
                           action: "Rate limit exceeded on OTP requests. Check context for scope (phone or ip) and scope_value_sha256. If ip scope: could be benign burst (shared NAT, corporate proxy) OR bot probing — check otp_attempts table for pattern and adjacent phone activity. If phone scope: possible SMS-bomb targeting a specific user — check if hash matches a real user via SELECT encode(digest(phone,'sha256'),'hex') FROM auth.users. If pattern persists or targets a real user, add IP to Cloudflare WAF block list (S-13) or reach out to affected user via WhatsApp fallback.",
                           dedup_cooldown_minutes: 60,  // one alert per scope_value per hour
+                        },
+                        // ── S-11 guest-token brute-force threshold (mint-guest-token) ──
+                        GUEST_TOKEN_ATTEMPT_THRESHOLD: {
+                          severity: "⚠️ HIGH",
+                          subject: "Guest-token brute-force threshold reached",
+                          action: "A pending_bookings row's guest_token_attempts counter crossed MAX_ATTEMPTS (20). All subsequent mint-guest-token requests for this booking will 429 until counter is reset. Check context: pending_booking_id (safe to log), attempt_count, source_ip_hash. Investigate: SELECT id, user_id, guest_pending_booking_id, status, created_at FROM pending_bookings WHERE id = '<pending_booking_id>'. If the affected booking is a real customer's, contact them via their auth.users email and ask if they hit the resend link repeatedly. If suspicious pattern (multiple bookings from same source_ip_hash), add IP to Cloudflare WAF block list (S-13). To unblock a legitimate customer: UPDATE pending_bookings SET guest_token_attempts = 0 WHERE id = '<id>'.",
+                          dedup_cooldown_minutes: 60,  // dedup per pending_booking_id per hour (mechanic naturally fires once, dedup is defensive)
                         },
                 // ── S-02 fallback: unregistered alert types render here (never silently dropped) ──
         UNKNOWN_ALERT_TYPE: {
