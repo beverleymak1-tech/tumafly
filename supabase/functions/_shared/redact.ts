@@ -1,100 +1,131 @@
-// _shared/redact.ts
-// PII redaction helper for alert payloads and log statements.
-// Ship: S-02 (alert-founder). Reused by: S-04 (log hygiene sweep).
+// _shared/redact.ts — v2 (Session 35b, Architecture B)
+// Boundary-only redaction for the alerts pipeline.
 //
-// Rules (applied recursively):
-//   1. Keys matching PII_KEYS  → value replaced with "[REDACTED]"
-//   2. Values that are objects/arrays → recurse (regardless of key)
-//   3. Scalar values with allowlisted keys → kept as-is
-//   4. Scalar values with unknown keys → replaced with "[REDACTED]"
+// Design (see TumaFly_Session35b_Design_Audit.md §2.1-2):
+//   Architecture B: redact at trust-boundary crossings, not at DB insert.
+//   The alerts table itself is inside the trust boundary (RLS deny-all +
+//   service-role-only + encrypted-at-rest + 365d retention). Raw context
+//   preserved there enables §26 data-subject access, RTBF Stage 4
+//   anonymization, and forensic incident reconstruction. Redaction happens
+//   only on the outbound email render (crosses to Resend + inbox).
 //
-// Rule 2 sits above Rules 3-4 so nested PII inside allowlisted or unknown
-// parent keys is still scrubbed. Rule 1 sits above Rule 2 so a PII key
-// pointing at an object (e.g. { "email": { "primary": "x@y" } }) still
-// redacts wholesale.
+// Two categories, applied recursively via walk():
+//   SECRET_KEYS  — payment/auth credentials with high blast radius.
+//                   Redacted in BOTH email and audit paths. Never needed
+//                   anywhere in the alerts pipeline; defense-in-depth.
+//   PII_KEYS     — personal identifiers (email/phone/passport/DOB/names).
+//                   Redacted in email path ONLY. Preserved in audit path
+//                   because §26 access + RTBF Stage 4 + incident forensics
+//                   all require identifier-to-alert mapping capability.
+//
+// Rule order (per key/value pair):
+//   A. key in SECRET_KEYS         → "[REDACTED]", regardless of value type
+//   B. key in PII_KEYS (email mode only) → "[REDACTED]", regardless of value type
+//   C. value is object/array      → recurse
+//   D. default                    → passthrough
+//
+// Rule A above B: correct handling of edge case { authorization_code: {...} }.
+// Rule B above C: correct handling of nested { contact: { email: "..." } }.
+// Rule C above D: unknown-shaped nested objects still get walked so nested
+//                 SECRETS + PII get caught by rules A/B one level deeper.
+//
+// Drift-warning heuristic: any scalar key matching a broad SECRET pattern
+// that is NOT in SECRET_KEYS emits a console.warn (never the value, only
+// the key name + call site marker). Zero behavior change — passive drift
+// visibility so a Session-33-class allowlist-drift can't recur silently.
 
+// ── SECRET_KEYS ──────────────────────────────────────────────────────────
+// Redacted in both email and audit paths.
+const SECRET_KEYS = new Set([
+  "authorization_code",   // Paystack reusable card-charge token (nests inside verify_response.data.authorization)
+  "access_code",          // Paystack transaction session code
+  "password",
+  "token",                // generic bearer/auth tokens
+  "secret",
+  "api_key",
+  "bearer",
+]);
+
+// ── PII_KEYS ─────────────────────────────────────────────────────────────
+// Redacted in email path only. Preserved in audit path.
+// Includes aliases for Paystack/Turnstile/legacy shapes (first_name/last_name)
+// alongside Duffel's given_name/family_name.
 const PII_KEYS = new Set([
   "email", "phone", "phone_number",
   "contact_email", "contact_phone",
   "customer_email", "customer_phone",
   "given_name", "family_name", "middle_name",
+  "first_name", "last_name", "full_name",
   "passenger_name", "customer_name",
   "passport_number", "passport_no",
-  "born_on", "dob", "date_of_birth",
-  "authorization_code", "access_code",
+  "born_on", "dob", "date_of_birth", "birthdate",
 ]);
 
-const ALLOWLIST_KEYS = new Set([
-  "merchant_ref", "pending_booking_id", "booking_id",
-  "duffel_order_id", "booking_reference",
-  "paystack_tx_id", "alert_type", "error_code",
-  "http_status", "timestamp",
-  "retry_count", "attempt_number",
-  "received_alert_type",  // S-02 fallback: preserve which unknown type came in
-  // S-06 dispute-lifecycle operational fields (non-PII, non-secret) ─────
-  "dispute_code",          // Paystack DISP_xxx identifier
-  "dispute_reason",        // e.g. "unauthorized", "duplicate", "product-not-received"
-  "dispute_outcome",       // "won" | "lost"
-  "prior_status",          // bookings.status before the transition
-  "flown",                 // boolean: has the flight already flown?
-  "verify_status",         // Paystack verify endpoint status echo
-  "verify_gateway_response",  // Paystack gateway_response echo
-  "event_type",            // Paystack webhook event name (already used in refund alerts)
-  "reference",             // Paystack transaction reference (echo of merchant_ref)
-  "expected_kes",          // AMOUNT_MISMATCH context
-  "received_kes",          // AMOUNT_MISMATCH context
-  "webhook_amount_kes",    // AMOUNT_MISMATCH context
-  "resend_error",          // S-02 email-failure branch preserves this
-  "body_length",           // PAYSTACK_MALFORMED_WEBHOOK context
-  "signature_header_present",  // PAYSTACK_SIGNATURE_FAILURE context
-  "reason",                // generic reason string in many alerts
-    "message",               // generic message string in many alerts
-    "payload",               // nested payload (recursion will redact PII inside)
-    // S-07 OTP throttle context (non-PII operational fields; hash is irreversible) ─
-      "scope",                 // "phone" | "ip"
-      "scope_value_sha256",    // SHA256 hash of phone or IP (irreversible)
-      "window_minutes",        // rolling window size (integer)
-      "limit",                 // throttle threshold (integer)
-      "observed_count",        // count at time of trip (integer)
-      // S-11 guest-token threshold context (non-PII operational fields) ─
-      "attempt_count",         // guest_token_attempts value at threshold crossing (integer)
-      "source_ip_hash",        // SHA256 hash of source IP (irreversible)
-      // S-34 cleanup: send-otp AT delivery-failure alerts (typed contract) ─
-      "phone_sha256",          // SHA256 hash of phone number (irreversible; distinct from scope_value_sha256 for clarity)
-      "at_http_status",        // Africa's Talking HTTP status code (integer)
-      "at_status_code",        // AT per-recipient status code (integer)
-      "at_message",            // AT status message string (short, non-PII)
+// ── Drift-warning heuristic ──────────────────────────────────────────────
+// Matches keys likely to hold a credential. Used ONLY for a console.warn on
+// keys that AREN'T in SECRET_KEYS but look like they could hold one — passive
+// signal to review whether SECRET_KEYS needs extending. NEVER used to redact
+// (avoids false-positive scrubbing of e.g. dedup_key, merchant_ref, email_id).
+const SECRET_LOOKING = /(secret|token|password|api[_-]?key|bearer|credential|auth[_-]?code)/i;
+
+// Known-safe exceptions to the heuristic (would otherwise trigger warns).
+const SECRET_HEURISTIC_EXCEPTIONS = new Set([
+  "dedup_key",           // alerts dedup framework
+  "merchant_ref_key",    // hypothetical — reserved
+  "phone_sha256",        // hashed, not a secret
+  "source_ip_hash",      // hashed, not a secret
+  "scope_value_sha256",  // hashed, not a secret
+  "webhook_secret_header_present",  // boolean marker, not the secret itself
 ]);
 
-export function redactContext(input: unknown): unknown {
+function walk(input: unknown, stripPII: boolean): unknown {
   if (input === null || input === undefined) return input;
-  if (Array.isArray(input)) return input.map(redactContext);
+  if (Array.isArray(input)) return input.map((v) => walk(v, stripPII));
   if (typeof input !== "object") return input;
 
   const out: Record<string, unknown> = {};
   for (const [k, v] of Object.entries(input as Record<string, unknown>)) {
     const key = k.toLowerCase();
 
-    // Rule 1: PII keys always redact, regardless of value type.
-    if (PII_KEYS.has(key)) {
-      out[k] = "[REDACTED]";
-      continue;
+    // Rule A: secrets always redact
+    if (SECRET_KEYS.has(key)) { out[k] = "[REDACTED]"; continue; }
+
+    // Passive drift-warn: scalar key matches SECRET pattern but isn't listed
+    if (
+      typeof v !== "object" &&
+      SECRET_LOOKING.test(key) &&
+      !SECRET_HEURISTIC_EXCEPTIONS.has(key)
+    ) {
+      console.warn(`[redact] Possible undeclared SECRET-shaped key: "${k}" — review SECRET_KEYS in _shared/redact.ts`);
     }
 
-    // Rule 2: Objects and arrays always recurse, regardless of key.
-    if (v !== null && typeof v === "object") {
-      out[k] = redactContext(v);
-      continue;
-    }
+    // Rule B: PII redacts on email path only
+    if (stripPII && PII_KEYS.has(key)) { out[k] = "[REDACTED]"; continue; }
 
-    // Rule 3: Allowlisted scalar keys pass through.
-    if (ALLOWLIST_KEYS.has(key)) {
-      out[k] = v;
-      continue;
-    }
+    // Rule C: recurse into objects/arrays
+    if (v !== null && typeof v === "object") { out[k] = walk(v, stripPII); continue; }
 
-    // Rule 4: Unknown scalar keys redact.
-    out[k] = "[REDACTED]";
+    // Rule D: passthrough
+    out[k] = v;
   }
   return out;
+}
+
+// ── Public API ───────────────────────────────────────────────────────────
+
+/** Full scrub for outbound email (SECRET_KEYS + PII_KEYS + recursion). */
+export function redactForEmail(input: unknown): unknown {
+  return walk(input, true);
+}
+
+/** Audit-row scrub (SECRET_KEYS + recursion only). PII preserved for
+ *  §26 access, RTBF Stage 4, and forensic reconstruction. */
+export function redactForAudit(input: unknown): unknown {
+  return walk(input, false);
+}
+
+/** @deprecated — use redactForEmail. Kept transiently for backward compat
+ *  during Session 35b/c rollout. Will be removed once no import remains. */
+export function redactContext(input: unknown): unknown {
+  return redactForEmail(input);
 }

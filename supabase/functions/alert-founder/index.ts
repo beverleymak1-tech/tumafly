@@ -1,6 +1,6 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
-import { redactContext } from "../_shared/redact.ts";
+import { redactForEmail, redactForAudit } from "../_shared/redact.ts";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SERVICE_ROLE_KEY = Deno.env.get("SERVICE_ROLE_KEY")!;
@@ -315,9 +315,16 @@ serve(async (req) => {
       });
     }
 
-    // S-02: PII-redact the incoming context BEFORE it renders to email or
-    // lands in the alerts table. redactContext walks nested objects.
-    const safeContext = redactContext(context || {}) as Record<string, unknown>;
+    // Session 35b Architecture B: split redaction paths.
+    //   emailContext — PII + SECRETS scrubbed (outbound to Resend + inbox)
+    //   auditContext — SECRETS only (raw PII preserved for §26 access,
+    //                  RTBF Stage 4, and forensic reconstruction; the
+    //                  alerts table is inside the trust boundary — RLS
+    //                  deny-all + service-role-only + 365d retention).
+    // See TumaFly_Session35b_Design_Audit.md §2.1-3.
+    const rawContext = (context || {}) as Record<string, unknown>;
+    const emailContext = redactForEmail(rawContext) as Record<string, unknown>;
+    const auditContext = redactForAudit(rawContext) as Record<string, unknown>;
 
     // S-02: UNKNOWN_ALERT_TYPE fallback. Previous behaviour was HTTP 400 on
     // unregistered types — silently dropped. Now: render synthetically so
@@ -328,9 +335,13 @@ serve(async (req) => {
       : "UNKNOWN_ALERT_TYPE";
 
     // Preserve which unknown type came in so operators can trace the caller.
+    // Applied to both paths so email + audit both surface the received type.
     const contextForEmail = isKnown
-      ? safeContext
-      : { received_alert_type: alert_type, ...safeContext };
+      ? emailContext
+      : { received_alert_type: alert_type, ...emailContext };
+    const contextForAudit = isKnown
+      ? auditContext
+      : { received_alert_type: alert_type, ...auditContext };
 
     const cfg = ALERT_CONFIG[effectiveType];
 
@@ -388,14 +399,17 @@ serve(async (req) => {
         }
 
         // ── Audit insert (ALWAYS — dedup metadata + delivery outcome) ────────────
+        // Session 35b: audit row uses contextForAudit (PII preserved, secrets stripped).
+        // resend_error is defensively passed through redactForAudit in case Resend
+        // ever echoes a credential-shaped field in its error responses.
         const emailStatus = suppressed
           ? "suppressed"
           : (emailRes?.ok ? "sent" : "failed");
         const insertContext = suppressed
-          ? contextForEmail
+          ? contextForAudit
           : (emailRes?.ok
-              ? contextForEmail
-              : { ...contextForEmail, resend_error: emailData });
+              ? contextForAudit
+              : { ...contextForAudit, resend_error: redactForAudit(emailData) });
 
         await supabase.from("alerts").insert({
           alert_type:         effectiveType,
