@@ -352,6 +352,20 @@ serve(async (req) => {
         triggered: deltaPct > 0.01,
       });
       if (deltaPct > 0.01) {
+        // Session 35b: fire PRICE_DRIFT alert for aggregate monitoring per SOP §4.2
+        // sentinel inventory. Individual fires expected under normal Duffel fare movement;
+        // sustained pattern or same-offer repeats indicate cache staleness / pricing
+        // turbulence. See ALERT_CONFIG.PRICE_DRIFT.action for query template.
+        await alertFounder("PRICE_DRIFT", {
+          offer_id,
+          expected_kes: expected_price_kes,
+          actual_kes: baseAmountKES,
+          delta_kes: deltaKES,
+          delta_pct: deltaPct,
+          customer_email: contact?.email,
+          customer_phone: contact?.phone_number,
+          source: "initialize-payment (price-drift check)",
+        });
         return new Response(JSON.stringify({
           code: "PRICE_DRIFT",
           expected_kes: expected_price_kes,

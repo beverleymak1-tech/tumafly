@@ -22,6 +22,7 @@ type AlertType =
   | "PAID_NO_TICKET"                       // customer paid, Duffel rejected the booking
   | "BOOKED_NO_DB_RECORD"                  // ticket issued but our DB write failed
   | "AMOUNT_MISMATCH"                      // processor reported a different amount than expected
+  | "PRICE_DRIFT"                          // Duffel offer price shifted >1% between search and payment init; customer prompted to re-confirm at new price
   | "PAYMENT_FAILED"                       // payment didn't complete (informational only)
   | "UNHANDLED_ERROR"                      // webhook crashed
   // Batch 2 refund automation (Session 25)
@@ -82,6 +83,11 @@ const ALERT_CONFIG: Record<AlertType, { severity: string; subject: string; actio
     severity: "⚠️ HIGH",
     subject: "Payment amount does not match expected total",
     action: "Investigate. May indicate tampering or a processor bug. Contact customer to confirm.",
+  },
+  PRICE_DRIFT: {
+    severity: "ℹ️ INFO",
+    subject: "Duffel offer price drifted >1% at payment init — customer prompted to re-confirm",
+    action: "Individual fires are normal (Duffel fare updates between search and booking). Frontend has returned 409 PRICE_DRIFT to the customer; they re-confirm at the new price or abandon. Investigate only on sustained patterns: many fires within a short window (Duffel-side pricing turbulence) OR repeats on same offer_id (frontend cache staleness OR user retry loops). Baseline expectation ~0.5-2% of initialize-payment calls under normal Duffel conditions; anomalous >5% sustained warrants Duffel Support ticket. Query: SELECT date_trunc('hour', created_at), COUNT(*) FROM alerts WHERE alert_type='PRICE_DRIFT' GROUP BY 1 ORDER BY 1 DESC LIMIT 24;",
   },
   PAYMENT_FAILED: {
     severity: "ℹ️ INFO",
