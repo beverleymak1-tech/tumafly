@@ -136,14 +136,27 @@ dig +short TXT _dmarc.tumafly.com @1.1.1.1
 - `"v=DMARC1; p=quarantine; rua=mailto:re+vziiql8vdh6@dmarc.postmarkapp.com, mailto:dmarc@tumafly.com; aspf=r; adkim=r"`
 
 **Report ingestion:**
+
 1. **Postmark DMARC Weekly Digest** — parsed, human-readable summary emailed weekly (Monday mornings) to `security@tumafly.com`. Postmark dashboard shows tumafly.com verified 2026-08-17. Free tier; account signed up with `security@tumafly.com`.
 2. **Google Group `dmarc@tumafly.com`** — raw XML archive of every RFC 7489 aggregate report. Group forwards to founder's personal Gmail. External posting enabled (required for receivers like Gmail/Yahoo/Microsoft to deliver reports); membership open to organization. External-delivery verified 2026-08-17 by test send from `tumelowrites@proton.me` → landed successfully via forwarding.
 
 **Rationale for dual ingestion:** Postmark provides usable weekly signal for routine review; Google Group preserves raw XMLs for audit-grade evidence and post-incident forensic analysis. Belt-and-suspenders — if Postmark ever has an outage, reports still land in the Google Group.
 
-**Subdomain policy:** absent `sp=` tag means subdomains inherit main policy (`p=quarantine`) per RFC 7489.
+**Subdomain policy:** absent `sp=` tag means subdomains inherit main policy (`p=quarantine`) per RFC 7489. Google's first aggregate report (see below) echoed back `sp=quarantine` AND `np=quarantine` (non-existent subdomain policy) as inherited from the main `p=` value, confirming the inheritance works as expected without needing explicit tags.
 
-Empirical validation via live send 2026-08-17: `DMARC: 'PASS'` at Gmail receiver — full authentication chain (SPF PASS + DKIM PASS + relaxed alignment on both) evaluates DMARC PASS.
+**Empirical validation:**
+
+- **Live send-test 2026-08-17:** `DMARC: 'PASS'` at Gmail receiver — full authentication chain (SPF PASS + DKIM PASS + relaxed alignment on both) evaluates DMARC PASS.
+
+- **First DMARC aggregate report from Google received 2026-08-17** (within 24h of deployment) — validates full ingestion chain functioning end-to-end. Report filename `google.com!tumafly.com!1786838400!1786924799.xml` covering the 24-hour observation window. Contents:
+    - 1 message observed from source IP `209.85.220.41` (Google Workspace outbound MTA — matches send-test)
+    - SPF: PASS with domain `tumafly.com`
+    - DKIM: PASS with `google` selector, domain `tumafly.com`
+    - DMARC disposition: `none` (message passed all checks, no policy action)
+    - Google's report echoed policy as `p=quarantine, sp=quarantine, np=quarantine, adkim=r, aspf=r` — confirms subdomain policy inheritance working
+    - Report delivered successfully to `dmarc@tumafly.com` Google Group + forwarded to founder Gmail (confirms Google Group external-posting permission correctly configured)
+
+Cross-checks: (a) Postmark, (b) Google Group raw XML archive, (c) send-test — all three converge on "authentication chain healthy, ingestion working."
 
 **Screenshots:**
 - `docs/security/screenshots/s13_dmarc_postmark.png` — Postmark verified state
@@ -185,6 +198,12 @@ Subject: External post test
 ```
 
 Expected: delivered without bounce; forwards to configured Google Group member(s). If bounces with "you may not have permission to post," Google Group's external posting permission is misconfigured (see §2.5).
+
+### 3.5 DMARC ingestion — passive validation
+
+After ~24h of deployment, first Google aggregate report should arrive at `dmarc@tumafly.com`. Filename pattern `google.com!tumafly.com!<start-ts>!<end-ts>.xml`. Absence after 24-48h suggests ingestion misconfiguration.
+
+Weekly: Postmark digest arrives Monday morning at `security@tumafly.com`.
 
 ---
 
@@ -246,6 +265,7 @@ See SOP Master §6 — Configuration Change Management.
 - DKIM (Google + Resend selectors): pre-Session-35 (verified 2026-08-17)
 - DMARC policy `p=quarantine`: pre-Session-35 (verified 2026-08-17)
 - DMARC dual-ingestion (Postmark + Google Group): 2026-08-17
+- First Google DMARC aggregate report received: 2026-08-17 (within 24h — validates full ingestion chain)
 
 **Configured by:** Founder (Bev)
 **Session:** 35d
