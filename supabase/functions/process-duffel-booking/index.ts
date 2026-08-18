@@ -200,7 +200,7 @@ serve(async (req) => {
           return digits.length >= 4 ? digits.slice(-4) : null;
         })(mpesaMobile);
       } else {
-        console.warn("[process-duffel-booking] Paystack verify disagreed (soft-degrade):", verifyData);
+        console.warn("[process-duffel-booking] Paystack verify disagreed (soft-degrade)");
         await alertFounder("PROCESS_DUFFEL_PAYSTACK_VERIFY_MISMATCH", {
           merchant_ref: reference,
           paystack_tx_id: paystackTxId,

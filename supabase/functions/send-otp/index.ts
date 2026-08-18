@@ -144,7 +144,8 @@ Deno.serve(async (req) => {
       });
     }
 
-    console.log("[send-otp] Verified payload:", JSON.stringify(payload));
+    // Session 35b S-04: removed console.log of signed payload — contained phone (PII) + OTP (secret).
+    // Signature verification success is implicit; failure path (line 140) still logs error object.
 
     // ── 2. Extract phone + OTP ───────────────────────────────────────────────
     const phone = payload?.user?.phone ?? "";
@@ -216,10 +217,11 @@ Deno.serve(async (req) => {
     });
 
     const result = await atResponse.json();
-    console.log("[send-otp] AT response:", JSON.stringify(result));
+    // Session 35b S-04: removed console.log of AT response — result.SMSMessageData.Recipients
+    // may echo phone. Success is implicit from atResponse.status check below.
 
     if (!atResponse.ok) {
-          console.error(`[send-otp] AT delivery failed status=${atResponse.status} response=${JSON.stringify(result).substring(0, 300)}`);
+          console.error(`[send-otp] AT delivery failed status=${atResponse.status}`);
           await alertFounderTyped("OTP_DELIVERY_FAILED", {
             phone_sha256:   await sha256Hex(phone),
             at_http_status: atResponse.status,

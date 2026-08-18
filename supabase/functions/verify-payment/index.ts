@@ -240,7 +240,7 @@ serve(async (req) => {
     if (!verifyRes.ok) {
       // Paystack returned non-2xx. Could be a transient issue on their side.
       // Treat as processing so the frontend polls again.
-      console.warn("[verify-payment] Paystack verify non-2xx:", verifyRes.status, verifyData);
+      console.warn(`[verify-payment] Paystack verify non-2xx: status=${verifyRes.status}`);
       return respond("processing", {
         message: "Confirming your payment...",
       });

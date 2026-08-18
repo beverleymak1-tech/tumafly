@@ -400,7 +400,7 @@ serve(async (req) => {
           });
           emailData = await emailRes.json();
           if (!emailRes.ok) {
-            console.error("Resend email failed:", JSON.stringify(emailData));
+          console.error(`Resend email failed: status=${emailRes?.status} name=${emailData?.name || "unknown"}`);
           }
         }
 

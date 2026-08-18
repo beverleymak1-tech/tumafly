@@ -339,7 +339,7 @@ serve(async (req) => {
 
     if (!resendRes.ok) {
       const body = await resendRes.text();
-      console.error("send-refund-notification: resend failed", resendRes.status, body);
+      console.error(`send-refund-notification: resend failed status=${resendRes.status} refund=${refund.id}`);
       return new Response(`resend failed: ${resendRes.status}`, {
         status: 502,
         headers: CORS_HEADERS,

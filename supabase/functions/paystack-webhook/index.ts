@@ -537,7 +537,7 @@ serve(async (req) => {
     const verifyData = await verifyRes.json();
 
     if (!verifyRes.ok || !verifyData?.status || verifyData?.data?.status !== "success") {
-      console.error("[paystack-webhook] Verify endpoint disagrees with webhook:", verifyData);
+      console.error("[paystack-webhook] Verify endpoint disagrees with webhook");
       await supabase
         .from("pending_bookings")
         .update({ status: "payment_invalid", payment_method: channel })

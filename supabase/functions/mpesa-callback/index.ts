@@ -102,7 +102,7 @@ serve(async (req) => {
     const stkCallback = body?.Body?.stkCallback;
 
     if (!stkCallback) {
-      console.error("Invalid Daraja callback shape:", body);
+      console.error("Invalid Daraja callback shape");
       return darajaAck(); // ack anyway so Daraja doesn't retry forever
     }
 
