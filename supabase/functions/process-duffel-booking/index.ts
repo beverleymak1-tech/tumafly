@@ -42,7 +42,7 @@ import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
 import {
-  DUFFEL_API_KEY, DUFFEL_BASE_URL, DUFFEL_MODE,
+  DUFFEL_WRITE_KEY, DUFFEL_BASE_URL, DUFFEL_MODE,
   SUPABASE_URL, SERVICE_ROLE_KEY,
   PAYSTACK_API_KEY, PAYSTACK_BASE_URL,
   SEND_CONFIRMATION_URL,
@@ -218,7 +218,7 @@ serve(async (req) => {
     const offerRes = await fetch(
       `${DUFFEL_BASE_URL}/air/offers/${pending.duffel_offer_id}`,
       { headers: {
-        Authorization: `Bearer ${DUFFEL_API_KEY}`,
+        Authorization: `Bearer ${DUFFEL_WRITE_KEY}`,
         "Duffel-Version": "v2",
         Accept: "application/json",
       }},
@@ -349,7 +349,7 @@ serve(async (req) => {
       orderRes = await fetch(`${DUFFEL_BASE_URL}/air/orders`, {
         method: "POST",
         headers: {
-          Authorization: `Bearer ${DUFFEL_API_KEY}`,
+          Authorization: `Bearer ${DUFFEL_WRITE_KEY}`,
           "Content-Type": "application/json",
           "Duffel-Version": "v2",
           "Duffel-Idempotency-Key": pending.id,

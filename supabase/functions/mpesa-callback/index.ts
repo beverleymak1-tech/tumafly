@@ -1,6 +1,7 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
+const DUFFEL_WRITE_KEY = Deno.env.get("DUFFEL_WRITE_KEY") || Deno.env.get("DUFFEL_API_KEY")!;
 const DUFFEL_API_KEY = Deno.env.get("DUFFEL_API_KEY")!;
 const DUFFEL_BASE_URL = "https://api.duffel.com";
 // In sandbox we skip sending seat services to /air/orders since Duffel test mode
@@ -242,7 +243,7 @@ serve(async (req) => {
     const offerRes = await fetch(
       `${DUFFEL_BASE_URL}/air/offers/${pending.duffel_offer_id}`,
       { headers: {
-        Authorization: `Bearer ${DUFFEL_API_KEY}`,
+        Authorization: `Bearer ${DUFFEL_WRITE_KEY}`,
         "Duffel-Version": "v2",
         Accept: "application/json",
       }}
@@ -341,7 +342,7 @@ serve(async (req) => {
     const orderRes = await fetch(`${DUFFEL_BASE_URL}/air/orders`, {
       method: "POST",
       headers: {
-        Authorization: `Bearer ${DUFFEL_API_KEY}`,
+        Authorization: `Bearer ${DUFFEL_WRITE_KEY}`,
         "Content-Type": "application/json",
         "Duffel-Version": "v2",
         Accept: "application/json",

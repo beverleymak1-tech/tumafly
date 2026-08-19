@@ -22,7 +22,9 @@ set -u
 PROJECT_REF="wmplcauhaqtyenwvkrkq"
 
 EXPECTED_SECRETS=(
-  DUFFEL_API_KEY
+  DUFFEL_API_KEY                              # legacy — retained as fallback source for unmigrated EFs
+  DUFFEL_READ_KEY                             # Session 35b task 5 — read-only scope (search, offer, baggage, seat maps)
+  DUFFEL_WRITE_KEY                            # Session 35b task 5 — read+write scope (order create + cancel)
   PAYSTACK_API_KEY
   AT_API_KEY
   RESEND_API_KEY
@@ -40,6 +42,8 @@ EXPECTED_SECRETS=(
 
 LOCAL_PREFIX_EXPECTATIONS=(
   "DUFFEL_API_KEY:duffel_test_|duffel_live_"
+  "DUFFEL_READ_KEY:duffel_test_|duffel_live_"
+  "DUFFEL_WRITE_KEY:duffel_test_|duffel_live_"
   "PAYSTACK_API_KEY:sk_test_|sk_live_"
   "RESEND_API_KEY:re_"
   "SERVICE_ROLE_KEY:eyJ"

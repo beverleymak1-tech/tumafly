@@ -46,7 +46,7 @@
 
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 
-const DUFFEL_API_KEY = Deno.env.get("DUFFEL_API_KEY")!;
+const DUFFEL_READ_KEY = Deno.env.get("DUFFEL_READ_KEY") || Deno.env.get("DUFFEL_API_KEY")!;
 const DUFFEL_BASE_URL = "https://api.duffel.com";
 
 const FALLBACK_RATES: Record<string, number> = {
@@ -116,7 +116,7 @@ serve(async (req) => {
     // 1. Fetch seat maps for this offer
     const smRes = await fetch(`${DUFFEL_BASE_URL}/air/seat_maps?offer_id=${offer_id}`, {
       headers: {
-        Authorization: `Bearer ${DUFFEL_API_KEY}`,
+        Authorization: `Bearer ${DUFFEL_READ_KEY}`,
         "Duffel-Version": "v2",
         Accept: "application/json",
       },
@@ -146,7 +146,7 @@ serve(async (req) => {
     // 2. Also fetch the offer so we know slice/segment ordering and labels.
     const offerRes = await fetch(`${DUFFEL_BASE_URL}/air/offers/${offer_id}`, {
       headers: {
-        Authorization: `Bearer ${DUFFEL_API_KEY}`,
+        Authorization: `Bearer ${DUFFEL_READ_KEY}`,
         "Duffel-Version": "v2",
         Accept: "application/json",
       },

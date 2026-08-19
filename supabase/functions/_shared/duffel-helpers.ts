@@ -22,7 +22,26 @@
 
 // ── Env vars ──────────────────────────────────────────────────────────────
 
-export const DUFFEL_API_KEY = Deno.env.get("DUFFEL_API_KEY")!;
+// Session 35b task 5: Duffel API key split into READ + WRITE scopes.
+// - DUFFEL_READ_KEY: search, offer lookup, baggage, seat maps (read-only surface)
+// - DUFFEL_WRITE_KEY: order creation + cancellation (write surface)
+//
+// Duffel provisions two scopes ("Read only" / "Read and write") — we map
+// "Read only" → DUFFEL_READ_KEY and "Read and write" → DUFFEL_WRITE_KEY. Split
+// limits blast radius: if the READ key leaks, attacker can only READ (cannot book);
+// if the WRITE key leaks, attacker can do everything, so it's held more tightly
+// and rotated more frequently per SOP §1.
+//
+// Fallback to DUFFEL_API_KEY on unset for backward compat during rollout — any
+// EF that hasn't yet been migrated still resolves to the legacy single-key env
+// var. To be removed one release cycle after all EFs migrate.
+export const DUFFEL_READ_KEY = Deno.env.get("DUFFEL_READ_KEY") || Deno.env.get("DUFFEL_API_KEY") || "";
+export const DUFFEL_WRITE_KEY = Deno.env.get("DUFFEL_WRITE_KEY") || Deno.env.get("DUFFEL_API_KEY") || "";
+
+/** @deprecated Use DUFFEL_READ_KEY or DUFFEL_WRITE_KEY per Session 35b task 5.
+ *  Retained as fallback source for EFs not yet migrated. */
+export const DUFFEL_API_KEY = Deno.env.get("DUFFEL_API_KEY") || "";
+
 export const DUFFEL_BASE_URL = "https://api.duffel.com";
 export const DUFFEL_MODE = (Deno.env.get("DUFFEL_MODE") || "production").toLowerCase();
 
@@ -69,23 +88,32 @@ export async function alertFounder(alertType: string, context: Record<string, un
 let MODE_KEY_OK = true;
 let MODE_KEY_REASON = "";
 {
-  const isDuffelTest = DUFFEL_API_KEY?.startsWith("duffel_test_");
-  const isDuffelLive = DUFFEL_API_KEY?.startsWith("duffel_live_");
+  // Session 35b task 5: verify BOTH keys match the mode (read + write).
+  // The legacy single-key DUFFEL_API_KEY check is preserved for the fallback
+  // path — DUFFEL_READ_KEY and DUFFEL_WRITE_KEY resolve to it if unset, so
+  // checking DUFFEL_READ_KEY covers the legacy case naturally.
+  const isDuffelReadTest = DUFFEL_READ_KEY?.startsWith("duffel_test_");
+  const isDuffelReadLive = DUFFEL_READ_KEY?.startsWith("duffel_live_");
+  const isDuffelWriteTest = DUFFEL_WRITE_KEY?.startsWith("duffel_test_");
+  const isDuffelWriteLive = DUFFEL_WRITE_KEY?.startsWith("duffel_live_");
   const isPaystackTest = PAYSTACK_API_KEY?.startsWith("sk_test_");
   const isPaystackLive = PAYSTACK_API_KEY?.startsWith("sk_live_");
 
-  if (!DUFFEL_API_KEY) {
+  if (!DUFFEL_READ_KEY) {
     MODE_KEY_OK = false;
-    MODE_KEY_REASON = "DUFFEL_API_KEY not set";
+    MODE_KEY_REASON = "DUFFEL_READ_KEY not set (and DUFFEL_API_KEY fallback also unset)";
+  } else if (!DUFFEL_WRITE_KEY) {
+    MODE_KEY_OK = false;
+    MODE_KEY_REASON = "DUFFEL_WRITE_KEY not set (and DUFFEL_API_KEY fallback also unset)";
   } else if (!PAYSTACK_API_KEY) {
     MODE_KEY_OK = false;
     MODE_KEY_REASON = "PAYSTACK_API_KEY not set";
-  } else if (DUFFEL_MODE === "sandbox" && !isDuffelTest) {
+  } else if (DUFFEL_MODE === "sandbox" && (!isDuffelReadTest || !isDuffelWriteTest)) {
     MODE_KEY_OK = false;
-    MODE_KEY_REASON = "DUFFEL_MODE=sandbox but DUFFEL_API_KEY is not a test key";
-  } else if (DUFFEL_MODE === "production" && !isDuffelLive) {
+    MODE_KEY_REASON = `DUFFEL_MODE=sandbox but Duffel key(s) not test: read=${isDuffelReadTest ? "test" : "wrong"}, write=${isDuffelWriteTest ? "test" : "wrong"}`;
+  } else if (DUFFEL_MODE === "production" && (!isDuffelReadLive || !isDuffelWriteLive)) {
     MODE_KEY_OK = false;
-    MODE_KEY_REASON = "DUFFEL_MODE=production but DUFFEL_API_KEY is not a live key";
+    MODE_KEY_REASON = `DUFFEL_MODE=production but Duffel key(s) not live: read=${isDuffelReadLive ? "live" : "wrong"}, write=${isDuffelWriteLive ? "live" : "wrong"}`;
   } else if (DUFFEL_MODE !== "sandbox" && DUFFEL_MODE !== "production") {
     MODE_KEY_OK = false;
     MODE_KEY_REASON = `DUFFEL_MODE has unexpected value: "${DUFFEL_MODE}"`;

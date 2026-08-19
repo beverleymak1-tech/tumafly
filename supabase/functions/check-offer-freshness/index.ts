@@ -37,7 +37,7 @@
 
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 
-const DUFFEL_API_KEY = Deno.env.get("DUFFEL_API_KEY");
+const DUFFEL_READ_KEY = Deno.env.get("DUFFEL_READ_KEY") || Deno.env.get("DUFFEL_API_KEY");
 const DUFFEL_BASE_URL = "https://api.duffel.com";
 
 const CORS_HEADERS = {
@@ -62,8 +62,8 @@ serve(async (req) => {
     );
   }
 
-  if (!DUFFEL_API_KEY) {
-    console.error("[check-offer-freshness] DUFFEL_API_KEY not set");
+  if (!DUFFEL_READ_KEY) {
+    console.error("[check-offer-freshness] DUFFEL_READ_KEY not set (and DUFFEL_API_KEY fallback also unset)");
     return new Response(
       JSON.stringify({ error: "Server configuration error" }),
       { status: 500, headers: CORS_HEADERS },
@@ -100,7 +100,7 @@ serve(async (req) => {
       {
         method: "POST",
         headers: {
-          Authorization: `Bearer ${DUFFEL_API_KEY}`,
+          Authorization: `Bearer ${DUFFEL_READ_KEY}`,
           "Content-Type": "application/json",
           "Duffel-Version": "v2",
           Accept: "application/json",

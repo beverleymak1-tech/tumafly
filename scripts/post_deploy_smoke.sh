@@ -36,7 +36,9 @@ set -uo pipefail  # NOT -e — cleanup must run even on assertion failure
 
 SB_URL="${SB_URL:-}"
 KEY="${SERVICE_ROLE_KEY:-}"
-DUFFEL_KEY="${DUFFEL_API_KEY:-}"
+# Session 35b task 5: smoke test uses READ key (Phase 2 is offer fetch — a read
+# operation). Falls back to DUFFEL_API_KEY for backward compat.
+DUFFEL_KEY="${DUFFEL_READ_KEY:-${DUFFEL_API_KEY:-}}"
 WEBHOOK_SECRET="${PROCESS_DUFFEL_BOOKING_WEBHOOK_SECRET:-}"
 
 SMOKE_EMAIL="${SMOKE_EMAIL:-beverley.mak1+smoketest@gmail.com}"
@@ -52,7 +54,11 @@ DEST="${SMOKE_ROUTE#*-}"
 # Bail-early env check
 for var in SB_URL KEY DUFFEL_KEY WEBHOOK_SECRET; do
   if [ -z "${!var}" ]; then
-    echo "[smoke] SETUP FAIL: env var $var not set" >&2
+    if [ "$var" = "DUFFEL_KEY" ]; then
+      echo "[smoke] SETUP FAIL: neither DUFFEL_READ_KEY nor DUFFEL_API_KEY set" >&2
+    else
+      echo "[smoke] SETUP FAIL: env var $var not set" >&2
+    fi
     exit 2
   fi
 done
@@ -69,71 +75,25 @@ PENDING_ID=""
 
 cleanup() {
   echo ""
-  echo "[smoke] Cleanup: cancel Duffel orders + delete synthetic rows..."
+  echo "[smoke] Cleanup: delete synthetic rows (local DB only)..."
+  echo "[smoke]   Note: Duffel-side sandbox orders are NOT cancelled programmatically —"
+  echo "[smoke]   duffel_airways test airline returns 'cancellation_not_supported' for"
+  echo "[smoke]   ticketed sandbox orders. Manual dashboard cleanup periodic; sandbox orders"
+  echo "[smoke]   age out via Duffel's 60-day inactivity purge. See docs/security/smoke_test.md §5."
 
-  # Step 1: Collect pending_booking_ids AND their duffel_order_ids for TF-SMOKETEST-* rows.
-  # Note: bookings table has NO merchant_ref column — must join via pending_booking_id.
-  PENDING_ROWS=$(curl -s "$SB_URL/rest/v1/pending_bookings?merchant_ref=like.TF-SMOKETEST-%25&select=id,duffel_order_id" \
-    -H "apikey: $KEY" -H "Authorization: Bearer $KEY")
-  PENDING_IDS=$(echo "$PENDING_ROWS" | jq -r '.[].id' 2>/dev/null)
-  DUFFEL_IDS_FROM_PENDING=$(echo "$PENDING_ROWS" | jq -r '.[] | select(.duffel_order_id != null) | .duffel_order_id' 2>/dev/null)
+  # Get pending_ids for local cleanup (bookings has no merchant_ref column;
+  # must join via pending_booking_id IN clause)
+  PENDING_IDS=$(curl -s "$SB_URL/rest/v1/pending_bookings?merchant_ref=like.TF-SMOKETEST-%25&select=id" \
+    -H "apikey: $KEY" -H "Authorization: Bearer $KEY" | jq -r '.[].id' 2>/dev/null)
 
-  # Step 2: Look up bookings.duffel_order_id via pending_booking_id IN (...)
-  DUFFEL_IDS_FROM_BOOKINGS=""
-  if [ -n "$PENDING_IDS" ]; then
-    IN_CLAUSE=$(echo "$PENDING_IDS" | tr '\n' ',' | sed 's/,$//' | sed 's/^/(/' | sed 's/$/)/')
-    DUFFEL_IDS_FROM_BOOKINGS=$(curl -s "$SB_URL/rest/v1/bookings?pending_booking_id=in.$IN_CLAUSE&select=duffel_order_id&duffel_order_id=not.is.null" \
-      -H "apikey: $KEY" -H "Authorization: Bearer $KEY" | jq -r '.[].duffel_order_id' 2>/dev/null)
-  fi
-
-  # Step 3: Union + dedupe, then cancel on Duffel side.
-  # Uses the 2-step /air/order_cancellations flow which works universally for
-  # both un-ticketed AND ticketed orders. Two calls per order:
-  #   1. POST /air/order_cancellations { data: { order_id } } → cancellation id
-  #   2. POST /air/order_cancellations/{id}/actions/confirm    → confirms
-  # This is proper cancellation — removes the order from Duffel sandbox entirely.
-  DUFFEL_ORDER_IDS=$(printf "%s\n%s\n" "$DUFFEL_IDS_FROM_PENDING" "$DUFFEL_IDS_FROM_BOOKINGS" | sort -u | grep -v '^$')
-  if [ -n "$DUFFEL_ORDER_IDS" ]; then
-    while IFS= read -r order_id; do
-      [ -z "$order_id" ] && continue
-
-      # 3a. Create pending cancellation
-      create_res=$(curl -s -X POST "https://api.duffel.com/air/order_cancellations" \
-        -H "Authorization: Bearer $DUFFEL_KEY" \
-        -H "Duffel-Version: v2" \
-        -H "Content-Type: application/json" \
-        -d "{\"data\":{\"order_id\":\"$order_id\"}}")
-
-      cancellation_id=$(echo "$create_res" | jq -r '.data.id // empty' 2>/dev/null)
-      if [ -z "$cancellation_id" ]; then
-        # Common causes: order already cancelled from prior partial run, or Duffel refused
-        err_code=$(echo "$create_res" | jq -r '.errors[0].code // "unknown"' 2>/dev/null)
-        echo "[smoke]   Duffel cancellation create failed for $order_id (code=$err_code; likely already cancelled)"
-        continue
-      fi
-
-      # 3b. Confirm the cancellation
-      confirm_status=$(curl -s -o /dev/null -w "%{http_code}" -X POST \
-        "https://api.duffel.com/air/order_cancellations/$cancellation_id/actions/confirm" \
-        -H "Authorization: Bearer $DUFFEL_KEY" \
-        -H "Duffel-Version: v2")
-
-      if [ "$confirm_status" = "200" ] || [ "$confirm_status" = "201" ]; then
-        echo "[smoke]   Cancelled Duffel order: $order_id"
-      else
-        echo "[smoke]   Duffel cancellation confirm status=$confirm_status for $cancellation_id (order $order_id may remain in sandbox)"
-      fi
-    done <<< "$DUFFEL_ORDER_IDS"
-  fi
-
-  # Step 4: Delete bookings via pending_booking_id IN clause (no merchant_ref column)
+  # Delete bookings via pending_booking_id IN clause
   if [ -n "$PENDING_IDS" ]; then
     IN_CLAUSE=$(echo "$PENDING_IDS" | tr '\n' ',' | sed 's/,$//' | sed 's/^/(/' | sed 's/$/)/')
     curl -s -X DELETE "$SB_URL/rest/v1/bookings?pending_booking_id=in.$IN_CLAUSE" \
       -H "apikey: $KEY" -H "Authorization: Bearer $KEY" -H "Prefer: return=minimal" >/dev/null
   fi
 
-  # Step 5: Delete alerts (jsonb path), refunds + pending_bookings (direct column)
+  # Delete alerts (jsonb path), refunds + pending_bookings (direct column)
   curl -s -X DELETE "$SB_URL/rest/v1/alerts?context->>merchant_ref=like.TF-SMOKETEST-%25" \
     -H "apikey: $KEY" -H "Authorization: Bearer $KEY" -H "Prefer: return=minimal" >/dev/null
   curl -s -X DELETE "$SB_URL/rest/v1/refunds?merchant_ref=like.TF-SMOKETEST-%25" \

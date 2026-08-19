@@ -25,6 +25,7 @@
 
 import { serve } from 'https://deno.land/std@0.208.0/http/server.ts';
 
+const DUFFEL_READ_KEY = Deno.env.get('DUFFEL_READ_KEY') || Deno.env.get('DUFFEL_API_KEY') || '';
 const DUFFEL_API_KEY = Deno.env.get('DUFFEL_API_KEY') || '';
 const DUFFEL_MODE = (Deno.env.get('DUFFEL_MODE') || '').toLowerCase();
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL') || '';
@@ -159,7 +160,7 @@ serve(async (req: Request) => {
     const url = `https://api.duffel.com/air/offers/${encodeURIComponent(offer_id)}?return_available_services=true`;
     const dfRes = await fetch(url, {
       headers: {
-        'Authorization': `Bearer ${DUFFEL_API_KEY}`,
+        'Authorization': `Bearer ${DUFFEL_READ_KEY}`,
         'Duffel-Version': 'v2',
         'Accept': 'application/json',
       },

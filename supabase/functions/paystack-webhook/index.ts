@@ -47,7 +47,7 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
 // Shared helpers extracted in Session 28b commit #7b-i.
 import {
-  DUFFEL_API_KEY, DUFFEL_BASE_URL, DUFFEL_MODE,
+  DUFFEL_WRITE_KEY, DUFFEL_BASE_URL, DUFFEL_MODE,
   SUPABASE_URL, SERVICE_ROLE_KEY,
   PAYSTACK_API_KEY, PAYSTACK_BASE_URL,
   CORS_HEADERS,
@@ -612,7 +612,7 @@ serve(async (req) => {
     const offerRes = await fetch(
       `${DUFFEL_BASE_URL}/air/offers/${pending.duffel_offer_id}`,
       { headers: {
-        Authorization: `Bearer ${DUFFEL_API_KEY}`,
+        Authorization: `Bearer ${DUFFEL_WRITE_KEY}`,
         "Duffel-Version": "v2",
         Accept: "application/json",
       }}

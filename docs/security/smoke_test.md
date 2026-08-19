@@ -38,7 +38,7 @@ Source-of-truth attestation for the post-deploy end-to-end pipeline verification
 ```bash
 export SB_URL="https://wmplcauhaqtyenwvkrkq.supabase.co"
 export SERVICE_ROLE_KEY="<from Supabase Dashboard → Settings → API>"
-export DUFFEL_API_KEY="<sandbox key from Duffel Dashboard>"
+export DUFFEL_READ_KEY="<sandbox read-only key from Duffel Dashboard, or DUFFEL_API_KEY as fallback>"
 export PROCESS_DUFFEL_BOOKING_WEBHOOK_SECRET="<from Supabase secrets>"
 ./scripts/post_deploy_smoke.sh
 ```
@@ -70,11 +70,11 @@ export SMOKE_DATE="2027-03-15"                # default: 90 days out from today
 
 ### 2.3 Cleanup mechanism
 
-**EXIT trap** ensures cleanup runs regardless of test outcome — pass, fail, script-crash, ctrl-C. Deletes all rows across `alerts` + `bookings` + `pending_bookings` + `refunds` where `merchant_ref LIKE 'TF-SMOKETEST-%'`.
+**EXIT trap** ensures cleanup runs regardless of test outcome — pass, fail, script-crash, ctrl-C. Deletes all rows across `alerts` + `bookings` (via `pending_booking_id IN (…)` — bookings has no `merchant_ref` column) + `pending_bookings` + `refunds` where `merchant_ref LIKE 'TF-SMOKETEST-%'`.
 
 **Belt-and-suspenders:** cleanup runs BOTH at script start (catches orphans from prior failed runs) AND at script exit. Missed cleanup from a network partition or SIGKILL would accrete synthetic rows until the next successful run's opening cleanup catches them.
 
-**Duffel-side sandbox orders:** Duffel sandbox orders are ephemeral test artifacts per Duffel documentation. No cleanup required on Duffel's side. If Duffel API rate limits ever become a concern, the smoke test cadence can be reduced from every-deploy to daily-cron.
+**Duffel-side orders are NOT programmatically cancelled** — Duffel's `duffel_airways` test airline refuses `/air/order_cancellations` for ticketed sandbox orders (returns `cancellation_not_supported`). See §5 for the manual dashboard cleanup workflow. Synthetic passengers use `given_name: "Smoke"` + `family_name: "Test"` for easy identification in Duffel dashboard.
 
 ### 2.4 Expected pollution
 
@@ -137,6 +137,8 @@ No production data was ever touched by the test's synthetic path.
 
 ## 5. Backlog / known limitations
 
+**Duffel-side sandbox cleanup is manual.** Duffel's `duffel_airways` test airline returns `cancellation_not_supported` from `/air/order_cancellations` for ticketed sandbox orders. The smoke test's cleanup does NOT attempt Duffel cancellation (it only cleans up our own DB rows). Sandbox orders persist in Duffel dashboard until either (a) manual cancellation via Duffel dashboard, or (b) Duffel's 60-day inactivity purge for the test account. Manual dashboard cleanup should happen periodically — easy to spot since synthetic passengers use `family_name: "Test"` and `given_name: "Smoke"`.
+
 **Paystack payment path not covered.** Smoke test jumps `pending_bookings.status` from insert directly to `duffel_pending`, bypassing `pending` → `paid` → `paystack-webhook` → `verify-payment`. This trades payment-path coverage for zero risk of unintended Paystack sandbox charges + zero Paystack sandbox rate consumption per deploy. Full payment-path coverage requires either (a) Paystack sandbox headless-browser automation with test cards, or (b) HMAC-signed synthetic webhook events. Deferred to Ops-1.
 
 **Duffel sandbox route + date dependence.** The default route `LHR-JFK` at +90 days is a route Duffel sandbox reliably returns offers for. If Duffel sandbox behavior changes (route retirement, date-window changes), Phase 2 will fail. Recovery: set `SMOKE_ROUTE` + `SMOKE_DATE` env vars to a working combination and update this doc's §2.1.
@@ -144,6 +146,8 @@ No production data was ever touched by the test's synthetic path.
 **Automated invocation deferred.** Currently runs on manual invocation post-deploy. Automating via GitHub Action or Supabase cron is deferred to Ops-1 — needs on-call rotation to receive failure signals. Until then, discipline is manual per RUNBOOK §Deploy Procedure.
 
 **Real confirmation email delivery.** Each successful run sends a real confirmation email via Resend. Uses free-tier quota (100/day) — at current deploy cadence (~1-3/day), negligible. If cadence increases, add a `X-Smoke-Test: 1` header check in `send-confirmation` to skip delivery.
+
+**Expected PROCESS_DUFFEL_PAYSTACK_VERIFY_MISMATCH alert noise.** Each smoke test run fires 1 HIGH-severity alert to `alerts@tumafly.com` — the synthetic paystack_tx_id can't be verified by Paystack (correctly triggers the soft-degrade branch). Recommend Gmail/mail filter: `subject:PROCESS_DUFFEL_PAYSTACK_VERIFY_MISMATCH AND body:"TF-SMOKETEST"` → auto-archive with `smoke-test-noise` label.
 
 ---
 

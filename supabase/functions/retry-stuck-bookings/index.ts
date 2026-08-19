@@ -62,7 +62,7 @@ import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
 import {
-  DUFFEL_API_KEY, DUFFEL_BASE_URL,
+  DUFFEL_WRITE_KEY, DUFFEL_BASE_URL,
   SUPABASE_URL, SERVICE_ROLE_KEY,
   SEND_CONFIRMATION_URL,
   CORS_HEADERS,
@@ -88,7 +88,7 @@ const AGE_BOOKED_NO_EMAIL_S      = 60;
 const BATCH_LIMIT = 5; // per-state cap per invocation
 
 const DUFFEL_HEADERS = {
-  Authorization: `Bearer ${DUFFEL_API_KEY}`,
+  Authorization: `Bearer ${DUFFEL_WRITE_KEY}`,
   "Duffel-Version": "v2",
   Accept: "application/json",
 };

@@ -1,7 +1,7 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
-const DUFFEL_API_KEY = Deno.env.get("DUFFEL_API_KEY")!;
+const DUFFEL_READ_KEY = Deno.env.get("DUFFEL_READ_KEY") || Deno.env.get("DUFFEL_API_KEY")!;
 const DUFFEL_BASE_URL = "https://api.duffel.com";
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SERVICE_ROLE_KEY = Deno.env.get("SERVICE_ROLE_KEY")!;
@@ -126,7 +126,7 @@ serve(async (req) => {
     // 2. Re-fetch offer
     const offerRes = await fetch(`${DUFFEL_BASE_URL}/air/offers/${offer_id}`, {
       headers: {
-        Authorization: `Bearer ${DUFFEL_API_KEY}`,
+        Authorization: `Bearer ${DUFFEL_READ_KEY}`,
         "Duffel-Version": "v2",
         Accept: "application/json",
       },

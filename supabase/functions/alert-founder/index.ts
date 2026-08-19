@@ -160,7 +160,7 @@ const ALERT_CONFIG: Record<AlertType, { severity: string; subject: string; actio
         DUFFEL_MODE_KEY_MISMATCH: {
           severity: "🚨 CRITICAL",
           subject: "Environment key/mode mismatch in mpesa-callback or get-baggage-options",
-          action: "DUFFEL_MODE doesn't match the DUFFEL_API_KEY prefix in one of the Duffel-touching EFs (mpesa-callback, get-baggage-options). All calls to that EF refused with 503. Fix env vars in Supabase dashboard.",
+          action: "DUFFEL_MODE doesn't match one or both of DUFFEL_READ_KEY / DUFFEL_WRITE_KEY prefixes (post-Session-35b split), OR the legacy DUFFEL_API_KEY fallback used by an unmigrated EF. All calls to that EF refused with 503. Fix env vars in Supabase dashboard: DUFFEL_READ_KEY + DUFFEL_WRITE_KEY should both start with `duffel_test_` when DUFFEL_MODE=sandbox, `duffel_live_` when DUFFEL_MODE=production.",
         },
         // ── Async Duffel decoupling (Session 28b commit #7b-ii) ─────────────────
         PROCESS_DUFFEL_PENDING_NOT_FOUND: {

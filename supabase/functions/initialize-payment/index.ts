@@ -27,6 +27,7 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
+const DUFFEL_READ_KEY = Deno.env.get("DUFFEL_READ_KEY") || Deno.env.get("DUFFEL_API_KEY")!;
 const DUFFEL_API_KEY = Deno.env.get("DUFFEL_API_KEY")!;
 const DUFFEL_BASE_URL = "https://api.duffel.com";
 // "sandbox" or "production". Defaults to production for fail-closed safety.
@@ -307,7 +308,7 @@ serve(async (req) => {
     // 2. Re-fetch offer (unchanged from create-payment)
     const offerRes = await fetch(`${DUFFEL_BASE_URL}/air/offers/${offer_id}?return_available_services=true`, {
       headers: {
-        Authorization: `Bearer ${DUFFEL_API_KEY}`,
+        Authorization: `Bearer ${DUFFEL_READ_KEY}`,
         "Duffel-Version": "v2",
         Accept: "application/json",
       },
@@ -394,7 +395,7 @@ serve(async (req) => {
     if (Array.isArray(seats) && seats.length > 0) {
       const smRes = await fetch(`${DUFFEL_BASE_URL}/air/seat_maps?offer_id=${offer_id}`, {
         headers: {
-          Authorization: `Bearer ${DUFFEL_API_KEY}`,
+          Authorization: `Bearer ${DUFFEL_READ_KEY}`,
           "Duffel-Version": "v2",
           Accept: "application/json",
         },
