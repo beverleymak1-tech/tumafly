@@ -36,9 +36,11 @@ set -uo pipefail  # NOT -e — cleanup must run even on assertion failure
 
 SB_URL="${SB_URL:-}"
 KEY="${SERVICE_ROLE_KEY:-}"
-# Session 35b task 5: smoke test uses READ key (Phase 2 is offer fetch — a read
-# operation). Falls back to DUFFEL_API_KEY for backward compat.
-DUFFEL_KEY="${DUFFEL_READ_KEY:-${DUFFEL_API_KEY:-}}"
+# Session 35b task 5: smoke test uses WRITE key. Phase 2 is
+# POST /air/offer_requests which Duffel classifies as a write operation
+# (creates a resource, requires 'air.offer_requests.create' permission).
+# Falls back to DUFFEL_API_KEY for backward compat.
+DUFFEL_KEY="${DUFFEL_WRITE_KEY:-${DUFFEL_API_KEY:-}}"
 WEBHOOK_SECRET="${PROCESS_DUFFEL_BOOKING_WEBHOOK_SECRET:-}"
 
 SMOKE_EMAIL="${SMOKE_EMAIL:-beverley.mak1+smoketest@gmail.com}"
@@ -55,7 +57,7 @@ DEST="${SMOKE_ROUTE#*-}"
 for var in SB_URL KEY DUFFEL_KEY WEBHOOK_SECRET; do
   if [ -z "${!var}" ]; then
     if [ "$var" = "DUFFEL_KEY" ]; then
-      echo "[smoke] SETUP FAIL: neither DUFFEL_READ_KEY nor DUFFEL_API_KEY set" >&2
+      echo "[smoke] SETUP FAIL: neither DUFFEL_WRITE_KEY nor DUFFEL_API_KEY set" >&2
     else
       echo "[smoke] SETUP FAIL: env var $var not set" >&2
     fi

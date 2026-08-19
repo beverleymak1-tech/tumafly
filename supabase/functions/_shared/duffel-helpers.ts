@@ -23,14 +23,30 @@
 // ── Env vars ──────────────────────────────────────────────────────────────
 
 // Session 35b task 5: Duffel API key split into READ + WRITE scopes.
-// - DUFFEL_READ_KEY: search, offer lookup, baggage, seat maps (read-only surface)
-// - DUFFEL_WRITE_KEY: order creation + cancellation (write surface)
 //
-// Duffel provisions two scopes ("Read only" / "Read and write") — we map
-// "Read only" → DUFFEL_READ_KEY and "Read and write" → DUFFEL_WRITE_KEY. Split
-// limits blast radius: if the READ key leaks, attacker can only READ (cannot book);
-// if the WRITE key leaks, attacker can do everything, so it's held more tightly
-// and rotated more frequently per SOP §1.
+// Duffel's permission model classifies ANY resource creation (POST) as a
+// write operation, even semantically-search-like operations. Specifically:
+//   - POST /air/offer_requests            → WRITE (requires air.offer_requests.create)
+//   - POST /air/offers/{id}/actions/price → WRITE (freshness re-check is an "action")
+//   - POST /air/orders                    → WRITE (order booking)
+//   - POST /air/orders/{id}/actions/cancel → WRITE (cancellation)
+//   - GET  /air/offers/{id}               → READ  (look up known offer)
+//   - GET  /air/offers/{id}?return_available_services=true → READ (baggage)
+//   - GET  /air/seat_maps?offer_id=...    → READ  (seat map lookup)
+//
+// EF assignment per this model:
+//   - DUFFEL_READ_KEY:  get-offer, get-baggage-options, get-seat-maps,
+//                       initialize-payment (offer re-check via GET),
+//                       create-mpesa-stk (offer re-check via GET)
+//   - DUFFEL_WRITE_KEY: search-flights, check-offer-freshness (POST actions/price),
+//                       process-duffel-booking, mpesa-callback (booking path),
+//                       paystack-webhook (booking path), retry-stuck-bookings (cancel)
+//
+// Split limits blast radius: if the READ key leaks, attacker who knows a
+// specific offer_id can look it up — but cannot search for new offers,
+// cannot create bookings, cannot cancel. If the WRITE key leaks, attacker
+// can do everything, so it's held more tightly and rotated more frequently
+// per SOP §1.
 //
 // Fallback to DUFFEL_API_KEY on unset for backward compat during rollout — any
 // EF that hasn't yet been migrated still resolves to the legacy single-key env

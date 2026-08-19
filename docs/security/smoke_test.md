@@ -38,10 +38,12 @@ Source-of-truth attestation for the post-deploy end-to-end pipeline verification
 ```bash
 export SB_URL="https://wmplcauhaqtyenwvkrkq.supabase.co"
 export SERVICE_ROLE_KEY="<from Supabase Dashboard → Settings → API>"
-export DUFFEL_READ_KEY="<sandbox read-only key from Duffel Dashboard, or DUFFEL_API_KEY as fallback>"
+export DUFFEL_WRITE_KEY="<sandbox read+write key from Duffel Dashboard, or DUFFEL_API_KEY as fallback>"
 export PROCESS_DUFFEL_BOOKING_WEBHOOK_SECRET="<from Supabase secrets>"
 ./scripts/post_deploy_smoke.sh
 ```
+
+Note: uses WRITE key because Phase 2 posts `POST /air/offer_requests` (Duffel classifies resource creation as a write operation, even for search requests).
 
 **Optional overrides:**
 ```bash
