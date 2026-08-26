@@ -8171,7 +8171,9 @@
                 <li>Extra documentation for travelers under 18</li>
             </ul>
             <p style="font-size:12px;color:var(--text-3);margin-top:14px;">
-                Need help? Reply to your confirmation email or message us on WhatsApp.
+                Need help? Reply to your confirmation email or
+                <a id="success-whatsapp-link" href="https://wa.me/254113165503" target="_blank" rel="noopener"
+                   style="color:var(--text-3);text-decoration:underline;">message us on WhatsApp</a>.
             </p>
         </div>
         <!-- Post-booking nudge — shown only when user is NOT signed in -->
@@ -19731,6 +19733,15 @@
         if (data.state === 'confirmed' && data.booking) {
           const ref = data.booking.booking_reference || activeMerchantRef;
           document.getElementById('success-ref').textContent = ref;
+          // Populate the WhatsApp support link with a happy-path prefill
+          // containing the booking reference so support can look it up on
+          // first read.
+          const _successWaLink = document.getElementById('success-whatsapp-link');
+          if (_successWaLink) {
+            _successWaLink.href = whatsappLink(
+              'Hi TumaFly, I have a question about my booking (ref ' + ref + ').'
+            );
+          }
           // Stash for F5-recovery on #success. The user could refresh the
           // page while on the success view (or land here via a bookmarked
           // /?ref=TF-... URL). Without this stash, the fresh page wouldn't
