@@ -9127,12 +9127,20 @@
     // sessionStorage before page load bypassed showView entirely via
     // the synchronous F5-recovery block, leaving the help line as plain
     // static text. Centralising the wiring here fixes that class.
-    function wireSuccessHelpLine(pnr) {
+        function wireSuccessHelpLine(pnr, customMsg) {
       const el = document.getElementById('success-help-line');
       if (!el) return;
-      const msg = pnr
-        ? 'Hi TumaFly, I have a question about my booking (ref ' + pnr + ').'
-        : 'Hi TumaFly, I need help with my booking.';
+      // Session 39 — customMsg (optional) lets callers mirror the state-
+      // specific WhatsApp button copy so both CTAs on a given state send
+      // an identical prefill. Preserves state context (e.g. "is being
+      // refunded", "is finalising", "was declined") that helps CS triage
+      // without a ref lookup. When omitted, falls back to the generic
+      // happy-path prefill.
+      const msg = customMsg
+        ? customMsg
+        : (pnr
+            ? 'Hi TumaFly, I have a question about my booking (ref ' + pnr + ').'
+            : 'Hi TumaFly, I need help with my booking.');
       const href = whatsappLink(msg);
       el.innerHTML =
         'Need help? Reply to your confirmation email or ' +
@@ -21101,7 +21109,7 @@
         // the final state and the help line renders a generic prefill
         // even though we have the merchant_ref in hand.
         if (typeof wireSuccessHelpLine === 'function' && mref) {
-          wireSuccessHelpLine(mref);
+          wireSuccessHelpLine(mref, 'Hi TumaFly, my booking (ref ' + mref + ') is finalising and I\'d like to check the status. Please help.');
         }
         return;
       }
@@ -21175,7 +21183,7 @@
         // refunding state: help line prefill mirrors the waButton so
         // the two CTAs are identical.
         if (typeof wireSuccessHelpLine === 'function' && mref) {
-          wireSuccessHelpLine(mref);
+          wireSuccessHelpLine(mref, 'Hi TumaFly, my booking (ref ' + mref + ') is being refunded and I have a question. Please help.');
         }
         return;
       }
@@ -21227,7 +21235,7 @@
         // email exists on 'failed'. Backlog item filed for state-aware
         // help-line copy; not blocking today.
         if (typeof wireSuccessHelpLine === 'function' && mref) {
-          wireSuccessHelpLine(mref);
+          wireSuccessHelpLine(mref, 'Hi TumaFly, my payment (ref ' + mref + ') was declined and I need help.');
         }
         return;
       }
