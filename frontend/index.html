@@ -9122,11 +9122,10 @@
     // treatment across all post-purchase surfaces (finalising, refund,
     // declined states, and any future post-purchase surface).
     function waButton(href) {
-      return `<a target="_blank" rel="noopener noreferrer" href="${href}"
-        style="display:inline-flex;align-items:center;gap:8px;padding:10px 16px;
-               background:#25D366;color:#fff;border-radius:8px;
-               text-decoration:none;font-weight:600;font-size:14px;">
-        <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+      return `<a class="btn btn-ghost" target="_blank" rel="noopener noreferrer" href="${href}"
+        style="display:inline-flex;align-items:center;gap:8px;text-decoration:none;"
+        aria-label="Message us on WhatsApp">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="#25D366" aria-hidden="true">
           <path d="M20.52 3.48A11.86 11.86 0 0 0 12.06 0C5.51 0 .17 5.34.17 11.9c0 2.1.55 4.14 1.6 5.94L.05 24l6.35-1.67a11.9 11.9 0 0 0 5.66 1.44h.01c6.56 0 11.9-5.34 11.9-11.9 0-3.18-1.24-6.17-3.45-8.39ZM12.07 21.78h-.01a9.89 9.89 0 0 1-5.03-1.38l-.36-.21-3.75.98 1-3.65-.24-.38a9.86 9.86 0 0 1-1.5-5.24c0-5.44 4.43-9.87 9.9-9.87 2.64 0 5.12 1.03 6.98 2.9a9.8 9.8 0 0 1 2.89 6.98c0 5.45-4.44 9.87-9.88 9.87Zm5.42-7.4c-.3-.15-1.76-.87-2.03-.97-.27-.1-.47-.15-.67.15-.2.3-.77.97-.94 1.17-.17.2-.35.22-.65.08-.3-.15-1.26-.46-2.4-1.48a9 9 0 0 1-1.66-2.07c-.17-.3-.02-.46.13-.6.13-.14.3-.35.45-.52.15-.17.2-.3.3-.5.1-.2.05-.37-.02-.52-.08-.15-.67-1.62-.92-2.22-.24-.58-.49-.5-.67-.51-.17-.01-.37-.01-.57-.01-.2 0-.52.07-.79.37-.27.3-1.04 1.02-1.04 2.48s1.06 2.87 1.21 3.07c.15.2 2.1 3.2 5.08 4.49.71.31 1.26.49 1.69.63.71.22 1.35.19 1.86.12.57-.09 1.76-.72 2-1.42.25-.7.25-1.29.17-1.41-.07-.13-.27-.2-.57-.35Z"/>
         </svg>
         Message us on WhatsApp
@@ -19784,7 +19783,7 @@
           // Populate the WhatsApp support link with a happy-path prefill
           // containing the booking reference so support can look it up on
           // first read.
-          
+
           // Stash for F5-recovery on #success. The user could refresh the
           // page while on the success view (or land here via a bookmarked
           // /?ref=TF-... URL). Without this stash, the fresh page wouldn't
