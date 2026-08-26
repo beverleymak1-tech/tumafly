@@ -9112,10 +9112,32 @@
   const TUMAFLY_WHATSAPP_WAME = '254113165503';
     const TUMAFLY_SUPPORT_EMAIL = 'hello@tumafly.com';
 
-    // Build a wa.me deep-link with a URL-encoded prefilled message.
+     // Build a wa.me deep-link with a URL-encoded prefilled message.
         function whatsappLink(prefilledText) {
       const t = encodeURIComponent(String(prefilledText || ''));
       return `https://wa.me/${TUMAFLY_WHATSAPP_WAME}${t ? '?text=' + t : ''}`;
+    }
+    // Session 39 — reusable wiring for the happy-path success screen's
+    // "Before you travel" help line. Called from every path that lands
+    // on #success (showView at ~9515, F5-recovery at ~12058, polling
+    // terminal at ~19783) so the WhatsApp link is always live regardless
+    // of entry path. Pass a real PNR to embed it in the wa.me prefill;
+    // pass null/falsy for a generic prefill (used before PNR lands).
+    // Root cause history: happy-path bookings that stashed a PNR in
+    // sessionStorage before page load bypassed showView entirely via
+    // the synchronous F5-recovery block, leaving the help line as plain
+    // static text. Centralising the wiring here fixes that class.
+    function wireSuccessHelpLine(pnr) {
+      const el = document.getElementById('success-help-line');
+      if (!el) return;
+      const msg = pnr
+        ? 'Hi TumaFly, I have a question about my booking (ref ' + pnr + ').'
+        : 'Hi TumaFly, I need help with my booking.';
+      const href = whatsappLink(msg);
+      el.innerHTML =
+        'Need help? Reply to your confirmation email or ' +
+        '<a href="' + href + '" target="_blank" rel="noopener" ' +
+        'style="color:var(--text-3);text-decoration:underline;">message us on WhatsApp</a>.';
     }
     // WhatsApp CTA button — brand-green background with logo. Use as an
     // inline HTML snippet inside template literals for consistent
@@ -9507,26 +9529,19 @@
             ['home','results','booking','success','profile','my-trips','find-booking','itinerary'].forEach(n => {
         document.getElementById('view-' + n).classList.toggle('hidden', n !== name);
       });
-      // Session 38 — wire the WhatsApp help line from showView('success')
-      // so it fires regardless of which code path reached the success screen
-      // (polling terminal, F5 recovery, Realtime path, etc). Reads the ref
-      // from the DOM slot populated by whichever code path led here. Guards
-      // against firing before ref lands (placeholder still showing).
+          // Session 39 — wire the WhatsApp help line whenever we land on
+      // success via showView. Other entry paths (F5-recovery block at
+      // ~12058, polling terminal at ~19783) call wireSuccessHelpLine
+      // directly because they render the success view without going
+      // through showView. See helper definition near whatsappLink().
+      // Passes null when ref is still a placeholder so the link exists
+      // with a generic prefill during "Confirming…"; the terminal path
+      // will re-wire with the real PNR when it lands.
       if (name === 'success') {
-        const _successHelpLine = document.getElementById('success-help-line');
         const _refSlot = document.getElementById('success-ref');
-        if (_successHelpLine && _refSlot) {
-          const ref = _refSlot.textContent.trim();
-          if (ref && ref !== 'Confirming…' && ref !== 'TF-XXXXXXXX') {
-            const _waHref = whatsappLink(
-              'Hi TumaFly, I have a question about my booking (ref ' + ref + ').'
-            );
-            _successHelpLine.innerHTML =
-              'Need help? Reply to your confirmation email or ' +
-              '<a href="' + _waHref + '" target="_blank" rel="noopener" ' +
-              'style="color:var(--text-3);text-decoration:underline;">message us on WhatsApp</a>.';
-          }
-        }
+        const _ref = _refSlot ? _refSlot.textContent.trim() : '';
+        const _realRef = (_ref && _ref !== 'Confirming…' && _ref !== 'TF-XXXXXXXX') ? _ref : null;
+        wireSuccessHelpLine(_realRef);
       }
       document.body.setAttribute('data-view', name);
       window.scrollTo({ top: 0, behavior: 'instant' });
@@ -12053,7 +12068,7 @@
       // F5 fired, the PNR is stashed alongside the ref — read it and render
       // directly. Otherwise show "Confirming…" while the on-load handler
       // kicks off the polling fallback.
-      const _refSlot = document.getElementById('success-ref');
+        const _refSlot = document.getElementById('success-ref');
       if (_refSlot) {
         let _stashedPnr = null, _stashedRef = null;
         try {
@@ -12066,6 +12081,16 @@
           try { sessionStorage.setItem('tumafly_post_pay_consumed', '1'); } catch (_) {}
         } else {
           _refSlot.textContent = 'Confirming…';
+        }
+        // Session 39 — this synchronous F5-recovery block bypasses
+        // showView entirely (flips CSS classes directly at lines
+        // 12047-12051), so the showView('success') wiring at ~9515
+        // never fires on this path. Call the helper here so the help
+        // line is live regardless. Pass the real PNR when we have it,
+        // null when we're still "Confirming…" — a subsequent polling
+        // terminal will re-wire with the real PNR when it lands.
+        if (typeof wireSuccessHelpLine === 'function') {
+          wireSuccessHelpLine(_stashedPnr || null);
         }
       }
     }
@@ -19777,9 +19802,16 @@
         });
         const data = await res.json();
 
-        if (data.state === 'confirmed' && data.booking) {
+          if (data.state === 'confirmed' && data.booking) {
           const ref = data.booking.booking_reference || activeMerchantRef;
           document.getElementById('success-ref').textContent = ref;
+          // Session 39 — wire the help line the moment the PNR lands.
+          // Belt-and-braces: showView('success') fires below and also
+          // calls wireSuccessHelpLine via its own wiring block. Doing
+          // it here too covers the case where an F5-recovery render
+          // already put a generic link in place and needs updating with
+          // the real PNR, without waiting for the showView call.
+          wireSuccessHelpLine(ref);
           // Populate the WhatsApp support link with a happy-path prefill
           // containing the booking reference so support can look it up on
           // first read.
