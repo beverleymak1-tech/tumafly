@@ -21094,6 +21094,15 @@
                         ${waButton(waHref)}
           </div>
         `;
+        // Session 39 — wire the "Before you travel" help line with the
+        // same merchant_ref used in the waButton above, so the two CTAs
+        // produce identical prefills. Without this, the earlier
+        // F5-recovery block's wireSuccessHelpLine(null) call remains
+        // the final state and the help line renders a generic prefill
+        // even though we have the merchant_ref in hand.
+        if (typeof wireSuccessHelpLine === 'function' && mref) {
+          wireSuccessHelpLine(mref);
+        }
         return;
       }
 
@@ -21162,6 +21171,12 @@
                         ${emailButton()}
           </div>
         `;
+        // Session 39 — see Edit 5A comment. Same treatment for the
+        // refunding state: help line prefill mirrors the waButton so
+        // the two CTAs are identical.
+        if (typeof wireSuccessHelpLine === 'function' && mref) {
+          wireSuccessHelpLine(mref);
+        }
         return;
       }
 
@@ -21202,10 +21217,21 @@
                         ${waButton(waHref)}
           </div>
         `;
+        // Session 39 — same treatment as 5A/5B: mirror the waButton's
+        // mref-embedded prefill on the help line so both CTAs are
+        // identical. NOTE: this state doesn't render #success-ref (no
+        // charge, no booking, no customer-facing reference by design),
+        // so the mref appears only inside the WhatsApp message body.
+        // COPY CAVEAT: the help line's static text "Reply to your
+        // confirmation email..." is misleading here — no confirmation
+        // email exists on 'failed'. Backlog item filed for state-aware
+        // help-line copy; not blocking today.
+        if (typeof wireSuccessHelpLine === 'function' && mref) {
+          wireSuccessHelpLine(mref);
+        }
         return;
       }
     }
-
     async function pollPostRedirect(merchantRef) {
       // Session 28c #12 — best-effort Realtime open. Idempotent (guard
       // flag inside _openRealtimeChannel returns true if already up), fire-
