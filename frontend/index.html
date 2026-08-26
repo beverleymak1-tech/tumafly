@@ -21021,7 +21021,7 @@
         return;
       }
 
-      if (state === 'confirmed') {
+            if (state === 'confirmed') {
         _stopPhasedProgression();
         _wipeTerminalStash();
         const pnr = payload?.booking?.booking_reference || '';
@@ -21031,6 +21031,17 @@
           <p style="color:var(--text-2);max-width:42ch;margin:8px auto 0;">A confirmation is on its way to your email. Your booking reference:</p>
           <div class="success-ref" id="success-ref">${escapeHtml(pnr)}</div>
         `;
+        // Session 39 — the Paystack-callback poll's confirm terminal at
+        // ~line 21247 lands here via renderPostRedirectSuccess('confirmed').
+        // This is the primary in-tab success path (customer completes
+        // payment without a redirect). It writes the PNR to #success-ref
+        // via the template literal above but never touches #success-help-line
+        // — so without this call, the F5-recovery block's early
+        // wireSuccessHelpLine(null) stays as the final state and the help
+        // line renders with a generic prefill even though we have the PNR.
+        if (typeof wireSuccessHelpLine === 'function' && pnr) {
+          wireSuccessHelpLine(pnr);
+        }
         // Session 27b Commit 6 Part 4a — State B navigation prep.
         // Booking is confirmed and the check mark is showing. Replace the
         // current history entry with #home, then push a #success entry on
