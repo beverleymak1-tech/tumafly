@@ -87,17 +87,20 @@ async function checkModeKeyMismatch(source: string): Promise<Response | null> {
   );
 }
 
-// Response envelope. Terminal states end the frontend's poll loop.
-//   confirmed      — booking is done, PNR ready
-//   processing     — payment confirmed, webhook is finalizing (poll again)
-//   failed         — payment or verification failed (customer needs to retry)
-//   refund_pending — Duffel failed post-capture; automated refund issued
 //   refunded       — Paystack has finalized the refund
 //   needs_support  — refund automation itself failed (rare; requires human)
 //   not_found      — no pending_bookings row (should never happen post-init)
+//   duffel_pending — payment confirmed, waiting on Duffel to issue ticket.
+//                    Transient happy-path state (typically 2-8s) between
+//                    Paystack settling and Duffel returning a PNR. Session
+//                    39 Fix B — before this, duffel_pending fell through
+//                    to the Paystack /verify block, which mapped to
+//                    'processing' but also fired a pointless Paystack
+//                    round-trip on every poll while Duffel was in flight.
 type VerifyState =
   | "confirmed"
   | "processing"
+  | "duffel_pending"
   | "failed"
   | "refund_pending"
   | "refunded"
@@ -214,6 +217,19 @@ serve(async (req) => {
     if (pending.status === "paid" || pending.status === "booking") {
       return respond("processing", {
         message: "Confirming your payment...",
+      });
+    }
+    // Session 39 Fix B — duffel_pending is a happy-path transient state
+    // (payment settled, Duffel POST in flight, typically resolves in
+    // 2-8s). Distinct from 'processing' (which means Paystack is still
+    // settling). Explicit branch here avoids the Paystack /verify
+    // round-trip that would otherwise fire on every poll while the
+    // Duffel side is working. Frontend polling loop treats any non-
+    // terminal state as "keep polling" via fallthrough at
+    // frontend/index.html:19912, so no frontend change is needed.
+    if (pending.status === "duffel_pending") {
+      return respond("duffel_pending", {
+        message: "Confirming your ticket...",
       });
     }
 
