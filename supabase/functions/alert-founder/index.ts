@@ -61,6 +61,13 @@ type AlertType =
   | "OTP_STATUS_NON_SUCCESS"               // AT accepted request but returned non-Success for individual recipient; OTP undelivered
   // S-11 guest-token brute-force threshold (mint-guest-token EF)
   | "GUEST_TOKEN_ATTEMPT_THRESHOLD"        // pending_bookings.guest_token_attempts crossed MAX_ATTEMPTS (20) on this request
+  // Session 39 heartbeat monitoring — customer-money-taken rows stuck past
+  // SLA AND cron auth health checks. Complements per-EF alerts by catching
+  // silent failures where no EF ever runs to send its own alert (the class
+  // of failure that hid the retry-stuck-bookings vault-placeholder P0 for
+  // probably months). See session_s39_heartbeat_infra.sql for full context.
+  | "HEARTBEAT_STUCK_ROWS"                 // one or more pending_bookings rows past 15min in customer-money-taken non-terminal state
+  | "HEARTBEAT_CRON_FAILURES"              // non-2xx/timeout/error responses from pg_net HTTP callers in trailing 60min
   | "UNKNOWN_ALERT_TYPE";                  // S-02 fallback — unregistered alert_type received, rendered synthetically to avoid silent-drop
 
 const ALERT_CONFIG: Record<AlertType, { severity: string; subject: string; action: string; dedup_cooldown_minutes?: number }> = {
@@ -240,6 +247,19 @@ const ALERT_CONFIG: Record<AlertType, { severity: string; subject: string; actio
                           subject: "Guest-token brute-force threshold reached",
                           action: "A pending_bookings row's guest_token_attempts counter crossed MAX_ATTEMPTS (20). All subsequent mint-guest-token requests for this booking will 429 until counter is reset. Check context: pending_booking_id (safe to log), attempt_count, source_ip_hash. Investigate: SELECT id, user_id, guest_pending_booking_id, status, created_at FROM pending_bookings WHERE id = '{pending_booking_id}'. If the affected booking is a real customer's, contact them via their auth.users email and ask if they hit the resend link repeatedly. If suspicious pattern (multiple bookings from same source_ip_hash), add IP to Cloudflare WAF block list (S-13). To unblock a legitimate customer: UPDATE pending_bookings SET guest_token_attempts = 0 WHERE id = '{pending_booking_id}'.",
                           dedup_cooldown_minutes: 60,  // dedup per pending_booking_id per hour (mechanic naturally fires once, dedup is defensive)
+                        },
+                        // ── Session 39 heartbeat monitoring ─────────────────────────────────────
+                        HEARTBEAT_STUCK_ROWS: {
+                          severity: "🚨 CRITICAL",
+                          subject: "Heartbeat: pending_bookings rows stuck past SLA",
+                          action: "Rows have been in customer-money-taken non-terminal states (paid, duffel_pending, refund_pending, paid_offer_expired, paid_booking_failed, duffel_pending_orphan_alert_only, needs_support) for >15 min. Normal machinery (process-duffel-booking + retry-stuck-bookings cron + refund executor) should have resolved these by now. Investigate: (1) check cron.job_run_details and net._http_response for recent 4xx/5xx; (2) inspect each row's booking_status_history to see where the transition chain stopped; (3) if reconciler misclassified as orphan (duffel_pending_orphan_alert_only), verify against Duffel dashboard before force-refunding. Full row context in the alert payload. See session_s39_heartbeat_infra.sql.",
+                          dedup_cooldown_minutes: 30,
+                        },
+                        HEARTBEAT_CRON_FAILURES: {
+                          severity: "🚨 CRITICAL",
+                          subject: "Heartbeat: pg_net HTTP callers returning failures",
+                          action: "One or more pg_net HTTP calls (from pg_cron jobs) returned non-2xx / timed out / errored in the trailing 60 min. This is the exact class of silent failure that hid the retry-stuck-bookings vault-placeholder P0 for probably months. Investigate: (1) query `SELECT * FROM net._http_response WHERE created > NOW() - INTERVAL '2 hours' AND (status_code >= 400 OR timed_out OR error_msg IS NOT NULL) ORDER BY created DESC;` to see the full failure detail; (2) map back to which cron job originated each request (join on cron.job_run_details.start_time ≈ net._http_response.created); (3) if 401, check the auth mechanism used by that cron — most likely a vault entry drift. Fix per SOP §1 (Secret Rotation). See session_s39_heartbeat_infra.sql.",
+                          dedup_cooldown_minutes: 30,
                         },
                 // ── S-02 fallback: unregistered alert types render here (never silently dropped) ──
         UNKNOWN_ALERT_TYPE: {
