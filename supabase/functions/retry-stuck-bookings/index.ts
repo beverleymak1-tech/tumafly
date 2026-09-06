@@ -469,7 +469,13 @@ serve(async (req) => {
 
   // Auth: service_role via Authorization (pg_cron passes Vault secret)
   const authHeader = req.headers.get("Authorization") || "";
-  if (!authHeader.includes(SERVICE_ROLE_KEY)) {
+  // Strip optional "Bearer " prefix (pg_cron's net.http_post historically has
+  // sent both formats). Constant-time compare would be marginally stronger,
+  // but the key is high-entropy JWT + hits before any DB touch.
+  const presented = authHeader.startsWith("Bearer ")
+    ? authHeader.slice(7).trim()
+    : authHeader.trim();
+  if (presented !== SERVICE_ROLE_KEY) {
     return new Response(
       JSON.stringify({ error: "Unauthorized" }),
       { status: 401, headers: { ...CORS_HEADERS, "Content-Type": "application/json" } },
@@ -489,17 +495,21 @@ serve(async (req) => {
     const pnrThresh  = new Date(now.getTime() - AGE_PNR_ISSUED_POLL_S * 1000).toISOString();
     const bookedThresh = new Date(now.getTime() - AGE_BOOKED_NO_EMAIL_S * 1000).toISOString();
 
+    // S-14b: read via pending_bookings_decrypted so row.passengers is plaintext
+    // in PAID_NO_TICKET alert contexts (buckets 3, 5). Buckets 1, 2, 4, 6 don't
+    // read row.passengers themselves — nudges + Duffel calls + fireSendConfirmation
+    // only touch id/contact/order — but consistency-of-shape matters for future dev.
     const [paidRows, dpRows, pnrRows, bookedRows] = await Promise.all([
-      supabase.from("pending_bookings").select("*")
+      supabase.from("pending_bookings_decrypted").select("*")
         .eq("status", "paid").lte("updated_at", paidThresh)
         .order("updated_at", { ascending: true }).limit(BATCH_LIMIT),
-      supabase.from("pending_bookings").select("*")
+      supabase.from("pending_bookings_decrypted").select("*")
         .eq("status", "duffel_pending").lte("updated_at", dpThresh)
         .order("updated_at", { ascending: true }).limit(BATCH_LIMIT),
-      supabase.from("pending_bookings").select("*")
+      supabase.from("pending_bookings_decrypted").select("*")
         .eq("status", "pnr_issued").lte("updated_at", pnrThresh)
         .order("updated_at", { ascending: true }).limit(BATCH_LIMIT),
-      supabase.from("pending_bookings").select("*")
+      supabase.from("pending_bookings_decrypted").select("*")
         .eq("status", "booked").is("confirmation_email_sent_at", null)
         .lte("updated_at", bookedThresh)
         .order("updated_at", { ascending: true }).limit(BATCH_LIMIT),

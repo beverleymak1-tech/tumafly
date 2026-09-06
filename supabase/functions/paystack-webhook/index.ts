@@ -491,8 +491,10 @@ serve(async (req) => {
 
   try {
     // 1. Find pending booking by merchant_ref (Paystack echoes it back as data.reference).
+    // S-14b: read via pending_bookings_decrypted so pending.passengers is plaintext
+    // for downstream uses (alertFounder PAID_NO_OFFER context + refundBooking cascade).
     const { data: pending, error: pendingErr } = await supabase
-      .from("pending_bookings")
+      .from("pending_bookings_decrypted")
       .select("*")
       .eq("merchant_ref", reference)
       .maybeSingle();

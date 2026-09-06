@@ -109,8 +109,11 @@ serve(async (req) => {
     // last_name acts as a soft auth: anyone with a PNR can request, but
     // we require the last name to match a passenger on the booking.
     if (pnr) {
+      // S-14b: read via bookings_decrypted so passenger_name/email/details
+      // are plaintext. Without this the last-name verification below always
+      // fails (ciphertext split) and the customer sees ciphertext in the UI.
       const { data: booking, error: bookingErr } = await supabase
-        .from("bookings")
+        .from("bookings_decrypted")
         .select(`
           id, booking_reference, status, origin, destination, departure_at,
           airline, flight_number, cabin_class, fare_brand_name,
@@ -170,8 +173,12 @@ serve(async (req) => {
 
    // ── Mode A: merchant_ref (checkout polling / ops diagnostic) ────────
        // 1. Look up pending_booking
+       // S-14b: read via pending_bookings_decrypted for consistency across
+       // read paths, even though this response body doesn't currently render
+       // passenger data. Future-proofs against a Mode A extension that adds
+       // customer-visible fields.
        const { data: pending, error } = await supabase
-         .from("pending_bookings")
+         .from("pending_bookings_decrypted")
          .select("*")
          .eq("merchant_ref", merchantRef)
          .maybeSingle();
@@ -204,8 +211,10 @@ serve(async (req) => {
 
     // 3. If booked, attach the actual booking details for the success page
     if (pending.status === "booked" && pending.duffel_order_id) {
+      // S-14b: read via bookings_decrypted so passenger_name and
+      // passenger_details render as plaintext on the customer's #success page.
       const { data: booking } = await supabase
-        .from("bookings")
+        .from("bookings_decrypted")
         .select(`
           booking_reference, origin, destination, departure_at, airline, flight_number,
           cabin_class, fare_brand_name, passenger_details,

@@ -87,9 +87,9 @@ async function checkModeKeyMismatch(source: string): Promise<Response | null> {
   );
 }
 
-//   refunded       — Paystack has finalized the refund
-//   needs_support  — refund automation itself failed (rare; requires human)
-//   not_found      — no pending_bookings row (should never happen post-init)
+// ── VerifyState — the states the frontend poll loop understands ───────────
+//   confirmed      — booking is booked, PNR ready
+//   processing     — Paystack is still settling; poll again
 //   duffel_pending — payment confirmed, waiting on Duffel to issue ticket.
 //                    Transient happy-path state (typically 2-8s) between
 //                    Paystack settling and Duffel returning a PNR. Session
@@ -97,6 +97,11 @@ async function checkModeKeyMismatch(source: string): Promise<Response | null> {
 //                    to the Paystack /verify block, which mapped to
 //                    'processing' but also fired a pointless Paystack
 //                    round-trip on every poll while Duffel was in flight.
+//   failed         — payment_failed / payment_invalid / amount_mismatch
+//   refund_pending — refund automation in flight
+//   refunded       — Paystack has finalized the refund
+//   needs_support  — refund automation itself failed (rare; requires human)
+//   not_found      — no pending_bookings row (should never happen post-init)
 type VerifyState =
   | "confirmed"
   | "processing"

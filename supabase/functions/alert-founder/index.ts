@@ -245,7 +245,7 @@ const ALERT_CONFIG: Record<AlertType, { severity: string; subject: string; actio
                         GUEST_TOKEN_ATTEMPT_THRESHOLD: {
                           severity: "⚠️ HIGH",
                           subject: "Guest-token brute-force threshold reached",
-                          action: "A pending_bookings row's guest_token_attempts counter crossed MAX_ATTEMPTS (20). All subsequent mint-guest-token requests for this booking will 429 until counter is reset. Check context: pending_booking_id (safe to log), attempt_count, source_ip_hash. Investigate: SELECT id, user_id, guest_pending_booking_id, status, created_at FROM pending_bookings WHERE id = '{pending_booking_id}'. If the affected booking is a real customer's, contact them via their auth.users email and ask if they hit the resend link repeatedly. If suspicious pattern (multiple bookings from same source_ip_hash), add IP to Cloudflare WAF block list (S-13). To unblock a legitimate customer: UPDATE pending_bookings SET guest_token_attempts = 0 WHERE id = '{pending_booking_id}'.",
+                          action: "A pending_bookings row's guest_token_attempts counter crossed MAX_ATTEMPTS (20). All subsequent mint-guest-token requests for this booking will 429 until counter is reset. Check context: pending_booking_id (safe to log), attempt_count, source_ip_hash. Investigate: SELECT id, user_id, status, guest_token_attempts, created_at FROM pending_bookings WHERE id = '{pending_booking_id}'. If the affected booking is a real customer's, contact them via their auth.users email and ask if they hit the resend link repeatedly. If suspicious pattern (multiple bookings from same source_ip_hash), add IP to Cloudflare WAF block list (S-13). To unblock a legitimate customer: UPDATE pending_bookings SET guest_token_attempts = 0 WHERE id = '{pending_booking_id}'.",
                           dedup_cooldown_minutes: 60,  // dedup per pending_booking_id per hour (mechanic naturally fires once, dedup is defensive)
                         },
                         // ── Session 39 heartbeat monitoring ─────────────────────────────────────
@@ -322,7 +322,13 @@ serve(async (req) => {
 
   // Internal function — require service role auth header
   const authHeader = req.headers.get("Authorization") || "";
-  if (!authHeader.includes(SERVICE_ROLE_KEY)) {
+  // Strip optional "Bearer " prefix (pg_cron and internal EF callers use both
+  // formats historically). Constant-time compare unnecessary — high-entropy
+  // JWT and this check fires before any DB touch.
+  const presented = authHeader.startsWith("Bearer ")
+    ? authHeader.slice(7).trim()
+    : authHeader.trim();
+  if (presented !== SERVICE_ROLE_KEY) {
     return new Response(JSON.stringify({ error: "Unauthorized" }), {
       status: 401,
       headers: { ...CORS_HEADERS, "Content-Type": "application/json" },

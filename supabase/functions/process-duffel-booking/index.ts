@@ -146,8 +146,12 @@ serve(async (req) => {
 
   try {
     // 4. Entry-point double-fire guard: re-read live status
+    // S-14b: read via pending_bookings_decrypted so pending.passengers is plaintext
+    // for the Duffel /air/orders payload construction. Without this, born_on/gender/
+    // etc. would be base64 ciphertext strings and every booking would fail Duffel
+    // schema validation post-payment.
     const { data: pending, error: pendingErr } = await supabase
-      .from("pending_bookings")
+      .from("pending_bookings_decrypted")
       .select("*")
       .eq("id", pendingId)
       .maybeSingle();

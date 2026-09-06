@@ -131,8 +131,10 @@ function documentsPopulated(order: any): boolean {
 }
 
 async function findPendingByDuffelOrderId(supabase: any, orderId: string): Promise<any> {
+  // S-14b: read via pending_bookings_decrypted so pending.passengers is plaintext
+  // for the PAID_NO_TICKET alert context and any future consumer of this helper.
   const { data } = await supabase
-    .from("pending_bookings")
+    .from("pending_bookings_decrypted")
     .select("*")
     .eq("duffel_order_id", orderId)
     .maybeSingle();
@@ -421,8 +423,8 @@ serve(async (req) => {
           function: "duffel-webhook",
           message: "Signature verification failed",
           reason: verify.reason,
-          severity: verify.reason === "signature_mismatch"
-                    || verify.reason === "timestamp_outside_replay_window"
+          severity: (verify.reason?.startsWith("signature_mismatch_")
+                     || verify.reason === "timestamp_outside_replay_window")
             ? "CRITICAL"
             : "HIGH",
         });

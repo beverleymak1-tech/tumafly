@@ -117,8 +117,10 @@ serve(async (req) => {
     }
 
     // 1. Find the pending booking
+    // S-14b: read via pending_bookings_decrypted so pending.passengers is plaintext
+    // for the Duffel /air/orders payload construction below.
     const { data: pending, error: pendingErr } = await supabase
-      .from("pending_bookings")
+      .from("pending_bookings_decrypted")
       .select("*")
       .eq("mpesa_checkout_request_id", checkoutRequestId)
       .maybeSingle();
@@ -138,8 +140,8 @@ serve(async (req) => {
     // and is currently calling Duffel /air/orders. We must NOT try again — the
     // other worker will finalise to "booked" or "paid_booking_failed".
     if (pending.status === "booked" || pending.status === "booking") {
-      console.log(`Webhook re-fired for ${pending.status} booking (${trackingId})`);
-      return pesapalAck(trackingId, merchantRef, notificationType, 200);
+      console.log(`Webhook re-fired for ${pending.status} booking (${checkoutRequestId})`);
+      return darajaAck();
     }
 
     // 3. Handle failure (any ResultCode != 0)
@@ -154,7 +156,7 @@ serve(async (req) => {
         .eq("id", pending.id);
 
       await alertFounder("PAYMENT_FAILED", {
-        merchant_ref: pending.pesapal_order_id,
+        merchant_ref: pending.merchant_ref,
         checkout_request_id: checkoutRequestId,
         result_code: resultCode,
         result_desc: resultDesc,
@@ -183,7 +185,7 @@ serve(async (req) => {
         .eq("id", pending.id);
 
       await alertFounder("AMOUNT_MISMATCH", {
-        merchant_ref: pending.pesapal_order_id,
+        merchant_ref: pending.merchant_ref,
         checkout_request_id: checkoutRequestId,
         expected_kes: pending.total_kes,
         received_kes: amountPaid,
@@ -257,7 +259,7 @@ serve(async (req) => {
         .eq("id", pending.id);
 
       await alertFounder("PAID_NO_OFFER", {
-        merchant_ref: pending.pesapal_order_id,
+        merchant_ref: pending.merchant_ref,
         checkout_request_id: checkoutRequestId,
         duffel_offer_id: pending.duffel_offer_id,
         amount_paid_kes: pending.total_kes,
@@ -370,7 +372,7 @@ serve(async (req) => {
         .eq("id", pending.id);
 
       await alertFounder("PAID_NO_TICKET", {
-        merchant_ref: pending.pesapal_order_id,
+        merchant_ref: pending.merchant_ref,
         checkout_request_id: checkoutRequestId,
         duffel_offer_id: pending.duffel_offer_id,
         amount_paid_kes: pending.total_kes,
@@ -494,7 +496,7 @@ serve(async (req) => {
       await alertFounder("BOOKED_NO_DB_RECORD", {
         duffel_order_id: order.id,
         booking_reference: order.booking_reference,
-        merchant_ref: pending.pesapal_order_id,
+        merchant_ref: pending.merchant_ref,
         customer_email: pending.contact.email,
         mpesa_receipt: mpesaReceiptNumber,
         db_error: dbErr.message,

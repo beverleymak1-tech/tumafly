@@ -168,7 +168,7 @@ serve(async (req) => {
       .from("pending_bookings")
       .insert({
         user_id: userId,                  // null for guests; uid for signed-in users
-        pesapal_order_id: merchantRef,  // reused as universal merchant_ref
+        merchant_ref: merchantRef,
         duffel_offer_id: offer_id,
         passengers,
         contact: { ...contact, phone_number: normalizedPhone },

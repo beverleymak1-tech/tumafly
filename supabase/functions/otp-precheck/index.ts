@@ -7,10 +7,10 @@
 // Per-phone dimension enforced downstream in the send-otp hook (S-07c).
 
 const SUPABASE_URL          = Deno.env.get("SUPABASE_URL")!;
-const SUPABASE_SERVICE_ROLE = Deno.env.get("SERVICE_ROLE_KEY")!;
+const SERVICE_ROLE_KEY = Deno.env.get("SERVICE_ROLE_KEY")!;
 
 // S-07b.1 diagnostic: log env-var presence at boot (length only, never values)
-console.log(`[otp-precheck] boot — SUPABASE_URL: ${SUPABASE_URL ? "set" : "MISSING"}, SUPABASE_SERVICE_ROLE_KEY length: ${SUPABASE_SERVICE_ROLE?.length ?? 0}`);
+console.log(`[otp-precheck] boot — SUPABASE_URL: ${SUPABASE_URL ? "set" : "MISSING"}, SERVICE_ROLE_KEY length: ${SERVICE_ROLE_KEY?.length ?? 0}`);
 
 // Throttle rule: 10 IP-scoped requests per rolling 15 minutes
 const IP_WINDOW_MINUTES = 15;
@@ -53,7 +53,7 @@ async function alertFounderTyped(alert_type: string, context: Record<string, unk
       method:  "POST",
       headers: {
         "Content-Type":  "application/json",
-        "Authorization": `Bearer ${SUPABASE_SERVICE_ROLE}`,
+        "Authorization": `Bearer ${SERVICE_ROLE_KEY}`,
       },
       body: JSON.stringify({ alert_type, context, dedup_key }),
     });
@@ -92,8 +92,8 @@ Deno.serve(async (req) => {
     const countRes = await fetch(countUrl, {
       method:  "HEAD",
       headers: {
-        "apikey":        SUPABASE_SERVICE_ROLE,
-        "Authorization": `Bearer ${SUPABASE_SERVICE_ROLE}`,
+        "apikey":        SERVICE_ROLE_KEY,
+        "Authorization": `Bearer ${SERVICE_ROLE_KEY}`,
         "Prefer":        "count=exact",
       },
     });
@@ -132,8 +132,8 @@ Deno.serve(async (req) => {
     const insertRes = await fetch(`${SUPABASE_URL}/rest/v1/otp_attempts`, {
       method:  "POST",
       headers: {
-        "apikey":        SUPABASE_SERVICE_ROLE,
-        "Authorization": `Bearer ${SUPABASE_SERVICE_ROLE}`,
+        "apikey":       SERVICE_ROLE_KEY,
+        "Authorization": `Bearer ${SERVICE_ROLE_KEY}`,
         "Content-Type":  "application/json",
         "Prefer":        "return=minimal",
       },

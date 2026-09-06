@@ -10,8 +10,12 @@
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
-const SUPABASE_URL          = Deno.env.get("SUPABASE_URL")!;
-const SUPABASE_SERVICE_ROLE = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
+const SUPABASE_URL      = Deno.env.get("SUPABASE_URL")!;
+// SOP §1.1: canonical env var is SERVICE_ROLE_KEY (custom Vault secret),
+// NEVER SUPABASE_SERVICE_ROLE_KEY (Supabase-auto-injected variant that
+// historically resolved to different values on some deploys — this is the
+// class of bug that hid the Session 39 retry-stuck-bookings P0 for months).
+const SERVICE_ROLE_KEY  = Deno.env.get("SERVICE_ROLE_KEY")!;
 
 const CORS = {
   "Access-Control-Allow-Origin": "*",
@@ -36,7 +40,7 @@ Deno.serve(async (req) => {
     }
 
     // Resolve the JWT to a uid using the service-role client.
-    const adminClient = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE, {
+    const adminClient = createClient(SUPABASE_URL, SERVICE_ROLE_KEY, {
       auth: { persistSession: false },
     });
     const { data: { user }, error: authError } = await adminClient.auth.getUser(token);
@@ -49,8 +53,11 @@ Deno.serve(async (req) => {
     }
 
     // ── 2. Fetch bookings for this user ────────────────────────────────────
+    // S-14b: read via bookings_decrypted so passenger_name/email/phone/details
+    // are plaintext for the #my-trips card + itinerary rendering. Without this
+    // every signed-in customer sees ciphertext where their name should be.
     const { data: rows, error: dbError } = await adminClient
-      .from("bookings")
+      .from("bookings_decrypted")
       .select(`
           id,
           pending_booking_id,
@@ -99,7 +106,7 @@ Deno.serve(async (req) => {
     // window (pending is typically ~5-60s before bookings). Best-effort —
     // if the join misses, we just show the source-currency total.
     const userPendings = await adminClient
-      .from("pending_bookings")
+      .from("pending_bookings_decrypted")
       .select(`
         merchant_ref,
         total_kes,

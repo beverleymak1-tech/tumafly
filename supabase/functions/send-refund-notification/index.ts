@@ -3,7 +3,11 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
 const RESEND_API_KEY = Deno.env.get("RESEND_API_KEY");
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
-const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
+// SOP §1.1: canonical env var is SERVICE_ROLE_KEY (custom Vault secret),
+// NEVER SUPABASE_SERVICE_ROLE_KEY (Supabase-auto-injected variant that
+// historically resolved to different values on some deploys — this is the
+// class of bug that hid the Session 39 retry-stuck-bookings P0 for months).
+const SERVICE_ROLE_KEY = Deno.env.get("SERVICE_ROLE_KEY")!;
 const WEBHOOK_SECRET = Deno.env.get("REFUND_NOTIFICATION_WEBHOOK_SECRET")!;
 
 const CORS_HEADERS = {
@@ -262,7 +266,7 @@ serve(async (req) => {
       return new Response("no-op event", { status: 200, headers: CORS_HEADERS });
     }
 
-    const sb = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
+    const sb = createClient(SUPABASE_URL, SERVICE_ROLE_KEY);
     const sentColumn = branch === "initiated"
       ? "refund_notification_sent_at"
       : "refund_settled_notification_sent_at";
@@ -297,8 +301,12 @@ serve(async (req) => {
       return new Response("no recipient", { status: 200, headers: CORS_HEADERS });
     }
 
+    // S-14b: read via pending_bookings_decrypted for consistency across
+    // customer-facing read paths. contact + booking_reference are non-encrypted
+    // so this SELECT is immune, but the swap future-proofs against fallback
+    // extensions to extractFirstName that might reach passengers[0].given_name.
     const { data: pb } = await sb
-      .from("pending_bookings")
+      .from("pending_bookings_decrypted")
       .select("contact, booking_reference")
       .eq("id", refund.pending_booking_id)
       .single();

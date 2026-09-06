@@ -12,7 +12,7 @@ const AT_BASE_URL = Deno.env.get("AT_ENV") === "production"
   : "https://api.sandbox.africastalking.com/version1/messaging";
 
 const SUPABASE_URL          = Deno.env.get("SUPABASE_URL")!;
-const SUPABASE_SERVICE_ROLE = Deno.env.get("SERVICE_ROLE_KEY")!;
+const SERVICE_ROLE_KEY = Deno.env.get("SERVICE_ROLE_KEY")!;
 
 // Hook secret — set this in Supabase Edge Function secrets.
 // Format from Supabase: "v1,whsec_<base64>" — strip the "v1,whsec_" prefix.
@@ -41,7 +41,7 @@ async function alertFounderTyped(alert_type: string, context: Record<string, unk
       method:  "POST",
       headers: {
         "Content-Type":  "application/json",
-        "Authorization": `Bearer ${SUPABASE_SERVICE_ROLE}`,
+        "Authorization": `Bearer ${SERVICE_ROLE_KEY}`,
       },
       body: JSON.stringify({ alert_type, context, dedup_key }),
     });
@@ -68,8 +68,8 @@ async function countPhoneAttempts(phone: string, minutes: number): Promise<numbe
     const res = await fetch(url, {
       method:  "HEAD",
       headers: {
-        "apikey":        SUPABASE_SERVICE_ROLE,
-        "Authorization": `Bearer ${SUPABASE_SERVICE_ROLE}`,
+        "apikey":        SERVICE_ROLE_KEY,
+        "Authorization": `Bearer ${SERVICE_ROLE_KEY}`,
         "Prefer":        "count=exact",
       },
     });
@@ -91,8 +91,8 @@ async function recordPhoneAttempt(phone: string): Promise<void> {
     const res = await fetch(`${SUPABASE_URL}/rest/v1/otp_attempts`, {
       method:  "POST",
       headers: {
-        "apikey":        SUPABASE_SERVICE_ROLE,
-        "Authorization": `Bearer ${SUPABASE_SERVICE_ROLE}`,
+        "apikey":        SERVICE_ROLE_KEY,
+        "Authorization": `Bearer ${SERVICE_ROLE_KEY}`,
         "Content-Type":  "application/json",
         "Prefer":        "return=minimal",
       },
