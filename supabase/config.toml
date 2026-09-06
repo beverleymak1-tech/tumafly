@@ -487,3 +487,7 @@ verify_jwt = false
 
 [functions.otp-precheck]
 verify_jwt = false
+
+[functions.heartbeat]
+enabled = true
+verify_jwt = false
