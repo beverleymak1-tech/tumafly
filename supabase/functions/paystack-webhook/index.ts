@@ -153,10 +153,18 @@ async function handleRefundEvent(eventType: string, event: any, supabase: any): 
 
   // Find the refunds row. Prefer paystack_refund_id, fall back to paystack_tx_id.
   let row: any = null;
+  // Column list scoped to what handleRefundEvent references: id + pending_booking_id
+  // (status UPDATE + linked-record narrative), merchant_ref + amount_kes + reason +
+  // customer_email (alertFounder REFUND_SUCCEEDED / REFUND_FAILED context), plus
+  // paystack_tx_id + paystack_refund_id (payload correlation, .eq clauses).
+  const REFUND_COLS =
+    "id, pending_booking_id, merchant_ref, amount_kes, reason, " +
+    "customer_email, paystack_tx_id, paystack_refund_id";
+
   if (refundId) {
     const { data: r } = await supabase
       .from("refunds")
-      .select("*")
+      .select(REFUND_COLS)
       .eq("paystack_refund_id", refundId)
       .maybeSingle();
     row = r;
@@ -164,7 +172,7 @@ async function handleRefundEvent(eventType: string, event: any, supabase: any): 
   if (!row && txId) {
     const { data: r } = await supabase
       .from("refunds")
-      .select("*")
+      .select(REFUND_COLS)
       .eq("paystack_tx_id", txId)
       .maybeSingle();
     row = r;
@@ -493,9 +501,15 @@ serve(async (req) => {
     // 1. Find pending booking by merchant_ref (Paystack echoes it back as data.reference).
     // S-14b: read via pending_bookings_decrypted so pending.passengers is plaintext
     // for downstream uses (alertFounder PAID_NO_OFFER context + refundBooking cascade).
+    // Column list is scoped to what handleChargeSuccess + refundBooking actually
+    // reference: id (row identity + .eq clauses), status (idempotency bail),
+    // total_kes (amount sanity + refund amount), contact (email + phone_number for
+    // alertFounder + refundBooking), duffel_offer_id (offer re-fetch + alert),
+    // passengers (PAID_NO_OFFER alert context). Every other column on the 27-column
+    // table is unused in this code path.
     const { data: pending, error: pendingErr } = await supabase
       .from("pending_bookings_decrypted")
-      .select("*")
+      .select("id, status, total_kes, contact, duffel_offer_id, passengers")
       .eq("merchant_ref", reference)
       .maybeSingle();
 

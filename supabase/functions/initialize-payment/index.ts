@@ -591,7 +591,9 @@ serve(async (req) => {
         status: "pending",
         guest_token: guestToken,
       })
-      .select()
+      .select("id")  // Only pending.id is referenced downstream (Paystack metadata,
+                    // status-transition UPDATEs, alertFounder context). Tightened
+                    // from bare .select() which returned all 27 columns unnecessarily.
       .single();
 
     if (insertErr) throw new Error(`DB insert failed: ${insertErr.message}`);
