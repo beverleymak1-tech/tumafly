@@ -22,3 +22,4 @@ deno.lock
 *.swp
 *.bak
 supabase/.temp/
+one-off-emails/
