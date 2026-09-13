@@ -52,6 +52,7 @@ import {
   PAYSTACK_API_KEY, PAYSTACK_BASE_URL,
   CORS_HEADERS,
   alertFounder,
+  auditLog,
   checkModeKeyMismatch,
   refundBooking,
 } from "../_shared/duffel-helpers.ts";
@@ -206,6 +207,22 @@ async function handleRefundEvent(eventType: string, event: any, supabase: any): 
       .update({ status: "refunded" })
       .eq("id", row.pending_booking_id);
     console.log(`[handleRefundEvent] refund.processed — pending_booking ${row.pending_booking_id} → refunded`);
+
+    // Ops-1 audit (Session 40): refund settled successfully by Paystack.
+    await auditLog({
+      actor_id: "paystack-webhook",
+      action_type: "refund_processed",
+      target_type: "refund",
+      target_id: row.id,
+      payload: {
+        merchant_ref: row.merchant_ref,
+        paystack_tx_id: row.paystack_tx_id,
+        paystack_refund_id: refundId || row.paystack_refund_id,
+        amount_kes: row.amount_kes,
+        reason: row.reason,
+        pending_booking_id: row.pending_booking_id,
+      },
+    });
   } else if (status === "failed") {
     // Leave pending_booking as refund_pending so support has a triage signal.
     await alertFounder("REFUND_FAILED", {
@@ -215,6 +232,23 @@ async function handleRefundEvent(eventType: string, event: any, supabase: any): 
       amount_kes: row.amount_kes,
       customer_email: row.customer_email,
       reason: row.reason,
+    });
+
+    // Ops-1 audit (Session 40): refund rejected by Paystack. Support
+    // handles manually; pending_booking left in refund_pending.
+    await auditLog({
+      actor_id: "paystack-webhook",
+      action_type: "refund_failed",
+      target_type: "refund",
+      target_id: row.id,
+      payload: {
+        merchant_ref: row.merchant_ref,
+        paystack_tx_id: row.paystack_tx_id,
+        paystack_refund_id: refundId || row.paystack_refund_id,
+        amount_kes: row.amount_kes,
+        reason: row.reason,
+        pending_booking_id: row.pending_booking_id,
+      },
     });
   }
   // status === 'pending' — no cascade needed; already refund_pending.
@@ -602,6 +636,22 @@ serve(async (req) => {
       })
       .eq("id", pending.id);
 
+    // Ops-1 audit (Session 40): payment captured. Fires exactly once per
+    // successful charge.success (idempotency guard at line 534 ensures
+    // duplicate webhook fires bail before this point).
+    await auditLog({
+      actor_id: "paystack-webhook",
+      action_type: "payment_captured",
+      target_type: "pending_booking",
+      target_id: pending.id,
+      payload: {
+        merchant_ref: reference,
+        paystack_tx_id: paystackTxId,
+        payment_method: channel,
+        amount_kes: verifiedAmountKes,
+      },
+    });
+
     // 5b. Atomic claim — exactly one worker proceeds to Duffel.
     const { data: claimed, error: claimErr } = await supabase
       .from("pending_bookings")
@@ -654,7 +704,8 @@ serve(async (req) => {
       });
 
       // Auto-refund — updates status to refund_pending on success.
-      await refundBooking(supabase, "paid_offer_expired", pending, paystackTxId, reference);
+      // Session 40: sourceEf param for refund_initiated audit attribution.
+      await refundBooking(supabase, "paid_offer_expired", pending, paystackTxId, reference, "paystack-webhook");
 
       return new Response("ok", { status: 200, headers: CORS_HEADERS });
     }

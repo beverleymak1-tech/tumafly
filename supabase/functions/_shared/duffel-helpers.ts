@@ -70,6 +70,7 @@ export const PAYSTACK_BASE_URL = "https://api.paystack.co";
 
 export const SEND_CONFIRMATION_URL = `${SUPABASE_URL}/functions/v1/send-confirmation`;
 export const ALERT_FOUNDER_URL = `${SUPABASE_URL}/functions/v1/alert-founder`;
+export const AUDIT_LOG_URL = `${SUPABASE_URL}/functions/v1/audit-log`;
 
 // ── CORS ──────────────────────────────────────────────────────────────────
 
@@ -93,6 +94,51 @@ export async function alertFounder(alertType: string, context: Record<string, un
     });
   } catch (err) {
     console.error("Failed to send alert:", alertType, err);
+  }
+}
+
+// ── Audit-log helper (Ops-1, Session 40) ──────────────────────────────────
+// Fire-and-forget write to audit_log via the audit-log EF. Never throws.
+// Uses object-param signature — 5+ params in positional form is bug-prone.
+//
+// Callers: paystack-webhook, process-duffel-booking, retry-stuck-bookings,
+// send-refund-notification, verify-payment, send-confirmation, and any future
+// EF that mutates booking/payment/refund/cancellation state.
+//
+// Actor convention (see audit_log migration comment for full spec):
+//   actor_type = 'system'   → actor_id = source EF name
+//   actor_type = 'ops'      → actor_id = ops user email
+//   actor_type = 'customer' → actor_id = user_id (or 'guest:<token>' for guests)
+//
+// Payload discipline: never cleartext PII. Structured event context only —
+// amounts, currencies, error details, state transitions, correlation IDs.
+
+export async function auditLog(params: {
+  actor_id: string;
+  action_type: string;
+  target_type: "pending_booking" | "booking" | "refund" | "cancellation";
+  target_id: string;
+  payload?: Record<string, unknown>;
+  actor_type?: "system" | "ops" | "customer";
+}) {
+  try {
+    await fetch(AUDIT_LOG_URL, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${SERVICE_ROLE_KEY}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        actor_type: params.actor_type ?? "system",
+        actor_id: params.actor_id,
+        action_type: params.action_type,
+        target_type: params.target_type,
+        target_id: params.target_id,
+        payload: params.payload ?? {},
+      }),
+    });
+  } catch (err) {
+    console.error("Failed to write audit log:", params.action_type, params.target_id, err);
   }
 }
 
@@ -180,11 +226,14 @@ export async function refundBooking(
   pending: any,
   paystackTxId: string,
   reference: string,
+  sourceEf: string,  // Ops-1, Session 40: attribution for refund_initiated audit
 ): Promise<void> {
   try {
     // Step 1: idempotent insert. Unique index on paystack_tx_id makes
     // the DB the source of truth. Any race resolves here.
-    const { error: insertErr } = await supabase.from("refunds").insert({
+    // Session 40: .select("id").single() so we can use refund.id as target_id
+    // for the refund_initiated audit at end of successful path.
+    const { data: refund, error: insertErr } = await supabase.from("refunds").insert({
       pending_booking_id: pending.id,
       merchant_ref: reference,
       paystack_tx_id: paystackTxId,
@@ -192,7 +241,7 @@ export async function refundBooking(
       reason,
       status: "pending",
       customer_email: pending.contact?.email || null,
-    });
+    }).select("id").single();
 
     if (insertErr) {
       // Duplicate key = we've already tried this. Fine — bail cleanly.
@@ -267,6 +316,27 @@ export async function refundBooking(
       .eq("id", pending.id);
 
     console.log(`[refundBooking] Refund initiated: refund_id=${refundId} tx=${paystackTxId} ref=${reference}`);
+
+    // Ops-1 audit (Session 40): fire only on happy path — after refund is
+    // both DB-persisted AND Paystack has accepted it. Failed Paystack calls
+    // above already alerted and returned; they intentionally don't audit
+    // as refund_initiated because the refund wasn't actually initiated.
+    if (refund?.id) {
+      await auditLog({
+        actor_id: sourceEf,
+        action_type: "refund_initiated",
+        target_type: "refund",
+        target_id: refund.id,
+        payload: {
+          reason,
+          merchant_ref: reference,
+          paystack_tx_id: paystackTxId,
+          paystack_refund_id: refundId,
+          amount_kes: pending.total_kes,
+          pending_booking_id: pending.id,  // cross-reference for booking timeline
+        },
+      });
+    }
   } catch (err) {
     console.error("[refundBooking] Unhandled:", err);
     await alertFounder("REFUND_UNHANDLED_ERROR", {

@@ -506,3 +506,7 @@ verify_jwt = false
 [functions.csp-report]
 enabled = true
 verify_jwt = false
+
+[functions.audit-log]
+enabled = true
+verify_jwt = false

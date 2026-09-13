@@ -49,6 +49,8 @@ type AlertType =
   | "PROCESS_DUFFEL_UNHANDLED_ERROR"       // try/catch at handler top in process-duffel-booking
   | "DUFFEL_ORDER_ACCEPTED_ASYNC"          // Duffel 202 — rare, informational, reconciler will finish
   | "CONFIRMATION_EMAIL_FAILED"            // send-confirmation returned non-2xx or threw; reconciler retries
+  // Session 40.b — race_lost defensive classification (double-fire fix)
+  | "RACE_LOST_NO_BOOKING"                 // Duffel says offer already booked, but no bookings row exists yet for this pending_booking_id
   // S-06 chargeback lifecycle (Paystack dispute events) ──────────────────
   | "CHARGEBACK_OPENED"                    // charge.dispute.create — new dispute filed by customer's bank
   | "CHARGEBACK_REMINDER"                  // charge.dispute.remind — Paystack reminder, response deadline near
@@ -199,6 +201,21 @@ const ALERT_CONFIG: Record<AlertType, { severity: string; subject: string; actio
           severity: "⚠️ HIGH",
           subject: "send-confirmation returned non-2xx or threw",
           action: "Booking is safe — customer is 'booked' in DB and at Duffel. Only the confirmation email failed. retry-stuck-bookings (#9) sweeps 'booked' rows with NULL confirmation_email_sent_at and retries. If this fires more than once for the same row, investigate send-confirmation and RESEND_API_KEY. Customer will not have their e-ticket until email delivers — WhatsApp them their PNR + ticket numbers if 15+ minutes have passed since booking.",
+        },
+        // ── Session 40.b — race_lost defensive classification (double-fire fix) ──
+        // Fires ONLY on the anomalous sub-case: process-duffel-booking classified
+        // a Duffel POST /air/orders error as "the offer_request is already booked
+        // by a concurrent invocation" (see classifyDuffelError in
+        // process-duffel-booking/index.ts), but a query for the winning bookings
+        // row (by pending_booking_id) came back empty. The much more common
+        // race_lost outcome — winner found, clean bail — does NOT alert; this is
+        // specifically the "we don't know what happened, don't guess" escape
+        // hatch. No refund and no pending_bookings.status change were made by
+        // the losing invocation in either case — see the handler for why.
+        RACE_LOST_NO_BOOKING: {
+          severity: "⚠️ HIGH",
+          subject: "Duffel says offer already booked, but no booking record found",
+          action: "process-duffel-booking got 'offer_request_already_booked' from Duffel (meaning some invocation won the race and booked this offer), but a query for the winning bookings row by pending_booking_id found nothing. No refund was fired and pending_bookings.status was left untouched, specifically so this state stays reconcilable. Most likely: a timing gap — the winning invocation's Duffel order succeeded but its bookings-table INSERT hasn't landed yet. Check pending_booking_id in context: (1) requery `SELECT * FROM bookings WHERE pending_booking_id = '{pending_booking_id}'` after a minute — if it now exists, this was just the timing gap and no action is needed; (2) if still empty after a few minutes, check Duffel dashboard directly for an order tied to this offer_request — a real ticket may exist that our DB never recorded (same class as BOOKED_NO_DB_RECORD); (3) check pending_bookings.status for this row — if still duffel_pending, the entry guard will let a future retry attempt Duffel again once whatever caused the gap clears, which is safe; do not force a status change or refund until you've confirmed via Duffel dashboard whether a real order exists.",
         },
         // ── S-06 chargeback lifecycle (Paystack dispute events) ────────────────
         CHARGEBACK_OPENED: {

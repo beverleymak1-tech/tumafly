@@ -20,6 +20,8 @@
 //                 (diverges from handoff §4.2 branch 3 which said pnr_issued
 //                 — that would be semantically wrong when no PNR exists)
 //       Branch 4: 4xx offer-dead            → paid_offer_expired + refund
+//       Branch 4b (Session 40.b): 4xx race_lost → NO state change, NO refund.
+//                 See classifyDuffelError + the race_lost handling below.
 //       Branch 5: 4xx/5xx other             → paid_booking_failed + refund
 //       Branch 6: network / timeout / ambig → return 500, DB webhook retries
 //
@@ -27,11 +29,23 @@
 //       PROCESS_DUFFEL_BOOKING_WEBHOOK_SECRET env var (constant-time compare).
 //
 // Idempotency guarantees:
-//   - Duffel-Idempotency-Key: <pending.id> ensures POST /air/orders is
-//     safely retryable (Duffel returns existing order on second call)
+//   - Duffel-Idempotency-Key: <pending.id> is sent on every POST /air/orders,
+//     correctly formed and stable. CORRECTED Session 40.b: this does NOT make
+//     concurrent duplicate POSTs safe. Duffel's key is a replay cache for
+//     SEQUENTIAL retries (same key + request already completed → same
+//     response replayed) — it is not a lock against CONCURRENT requests. Two
+//     invocations racing (the DB webhook is configured with Retries: 3 per
+//     README_async_duffel_wiring.md, and can deliver a second invocation
+//     before the first completes) will both be processed by Duffel; the
+//     loser gets a genuine `offer_request_already_booked` business error,
+//     not a cached duplicate success. classifyDuffelError's "race_lost"
+//     branch is what actually makes this safe now — see there for detail.
 //   - All pending_bookings.status UPDATEs use compare-and-set on
 //     `status = 'duffel_pending'` so concurrent handlers can't step on
-//     each other or regress state
+//     each other or regress state. This DOES work correctly (confirmed via
+//     Session 40.b Function Log trace) — the race_lost branch is careful
+//     to never touch pending_bookings.status at all, so it can't contend
+//     with the legitimate winner's own transition.
 //   - Pre-INSERT check on bookings prevents duplicates if a prior run
 //     died between INSERT and pending_bookings UPDATE
 //   - confirmation_email_sent_at atomic guard (WHERE ... IS NULL)
@@ -48,6 +62,7 @@ import {
   SEND_CONFIRMATION_URL,
   CORS_HEADERS,
   alertFounder,
+  auditLog,
   checkModeKeyMismatch,
   refundBooking,
 } from "../_shared/duffel-helpers.ts";
@@ -65,17 +80,40 @@ function safeCompare(a: string, b: string): boolean {
 }
 
 // ── Duffel error classifier ───────────────────────────────────────────────
-// Routes offer-related codes to paid_offer_expired; everything else to
-// paid_booking_failed. Duffel error codes come at errors[].code.
-function classifyDuffelError(errorData: any): "offer_dead" | "book_failed" {
+// Session 40.b — split into THREE outcomes, not two. Original (Session 28b)
+// version grouped "offer_request_already_booked" in with the genuinely-dead
+// offer codes on the theory that Duffel-Idempotency-Key would make a
+// concurrent duplicate POST /air/orders return the SAME 200 response as the
+// winner, so this branch would only ever see a real terminal failure.
+//
+// That assumption was wrong. Duffel's idempotency key is a replay cache for
+// SEQUENTIAL retries (same key, request already completed → same response
+// replayed), not a lock for CONCURRENT requests. When the DB webhook's
+// retry policy (Retries: 3, per README_async_duffel_wiring.md) delivers two
+// invocations close enough together that both reach this POST before either
+// has completed, Duffel processes both against the same offer_request. The
+// winner's order consumes it; the loser's POST then fails normal state
+// validation with "offer_request_already_booked" — a real business error,
+// not a cached duplicate success. Session 40.b incident (2 real customer-
+// visible refund-on-a-real-booking pairs) traced to exactly this.
+//
+// "race_lost" is NOT the same as offer_dead: a real booking usually exists
+// for a race_lost error. offer_dead means there is no live offer at all —
+// refund is correct there. race_lost must never auto-refund; see the
+// dedicated handling in the Branches 4 & 5 block below.
+function classifyDuffelError(errorData: any): "offer_dead" | "race_lost" | "book_failed" {
   const errors = Array.isArray(errorData?.errors) ? errorData.errors : [];
-  const offerCodes = new Set([
+  const offerDeadCodes = new Set([
     "offer_expired",
     "offer_no_longer_available",
+  ]);
+  const raceLostCodes = new Set([
     "offer_request_already_booked",
   ]);
   for (const e of errors) {
-    if (offerCodes.has(String(e?.code || ""))) return "offer_dead";
+    const code = String(e?.code || "");
+    if (raceLostCodes.has(code)) return "race_lost";
+    if (offerDeadCodes.has(code)) return "offer_dead";
   }
   return "book_failed";
 }
@@ -252,7 +290,8 @@ serve(async (req) => {
         duffel_error: offerData,
         source: "process-duffel-booking",
       });
-      await refundBooking(supabase, "paid_offer_expired", pending, paystackTxId, reference);
+      // Session 40: sourceEf param for refund_initiated audit attribution.
+      await refundBooking(supabase, "paid_offer_expired", pending, paystackTxId, reference, "process-duffel-booking");
       return new Response("ok", { status: 200, headers: CORS_HEADERS });
     }
 
@@ -393,6 +432,52 @@ serve(async (req) => {
     // 9. Branches 4 & 5 — Duffel error
     if (!orderRes.ok) {
       const errorClass = classifyDuffelError(orderRespData);
+
+      // Session 40.b — race_lost handling. Must run BEFORE the compare-
+      // and-set below: that update targets paid_offer_expired/failed and
+      // was exactly what won the race against the legitimate winner's own
+      // transition in the Session 40.b incident (the loser's bad update
+      // landed on pending_bookings.status while it was still
+      // 'duffel_pending', beating the winner's own step-11 update to it).
+      // race_lost must never touch pending_bookings.status at all — the
+      // real transition belongs entirely to the invocation that actually
+      // has an order. We only ever look, never write, here.
+      if (errorClass === "race_lost") {
+        const { data: winnerBooking } = await supabase
+          .from("bookings")
+          .select("id, booking_reference, duffel_order_id")
+          .eq("pending_booking_id", pending.id)
+          .maybeSingle();
+
+        if (winnerBooking) {
+          // The concurrent invocation already booked this successfully.
+          // No refund, no state change, no duffel_order_failed audit — this
+          // was never actually a failure. Entry guard (step 4) will
+          // correctly no-op-bail any further retries once the winner's own
+          // compare-and-set (step 11) has landed.
+          console.log(`[process-duffel-booking] race_lost: winner already booked ${winnerBooking.booking_reference} (order ${winnerBooking.duffel_order_id}) for ${reference}, bailing clean`);
+          return new Response("ok", { status: 200, headers: CORS_HEADERS });
+        }
+
+        // Anomalous: Duffel says the offer_request is already booked, but
+        // no bookings row exists yet for this pending_booking_id. Most
+        // likely explanation is a timing gap — the winner's own bookings
+        // INSERT (step 10) hasn't landed yet even though its Duffel POST
+        // already succeeded. Could also be a genuinely unexplained state.
+        // Do NOT guess: no refund (may cancel a real ticket-in-progress),
+        // no state change. Hand off for manual reconciliation.
+        console.error(`[process-duffel-booking] race_lost but no bookings row found for pending ${pending.id} (${reference}) — RACE_LOST_NO_BOOKING`);
+        await alertFounder("RACE_LOST_NO_BOOKING", {
+          merchant_ref: reference,
+          pending_booking_id: pending.id,
+          paystack_tx_id: paystackTxId,
+          duffel_offer_id: pending.duffel_offer_id,
+          duffel_error: orderRespData,
+          source: "process-duffel-booking",
+        });
+        return new Response("ok", { status: 200, headers: CORS_HEADERS });
+      }
+
       const targetStatus = errorClass === "offer_dead"
         ? "paid_offer_expired"
         : "paid_booking_failed";
@@ -411,6 +496,29 @@ serve(async (req) => {
         console.log(`[process-duffel-booking] Concurrent transition on Duffel-fail branch, bailing (${errorClass})`);
         return new Response("ok", { status: 200, headers: CORS_HEADERS });
       }
+
+      // Ops-1 audit (Session 40): Duffel POST /air/orders failed. Fires after
+      // the concurrent-transition guard (so we don't double-audit on race) and
+      // before alertFounder + refundBooking. Includes error CODES only, not the
+      // full Duffel response body — payload should stay queryable, not become
+      // a log dump. Full context available in Function Logs.
+      await auditLog({
+        actor_id: "process-duffel-booking",
+        action_type: "duffel_order_failed",
+        target_type: "pending_booking",
+        target_id: pending.id,
+        payload: {
+          merchant_ref: reference,
+          duffel_offer_id: pending.duffel_offer_id,
+          paystack_tx_id: paystackTxId,
+          duffel_http_status: orderRes.status,
+          error_class: errorClass,
+          target_status: targetStatus,
+          duffel_error_codes: (Array.isArray(orderRespData?.errors) ? orderRespData.errors : [])
+            .map((e: any) => e?.code || "unknown"),
+        },
+      });
+
       await alertFounder(alertType, {
         merchant_ref: reference,
         paystack_tx_id: paystackTxId,
@@ -426,7 +534,8 @@ serve(async (req) => {
         error_class: errorClass,
         source: "process-duffel-booking",
       });
-      await refundBooking(supabase, refundReason, pending, paystackTxId, reference);
+      // Session 40: sourceEf param for refund_initiated audit attribution.
+      await refundBooking(supabase, refundReason, pending, paystackTxId, reference, "process-duffel-booking");
       return new Response("ok", { status: 200, headers: CORS_HEADERS });
     }
 
@@ -527,7 +636,9 @@ serve(async (req) => {
       .maybeSingle();
 
     if (!existingBooking) {
-      const { error: dbErr } = await supabase.from("bookings").insert({
+      // Session 40: .select("id").single() so we can capture the new bookings.id
+      // as target_id for the booking_created audit.
+      const { data: newBooking, error: dbErr } = await supabase.from("bookings").insert({
         user_id: pending.user_id || null,
         pending_booking_id: pending.id,
         duffel_order_id: order.id,
@@ -563,7 +674,7 @@ serve(async (req) => {
         return_flight_number: returnSeg
           ? `${returnSeg.marketing_carrier.iata_code}${returnSeg.marketing_carrier_flight_number}`
           : null,
-      });
+      }).select("id").single();
 
       if (dbErr) {
         await alertFounder("BOOKED_NO_DB_RECORD", {
@@ -577,6 +688,27 @@ serve(async (req) => {
         });
         // Duffel booking succeeded — continue to transition pending_bookings.
         // Manual reconciliation via alert.
+        // NO booking_created audit here — no bookings row exists to reference.
+        // The BOOKED_NO_DB_RECORD alert is the signal for manual reconciliation.
+      } else if (newBooking?.id) {
+        // Ops-1 audit (Session 40): booking successfully created in DB.
+        // Fires exactly once per successful INSERT. Idempotent re-runs skip
+        // (existingBooking short-circuits above). dbErr paths skip (no row).
+        await auditLog({
+          actor_id: "process-duffel-booking",
+          action_type: "booking_created",
+          target_type: "booking",
+          target_id: newBooking.id,
+          payload: {
+            pending_booking_id: pending.id,   // cross-reference for booking timeline
+            merchant_ref: reference,
+            duffel_order_id: order.id,
+            booking_reference: order.booking_reference,
+            paystack_tx_id: paystackTxId,
+            total_paid_kes: pending.total_kes,
+            documents_populated: documentsPopulated,
+          },
+        });
       }
     } else {
       console.log(`[process-duffel-booking] Bookings row already exists for pending ${pending.id}, skipping INSERT`);

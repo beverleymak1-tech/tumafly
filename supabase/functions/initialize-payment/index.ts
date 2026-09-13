@@ -26,6 +26,7 @@
 
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { auditLog } from "../_shared/duffel-helpers.ts";
 
 const DUFFEL_READ_KEY = Deno.env.get("DUFFEL_READ_KEY") || Deno.env.get("DUFFEL_API_KEY")!;
 const DUFFEL_API_KEY = Deno.env.get("DUFFEL_API_KEY")!;
@@ -260,6 +261,12 @@ serve(async (req) => {
       } catch (_) { /* guest — leave null */ }
     }
   }
+
+  // Ops-1 audit: capture pending.id after successful insert so the outer
+  // catch can attribute unhandled failures to the specific pending_booking.
+  // Pre-insert failures are not audited (nothing to attach to; ops dashboard
+  // wouldn't have a booking to investigate anyway).
+  let capturedPendingId: string | null = null;
 
   try {
     const { offer_id, passengers, contact, seats, baggages, turnstile_token, expected_price_kes } = await req.json();
@@ -597,6 +604,7 @@ serve(async (req) => {
       .single();
 
     if (insertErr) throw new Error(`DB insert failed: ${insertErr.message}`);
+    capturedPendingId = pending.id;
 
     // 5. Call Paystack Initialize Transaction
     // Paystack expects amounts in the smallest currency unit (KES × 100 = cents/kobo).
@@ -645,6 +653,19 @@ serve(async (req) => {
     }
 
     // 6. Response — return access_code for InlineJS resumeTransaction
+    await auditLog({
+      actor_id: "initialize-payment",
+      action_type: "payment_initialized",
+      target_type: "pending_booking",
+      target_id: pending.id,
+      payload: {
+        merchant_ref: merchantRef,
+        duffel_offer_id: offer_id,
+        total_kes: totalKES,
+        currency: "KES",
+      },
+    });
+
     return new Response(JSON.stringify({
       success: true,
       access_code: paystackData.data.access_code,
@@ -666,6 +687,23 @@ serve(async (req) => {
 
   } catch (err) {
     console.error("initialize-payment error:", err);
+
+    // Ops-1: audit if we have a pending_booking to attribute to.
+    // Pre-insert failures are already returned via specific 400/403/410 paths
+    // above; only unhandled exceptions (Paystack API failure, DB errors after
+    // insert, etc) reach here.
+    if (capturedPendingId) {
+      await auditLog({
+        actor_id: "initialize-payment",
+        action_type: "payment_init_failed",
+        target_type: "pending_booking",
+        target_id: capturedPendingId,
+        payload: {
+          error: (err as Error).message,
+        },
+      });
+    }
+
     return new Response(JSON.stringify({ error: (err as Error).message }), {
       status: 500,
       headers: { ...CORS_HEADERS, "Content-Type": "application/json" },
