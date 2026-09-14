@@ -264,6 +264,7 @@ async function forceFailDuffelPending(supabase: any, row: any): Promise<any> {
     row,
     row.processor_transaction_id,
     row.merchant_ref,
+    "retry-stuck-bookings",  // Session 40: sourceEf for refund_initiated audit attribution
   );
   return { outcome: "duffel_pending_force_failed_and_refund_initiated" };
 }
@@ -327,6 +328,7 @@ async function handlePnrIssued(supabase: any, row: any, ageSec: number): Promise
       row,
       row.processor_transaction_id,
       row.merchant_ref,
+      "retry-stuck-bookings",  // Session 40: sourceEf for refund_initiated audit attribution
     );
     return { outcome: "pnr_issued_force_failed_cancelled_and_refunded" };
   }
