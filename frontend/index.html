@@ -12032,6 +12032,7 @@
       // clearTimeout) all no-op cleanly when there's nothing to clear.
       if (view === 'home') {
         _wipePaymentFlowState();
+        try { _wipeTerminalStash(); } catch (_) {}
       }
       showView(view, { fromPopState: true });
       // Q3: When the user navigates back to booking (e.g., Account → edit
@@ -12171,6 +12172,7 @@
       passengerData = [];
       contactData = {};
       _wipePaymentFlowState();
+      try { _wipeTerminalStash(); } catch (_) {}
       showView('home');
     }
 
