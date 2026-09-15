@@ -196,10 +196,14 @@ serve(async (req) => {
 
     if (pendingErr || !pending) {
       console.error(`[process-duffel-booking] Pending row not found: ${pendingId}`, pendingErr);
-      await alertFounder("PROCESS_DUFFEL_PENDING_NOT_FOUND", {
-        pending_booking_id: pendingId,
-        db_error: pendingErr?.message,
-      });
+      await alertFounder(
+        "PROCESS_DUFFEL_PENDING_NOT_FOUND",
+        {
+          pending_booking_id: pendingId,
+          db_error: pendingErr?.message,
+        },
+        `pending_booking_id:${pendingId}`,
+      );
       // 200 — don't retry a nonexistent row.
       return new Response("ok", { status: 200, headers: CORS_HEADERS });
     }
@@ -467,14 +471,18 @@ serve(async (req) => {
         // Do NOT guess: no refund (may cancel a real ticket-in-progress),
         // no state change. Hand off for manual reconciliation.
         console.error(`[process-duffel-booking] race_lost but no bookings row found for pending ${pending.id} (${reference}) — RACE_LOST_NO_BOOKING`);
-        await alertFounder("RACE_LOST_NO_BOOKING", {
-          merchant_ref: reference,
-          pending_booking_id: pending.id,
-          paystack_tx_id: paystackTxId,
-          duffel_offer_id: pending.duffel_offer_id,
-          duffel_error: orderRespData,
-          source: "process-duffel-booking",
-        });
+        await alertFounder(
+          "RACE_LOST_NO_BOOKING",
+          {
+            merchant_ref: reference,
+            pending_booking_id: pending.id,
+            paystack_tx_id: paystackTxId,
+            duffel_offer_id: pending.duffel_offer_id,
+            duffel_error: orderRespData,
+            source: "process-duffel-booking",
+          },
+          `pending_booking_id:${pending.id}`,
+        );
         return new Response("ok", { status: 200, headers: CORS_HEADERS });
       }
 
@@ -780,13 +788,17 @@ serve(async (req) => {
       });
     } catch (err) {
       console.error("[process-duffel-booking] send-confirmation threw:", err);
-      await alertFounder("CONFIRMATION_EMAIL_FAILED", {
-        merchant_ref: reference,
-        pending_booking_id: pending.id,
-        customer_email: pending.contact?.email,
-        source: "process-duffel-booking",
-        error: (err as Error).message,
-      });
+      await alertFounder(
+        "CONFIRMATION_EMAIL_FAILED",
+        {
+          merchant_ref: reference,
+          pending_booking_id: pending.id,
+          customer_email: pending.contact?.email,
+          source: "process-duffel-booking",
+          error: (err as Error).message,
+        },
+        `pending_booking_id:${pending.id}`,
+      );
       // Booking is safe. Reconciler (#9) sweeps booked rows w/ NULL timestamp.
       return new Response("ok", { status: 200, headers: CORS_HEADERS });
     }
@@ -801,14 +813,18 @@ serve(async (req) => {
     } else {
       const emailBody = await emailRes.text().catch(() => "");
       console.error(`[process-duffel-booking] send-confirmation ${emailRes.status}: ${emailBody}`);
-      await alertFounder("CONFIRMATION_EMAIL_FAILED", {
-        merchant_ref: reference,
-        pending_booking_id: pending.id,
-        customer_email: pending.contact?.email,
-        http_status: emailRes.status,
-        response_body: emailBody.slice(0, 500),
-        source: "process-duffel-booking",
-      });
+      await alertFounder(
+        "CONFIRMATION_EMAIL_FAILED",
+        {
+          merchant_ref: reference,
+          pending_booking_id: pending.id,
+          customer_email: pending.contact?.email,
+          http_status: emailRes.status,
+          response_body: emailBody.slice(0, 500),
+          source: "process-duffel-booking",
+        },
+        `pending_booking_id:${pending.id}`,
+      );
       // Booking is safe. Reconciler sweeps.
     }
 

@@ -3,6 +3,7 @@
 // Verifies webhook signature using Standard Webhooks spec (Supabase's format).
 
 import { Webhook } from "https://esm.sh/standardwebhooks@1.0.0";
+import { alertFounder } from "../_shared/duffel-helpers.ts";
 
 const AT_API_KEY  = Deno.env.get("AT_API_KEY")!;
 const AT_USERNAME = Deno.env.get("AT_USERNAME")!;
@@ -32,27 +33,10 @@ async function sha256Hex(input: string): Promise<string> {
     .join("");
 }
 
-// Typed alert-founder call (S-02 shape). Use for all NEW alerts.
-// Legacy alertFounder(subject, body) below is pre-existing tech debt — do not
-// use for new work; migrate incrementally in S-04 log-hygiene sweep.
-async function alertFounderTyped(alert_type: string, context: Record<string, unknown>, dedup_key?: string) {
-  try {
-    const res = await fetch(`${SUPABASE_URL}/functions/v1/alert-founder`, {
-      method:  "POST",
-      headers: {
-        "Content-Type":  "application/json",
-        "Authorization": `Bearer ${SERVICE_ROLE_KEY}`,
-      },
-      body: JSON.stringify({ alert_type, context, dedup_key }),
-    });
-    if (!res.ok) {
-      const body = await res.text();
-      console.error(`[send-otp] alertFounderTyped non-2xx: status=${res.status} type=${alert_type} body=${body.substring(0, 300)}`);
-    }
-  } catch (e) {
-    console.error(`[send-otp] alertFounderTyped threw for type=${alert_type}:`, e instanceof Error ? e.message : e);
-  }
-}
+// alertFounderTyped migrated to shared alertFounder() in
+// _shared/duffel-helpers.ts (Session 41.b consolidation). Same 3-arg shape
+// (alertType, context, dedupKey?) — this was the reference implementation
+// the shared helper's canonical pattern (RUNBOOK §1.7) was documented from.
 
 // Count phone rows in otp_attempts within a rolling window.
 // Returns null on infra error (caller decides fail-open behavior).
@@ -107,7 +91,7 @@ async function recordPhoneAttempt(phone: string): Promise<void> {
 }
 
 // ─── Legacy alertFounder(subject, body) helper removed Session 34 cleanup ────
-// All call sites migrated to alertFounderTyped(alert_type, context) above.
+// All call sites migrated to alertFounder(alert_type, context) above.
 // New alert types registered in alert-founder: OTP_DELIVERY_FAILED,
 // OTP_STATUS_NON_SUCCESS. See TumaFly_SOP_Master.md §1.1 for the SERVICE_ROLE_KEY
 // canonical convention that motivated this migration.
@@ -168,7 +152,7 @@ Deno.serve(async (req) => {
         if (count15m !== null && count15m >= PHONE_WINDOW_15M_LIMIT) {
           console.warn(`[send-otp] throttle HIT (15m window): phone_15m=${count15m} limit=${PHONE_WINDOW_15M_LIMIT}`);
           const hashedPhone = await sha256Hex(phone);
-                await alertFounderTyped("OTP_THROTTLE_HIT", {
+                await alertFounder("OTP_THROTTLE_HIT", {
                   scope:              "phone",
                   scope_value_sha256: hashedPhone,
                   window_minutes:     15,
@@ -181,7 +165,7 @@ Deno.serve(async (req) => {
               if (count24h !== null && count24h >= PHONE_WINDOW_24H_LIMIT) {
           console.warn(`[send-otp] throttle HIT (24h window): phone_24h=${count24h} limit=${PHONE_WINDOW_24H_LIMIT}`);
           const hashedPhone = await sha256Hex(phone);
-                await alertFounderTyped("OTP_THROTTLE_HIT", {
+                await alertFounder("OTP_THROTTLE_HIT", {
                   scope:              "phone",
                   scope_value_sha256: hashedPhone,
                   window_minutes:     60 * 24,
@@ -222,11 +206,15 @@ Deno.serve(async (req) => {
 
     if (!atResponse.ok) {
           console.error(`[send-otp] AT delivery failed status=${atResponse.status}`);
-          await alertFounderTyped("OTP_DELIVERY_FAILED", {
-            phone_sha256:   await sha256Hex(phone),
-            at_http_status: atResponse.status,
-            at_message:     typeof result?.SMSMessageData?.Message === "string" ? result.SMSMessageData.Message.substring(0, 200) : "no-message",
-          });
+          await alertFounder(
+            "OTP_DELIVERY_FAILED",
+            {
+              phone_sha256:   await sha256Hex(phone),
+              at_http_status: atResponse.status,
+              at_message:     typeof result?.SMSMessageData?.Message === "string" ? result.SMSMessageData.Message.substring(0, 200) : "no-message",
+            },
+            `at_http_status:${atResponse.status}`,
+          );
           return OK();
     }
 
@@ -235,11 +223,15 @@ Deno.serve(async (req) => {
     if (failed.length > 0) {
         const firstFailed = failed[0] as { status?: string; statusCode?: number };
         console.error(`[send-otp] AT non-Success failed_count=${failed.length} first_status=${firstFailed?.status ?? "unknown"}`);
-        await alertFounderTyped("OTP_STATUS_NON_SUCCESS", {
-            phone_sha256:   await sha256Hex(phone),
-            at_status_code: firstFailed?.statusCode ?? 0,
-            at_message:     typeof firstFailed?.status === "string" ? firstFailed.status.substring(0, 200) : "no-status",
-        });
+        await alertFounder(
+            "OTP_STATUS_NON_SUCCESS",
+            {
+              phone_sha256:   await sha256Hex(phone),
+              at_status_code: firstFailed?.statusCode ?? 0,
+              at_message:     typeof firstFailed?.status === "string" ? firstFailed.status.substring(0, 200) : "no-status",
+            },
+            `at_status_code:${firstFailed?.statusCode ?? 0}`,
+        );
     }
 
     return OK();

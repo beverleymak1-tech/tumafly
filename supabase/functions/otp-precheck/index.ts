@@ -6,6 +6,8 @@
 // Closes KYC 1.16 per-IP dimension.
 // Per-phone dimension enforced downstream in the send-otp hook (S-07c).
 
+import { alertFounder } from "../_shared/duffel-helpers.ts";
+
 const SUPABASE_URL          = Deno.env.get("SUPABASE_URL")!;
 const SERVICE_ROLE_KEY = Deno.env.get("SERVICE_ROLE_KEY")!;
 
@@ -47,26 +49,8 @@ async function sha256Hex(input: string): Promise<string> {
     .join("");
 }
 
-async function alertFounderTyped(alert_type: string, context: Record<string, unknown>, dedup_key?: string) {
-  try {
-    const res = await fetch(`${SUPABASE_URL}/functions/v1/alert-founder`, {
-      method:  "POST",
-      headers: {
-        "Content-Type":  "application/json",
-        "Authorization": `Bearer ${SERVICE_ROLE_KEY}`,
-      },
-      body: JSON.stringify({ alert_type, context, dedup_key }),
-    });
-    if (!res.ok) {
-      const body = await res.text();
-      console.error(`[otp-precheck] alertFounder non-2xx: status=${res.status} type=${alert_type} body=${body.substring(0, 300)}`);
-    } else {
-      console.log(`[otp-precheck] alertFounder OK: type=${alert_type} status=${res.status}`);
-    }
-  } catch (e) {
-    console.error(`[otp-precheck] alertFounder threw for type=${alert_type}:`, e instanceof Error ? e.message : e);
-  }
-}
+// alertFounderTyped migrated to shared alertFounder() in
+// _shared/duffel-helpers.ts (Session 41.b consolidation). Same 3-arg shape.
 
 // ─── Handler ─────────────────────────────────────────────────────────────────
 Deno.serve(async (req) => {
@@ -101,7 +85,7 @@ Deno.serve(async (req) => {
     if (!countRes.ok) {
       console.error("[otp-precheck] count query failed:", countRes.status);
       // Fail-open on infra error; alert so we notice
-      await alertFounderTyped("OTP_PRECHECK_INFRA_ERROR", {
+      await alertFounder("OTP_PRECHECK_INFRA_ERROR", {
         stage:  "count",
         status: countRes.status,
       });
@@ -115,7 +99,7 @@ Deno.serve(async (req) => {
           // Threshold hit — do NOT record another attempt (would extend the window)
           console.log(`[otp-precheck] throttle HIT: total=${total} limit=${IP_LIMIT} — firing alert`);
           const hashedIp = await sha256Hex(ip);
-                await alertFounderTyped("OTP_THROTTLE_HIT", {
+                await alertFounder("OTP_THROTTLE_HIT", {
                   scope:              "ip",
                   scope_value_sha256: hashedIp,
                   window_minutes:     IP_WINDOW_MINUTES,
@@ -142,7 +126,7 @@ Deno.serve(async (req) => {
 
     if (!insertRes.ok) {
       console.error("[otp-precheck] insert failed:", insertRes.status);
-      await alertFounderTyped("OTP_PRECHECK_INFRA_ERROR", {
+      await alertFounder("OTP_PRECHECK_INFRA_ERROR", {
         stage:  "insert",
         status: insertRes.status,
       });

@@ -26,7 +26,7 @@
 
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
-import { auditLog } from "../_shared/duffel-helpers.ts";
+import { auditLog, alertFounder } from "../_shared/duffel-helpers.ts";
 
 const DUFFEL_READ_KEY = Deno.env.get("DUFFEL_READ_KEY") || Deno.env.get("DUFFEL_API_KEY")!;
 const DUFFEL_API_KEY = Deno.env.get("DUFFEL_API_KEY")!;
@@ -110,24 +110,17 @@ let MODE_KEY_REASON = "";
 }
 let modeKeyAlertFired = false;
 
-async function alertFounder(alertType: string, context: Record<string, unknown>) {
-  try {
-    await fetch(`${SUPABASE_URL}/functions/v1/alert-founder`, {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${SERVICE_ROLE_KEY}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({ alert_type: alertType, context }),
-    });
-  } catch (_) { /* swallow — alerts must never block */ }
-}
+// alertFounder migrated to _shared/duffel-helpers.ts (Session 41.b consolidation)
 
 async function checkModeKeyMismatch(source: string): Promise<Response | null> {
   if (MODE_KEY_OK) return null;
   if (!modeKeyAlertFired) {
     modeKeyAlertFired = true;
-    await alertFounder("PAYSTACK_OR_DUFFEL_MODE_KEY_MISMATCH", { source, reason: MODE_KEY_REASON });
+    await alertFounder(
+      "PAYSTACK_OR_DUFFEL_MODE_KEY_MISMATCH",
+      { source, reason: MODE_KEY_REASON },
+      `source:${source}`,
+    );
   }
   return new Response(
     JSON.stringify({ error: "Service temporarily unavailable. Please try again shortly." }),

@@ -183,11 +183,15 @@ async function handleRefundEvent(eventType: string, event: any, supabase: any): 
     // Refund initiated outside our system (Paystack dashboard) — no matching row.
     // Alert so support can reconcile manually. Don't block the event.
     console.warn(`[handleRefundEvent] No matching refund row: refund_id=${refundId} tx_id=${txId}`);
-    await alertFounder("REFUND_EVENT_NO_ROW", {
-      event_type: eventType,
-      paystack_refund_id: refundId,
-      paystack_tx_id: txId,
-    });
+    await alertFounder(
+      "REFUND_EVENT_NO_ROW",
+      {
+        event_type: eventType,
+        paystack_refund_id: refundId,
+        paystack_tx_id: txId,
+      },
+      `paystack_refund_id:${refundId}`,
+    );
     return new Response("ok", { status: 200, headers: CORS_HEADERS });
   }
 
@@ -281,11 +285,15 @@ async function handleDisputeEvent(eventType: string, event: any, supabase: any):
 
   if (!reference) {
     console.error(`[handleDisputeEvent] ${eventType} with no reference`);
-    await alertFounder("UNHANDLED_ERROR", {
-      message: `Dispute event ${eventType} received with no transaction reference`,
-      event_type: eventType,
-      dispute_code: disputeCode,
-    });
+    await alertFounder(
+      "UNHANDLED_ERROR",
+      {
+        message: `Dispute event ${eventType} received with no transaction reference`,
+        event_type: eventType,
+        dispute_code: disputeCode,
+      },
+      `function:paystack-webhook+reason:dispute_missing_reference`,
+    );
     return new Response("ok", { status: 200, headers: CORS_HEADERS });
   }
 
@@ -304,29 +312,37 @@ async function handleDisputeEvent(eventType: string, event: any, supabase: any):
     // No pending_booking for this reference — dispute against something we don't
     // track. Still alert; support reconciles by hand.
     console.error(`[handleDisputeEvent] No pending_booking for reference ${reference}`);
-    await alertFounder(isResolve ? "CHARGEBACK_RESOLVED_LOST" : openedOrRemindAlert, {
-      event_type: eventType,
-      reference,
-      paystack_tx_id: paystackTxId,
-      dispute_code: disputeCode,
-      dispute_reason: disputeReason,
-      message: "No matching pending_booking found — dispute cannot be linked to a booking",
-    });
+    await alertFounder(
+      isResolve ? "CHARGEBACK_RESOLVED_LOST" : openedOrRemindAlert,
+      {
+        event_type: eventType,
+        reference,
+        paystack_tx_id: paystackTxId,
+        dispute_code: disputeCode,
+        dispute_reason: disputeReason,
+        message: "No matching pending_booking found — dispute cannot be linked to a booking",
+      },
+      `dispute_code:${disputeCode}`,
+    );
     return new Response("ok", { status: 200, headers: CORS_HEADERS });
   }
 
   if (!pending.booking_id) {
     // Dispute on a payment that never became a full booking (e.g. paid_booking_failed
     // where we kept the service fee). Alert only — no bookings row to transition.
-    await alertFounder(isResolve ? "CHARGEBACK_RESOLVED_LOST" : openedOrRemindAlert, {
-      event_type: eventType,
-      merchant_ref: reference,
-      pending_booking_id: pending.id,
-      paystack_tx_id: paystackTxId,
-      dispute_code: disputeCode,
-      dispute_reason: disputeReason,
-      message: "Dispute for a pending_booking that never became a full booking (e.g. paid_booking_failed retained service fee)",
-    });
+    await alertFounder(
+      isResolve ? "CHARGEBACK_RESOLVED_LOST" : openedOrRemindAlert,
+      {
+        event_type: eventType,
+        merchant_ref: reference,
+        pending_booking_id: pending.id,
+        paystack_tx_id: paystackTxId,
+        dispute_code: disputeCode,
+        dispute_reason: disputeReason,
+        message: "Dispute for a pending_booking that never became a full booking (e.g. paid_booking_failed retained service fee)",
+      },
+      `dispute_code:${disputeCode}`,
+    );
     return new Response("ok", { status: 200, headers: CORS_HEADERS });
   }
 
@@ -338,12 +354,16 @@ async function handleDisputeEvent(eventType: string, event: any, supabase: any):
     .maybeSingle();
 
   if (bookingErr || !booking) {
-    await alertFounder("UNHANDLED_ERROR", {
-      message: "handleDisputeEvent could not fetch booking row",
-      event_type: eventType,
-      pending_booking_id: pending.id,
-      booking_id: pending.booking_id,
-    });
+    await alertFounder(
+      "UNHANDLED_ERROR",
+      {
+        message: "handleDisputeEvent could not fetch booking row",
+        event_type: eventType,
+        pending_booking_id: pending.id,
+        booking_id: pending.booking_id,
+      },
+      `function:paystack-webhook+reason:dispute_booking_fetch_failed`,
+    );
     return new Response("ok", { status: 200, headers: CORS_HEADERS });
   }
 
@@ -376,33 +396,41 @@ async function handleDisputeEvent(eventType: string, event: any, supabase: any):
     if (priorStatus === "confirmed") {
       await supabase.from("bookings").update({ status: "disputed" }).eq("id", booking.id);
     }
-    await alertFounder("CHARGEBACK_OPENED", {
-      event_type: eventType,
-      merchant_ref: reference,
-      booking_reference: booking.booking_reference,
-      booking_id: booking.id,
-      paystack_tx_id: paystackTxId,
-      dispute_code: disputeCode,
-      dispute_reason: disputeReason,
-      prior_status: priorStatus,
-      flown,
-    });
+    await alertFounder(
+      "CHARGEBACK_OPENED",
+      {
+        event_type: eventType,
+        merchant_ref: reference,
+        booking_reference: booking.booking_reference,
+        booking_id: booking.id,
+        paystack_tx_id: paystackTxId,
+        dispute_code: disputeCode,
+        dispute_reason: disputeReason,
+        prior_status: priorStatus,
+        flown,
+      },
+      `dispute_code:${disputeCode}`,
+    );
     return new Response("ok", { status: 200, headers: CORS_HEADERS });
   }
 
   if (isRemind) {
     // No state change — reminders don't move state.
-    await alertFounder("CHARGEBACK_REMINDER", {
-      event_type: eventType,
-      merchant_ref: reference,
-      booking_reference: booking.booking_reference,
-      booking_id: booking.id,
-      paystack_tx_id: paystackTxId,
-      dispute_code: disputeCode,
-      dispute_reason: disputeReason,
-      prior_status: priorStatus,
-      flown,
-    });
+    await alertFounder(
+      "CHARGEBACK_REMINDER",
+      {
+        event_type: eventType,
+        merchant_ref: reference,
+        booking_reference: booking.booking_reference,
+        booking_id: booking.id,
+        paystack_tx_id: paystackTxId,
+        dispute_code: disputeCode,
+        dispute_reason: disputeReason,
+        prior_status: priorStatus,
+        flown,
+      },
+      `dispute_code:${disputeCode}`,
+    );
     return new Response("ok", { status: 200, headers: CORS_HEADERS });
   }
 
@@ -422,19 +450,23 @@ async function handleDisputeEvent(eventType: string, event: any, supabase: any):
       await supabase.from("bookings").update({ status: newStatus }).eq("id", booking.id);
     }
 
-    await alertFounder(alertType, {
-      event_type: eventType,
-      merchant_ref: reference,
-      booking_reference: booking.booking_reference,
-      booking_id: booking.id,
-      paystack_tx_id: paystackTxId,
-      dispute_code: disputeCode,
-      dispute_reason: disputeReason,
-      dispute_outcome: outcome,
-      prior_status: priorStatus,
-      flown,
-      reason: resolution || "(paystack sent no resolution string)",
-    });
+    await alertFounder(
+      alertType,
+      {
+        event_type: eventType,
+        merchant_ref: reference,
+        booking_reference: booking.booking_reference,
+        booking_id: booking.id,
+        paystack_tx_id: paystackTxId,
+        dispute_code: disputeCode,
+        dispute_reason: disputeReason,
+        dispute_outcome: outcome,
+        prior_status: priorStatus,
+        flown,
+        reason: resolution || "(paystack sent no resolution string)",
+      },
+      `dispute_code:${disputeCode}`,
+    );
     return new Response("ok", { status: 200, headers: CORS_HEADERS });
   }
 
@@ -466,10 +498,18 @@ serve(async (req) => {
     console.error("[paystack-webhook] Invalid JSON body:", err);
     // Return 200 so Paystack doesn't retry a malformed payload forever.
     // Alert so we know something upstream sent garbage.
-    await alertFounder("PAYSTACK_MALFORMED_WEBHOOK", {
-      error: (err as Error).message,
-      body_length: rawBody.length,
-    });
+    await alertFounder(
+      "PAYSTACK_MALFORMED_WEBHOOK",
+      {
+        error: (err as Error).message,
+        body_length: rawBody.length,
+      },
+      // Body couldn't be parsed, so event.event isn't available. Use a
+      // constant per-EF sentinel — attack bursts of unparseable bodies
+      // collapse to one alert per 15min window (§11 shape principle:
+      // per-EF class dedup when payload categorization is impossible).
+      `event_type:unparseable`,
+    );
     return new Response("ok", { status: 200, headers: CORS_HEADERS });
   }
 
@@ -478,12 +518,16 @@ serve(async (req) => {
   const validSig = await verifyPaystackSignature(rawBody, signature, PAYSTACK_API_KEY);
   if (!validSig) {
     console.error("[paystack-webhook] Signature verification failed");
-    await alertFounder("PAYSTACK_SIGNATURE_FAILURE", {
-      event_type: event?.event || "unknown",
-      reference: event?.data?.reference || "unknown",
-      signature_header_present: !!signature,
-      reason: "HMAC-SHA512 mismatch",
-    });
+    await alertFounder(
+      "PAYSTACK_SIGNATURE_FAILURE",
+      {
+        event_type: event?.event || "unknown",
+        reference: event?.data?.reference || "unknown",
+        signature_header_present: !!signature,
+        reason: "HMAC-SHA512 mismatch",
+      },
+      `event_type:${event?.event || "unknown"}`,
+    );
     // 401 signals a bad actor — Paystack won't retry (which we want here,
     // since the payload is untrusted).
     return new Response(JSON.stringify({ error: "Invalid signature" }), {
@@ -524,10 +568,14 @@ serve(async (req) => {
 
   if (!reference) {
     console.error("[paystack-webhook] charge.success with no reference");
-    await alertFounder("PAYSTACK_MISSING_REFERENCE", {
-      event_type: eventType,
-      paystack_tx_id: paystackTxId,
-    });
+    await alertFounder(
+      "PAYSTACK_MISSING_REFERENCE",
+      {
+        event_type: eventType,
+        paystack_tx_id: paystackTxId,
+      },
+      `paystack_tx_id:${paystackTxId}`,
+    );
     return new Response("ok", { status: 200, headers: CORS_HEADERS });
   }
 
@@ -549,11 +597,15 @@ serve(async (req) => {
 
     if (pendingErr || !pending) {
       console.error("CRITICAL: Webhook for unknown reference:", reference);
-      await alertFounder("UNHANDLED_ERROR", {
-        message: "Paystack webhook fired for unknown reference",
-        reference,
-        paystack_tx_id: paystackTxId,
-      });
+      await alertFounder(
+        "UNHANDLED_ERROR",
+        {
+          message: "Paystack webhook fired for unknown reference",
+          reference,
+          paystack_tx_id: paystackTxId,
+        },
+        `function:paystack-webhook+reason:webhook_unknown_reference`,
+      );
       return new Response("ok", { status: 200, headers: CORS_HEADERS });
     }
 
@@ -593,13 +645,17 @@ serve(async (req) => {
         .update({ status: "payment_invalid", payment_method: channel })
         .eq("id", pending.id);
 
-      await alertFounder("PAYMENT_FAILED", {
-        merchant_ref: reference,
-        paystack_tx_id: paystackTxId,
-        verify_status: verifyData?.data?.status || "unknown",
-        verify_gateway_response: verifyData?.data?.gateway_response || null,
-        customer_email: pending.contact.email,
-      });
+      await alertFounder(
+        "PAYMENT_FAILED",
+        {
+          merchant_ref: reference,
+          paystack_tx_id: paystackTxId,
+          verify_status: verifyData?.data?.status || "unknown",
+          verify_gateway_response: verifyData?.data?.gateway_response || null,
+          customer_email: pending.contact.email,
+        },
+        `merchant_ref:${reference}`,
+      );
 
       return new Response("ok", { status: 200, headers: CORS_HEADERS });
     }
@@ -722,12 +778,16 @@ serve(async (req) => {
 
   } catch (err) {
     console.error("CRITICAL: webhook unhandled error", err);
-    await alertFounder("UNHANDLED_ERROR", {
-      reference,
-      paystack_tx_id: paystackTxId,
-      error: (err as Error).message,
-      stack: (err as Error).stack,
-    });
+    await alertFounder(
+      "UNHANDLED_ERROR",
+      {
+        reference,
+        paystack_tx_id: paystackTxId,
+        error: (err as Error).message,
+        stack: (err as Error).stack,
+      },
+      `function:paystack-webhook+reason:top_level_catch`,
+    );
     // Non-2xx so Paystack retries. Our idempotency guard catches re-fires.
     return new Response(JSON.stringify({ error: "Internal error" }), {
       status: 500,

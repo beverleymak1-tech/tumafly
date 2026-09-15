@@ -197,13 +197,17 @@ async function fireSendConfirmation(
 async function handleOrderCreated(supabase: any, event: any): Promise<Response> {
   const order = event?.data?.object;
   if (!order?.id) {
-    await alertFounder("UNHANDLED_ERROR", {
-      function: "duffel-webhook",
-      event_id: event?.id,
-      event_type: event?.type,
-      message: "order.created event has no data.object.id",
-      raw_event: event,
-    });
+    await alertFounder(
+      "UNHANDLED_ERROR",
+      {
+        function: "duffel-webhook",
+        event_id: event?.id,
+        event_type: event?.type,
+        message: "order.created event has no data.object.id",
+        raw_event: event,
+      },
+      `function:duffel-webhook+reason:created_missing_object_id`,
+    );
     return new Response("ok", { status: 200, headers: CORS_HEADERS });
   }
 
@@ -213,14 +217,18 @@ async function handleOrderCreated(supabase: any, event: any): Promise<Response> 
     // outside our system; (b) event race — process-duffel-booking hasn't
     // yet UPDATED our row with duffel_order_id. Alert HIGH not CRITICAL
     // because case (b) is expected and case (a) is not customer-impacting.
-    await alertFounder("UNHANDLED_ERROR", {
-      function: "duffel-webhook",
-      event_type: event.type,
-      duffel_order_id: order.id,
-      booking_reference: order.booking_reference,
-      message: "order.created event fired for a duffel_order_id we don't have a pending row for. Either (a) created outside our system (Dashboard) or (b) race with process-duffel-booking's UPDATE. Not blocking.",
-      severity: "HIGH",
-    });
+    await alertFounder(
+      "UNHANDLED_ERROR",
+      {
+        function: "duffel-webhook",
+        event_type: event.type,
+        duffel_order_id: order.id,
+        booking_reference: order.booking_reference,
+        message: "order.created event fired for a duffel_order_id we don't have a pending row for. Either (a) created outside our system (Dashboard) or (b) race with process-duffel-booking's UPDATE. Not blocking.",
+        severity: "HIGH",
+      },
+      `function:duffel-webhook+reason:created_unknown_order_id`,
+    );
     return new Response("ok", { status: 200, headers: CORS_HEADERS });
   }
 
@@ -234,15 +242,19 @@ async function handleOrderCreated(supabase: any, event: any): Promise<Response> 
         && documentsPopulated(order)) {
       const email = await fireSendConfirmation(supabase, pending, order);
       if (!email.ok) {
-        await alertFounder("CONFIRMATION_EMAIL_FAILED", {
-          merchant_ref: pending.merchant_ref,
-          pending_booking_id: pending.id,
-          customer_email: pending.contact?.email,
-          http_status: email.http_status,
-          response_body: email.body,
-          error: email.error,
-          source: "duffel-webhook (booked no-email replay)",
-        });
+        await alertFounder(
+          "CONFIRMATION_EMAIL_FAILED",
+          {
+            merchant_ref: pending.merchant_ref,
+            pending_booking_id: pending.id,
+            customer_email: pending.contact?.email,
+            http_status: email.http_status,
+            response_body: email.body,
+            error: email.error,
+            source: "duffel-webhook (booked no-email replay)",
+          },
+          `pending_booking_id:${pending.id}`,
+        );
       } else {
         console.log(`[duffel-webhook] Replayed → email sent for ${pending.merchant_ref}`);
       }
@@ -268,15 +280,19 @@ async function handleOrderCreated(supabase: any, event: any): Promise<Response> 
     }
     const email = await fireSendConfirmation(supabase, pending, order);
     if (!email.ok) {
-      await alertFounder("CONFIRMATION_EMAIL_FAILED", {
-        merchant_ref: pending.merchant_ref,
-        pending_booking_id: pending.id,
-        customer_email: pending.contact?.email,
-        http_status: email.http_status,
-        response_body: email.body,
-        error: email.error,
-        source: "duffel-webhook (pnr_issued → booked)",
-      });
+      await alertFounder(
+        "CONFIRMATION_EMAIL_FAILED",
+        {
+          merchant_ref: pending.merchant_ref,
+          pending_booking_id: pending.id,
+          customer_email: pending.contact?.email,
+          http_status: email.http_status,
+          response_body: email.body,
+          error: email.error,
+          source: "duffel-webhook (pnr_issued → booked)",
+        },
+        `pending_booking_id:${pending.id}`,
+      );
     } else {
       console.log(`[duffel-webhook] pnr_issued → booked + email sent for ${pending.merchant_ref}`);
     }
@@ -309,15 +325,19 @@ async function handleOrderCreated(supabase: any, event: any): Promise<Response> 
   }
 
   // Any other state (paid, pending, etc.) — unexpected but not disaster.
-  await alertFounder("UNHANDLED_ERROR", {
-    function: "duffel-webhook",
-    merchant_ref: pending.merchant_ref,
-    pending_booking_id: pending.id,
-    current_status: pending.status,
-    duffel_order_id: order.id,
-    message: "order.created event fired for row in unexpected state",
-    severity: "HIGH",
-  });
+  await alertFounder(
+    "UNHANDLED_ERROR",
+    {
+      function: "duffel-webhook",
+      merchant_ref: pending.merchant_ref,
+      pending_booking_id: pending.id,
+      current_status: pending.status,
+      duffel_order_id: order.id,
+      message: "order.created event fired for row in unexpected state",
+      severity: "HIGH",
+    },
+    `function:duffel-webhook+reason:created_unexpected_row_state`,
+  );
   return new Response("ok", { status: 200, headers: CORS_HEADERS });
 }
 
@@ -328,25 +348,33 @@ async function handleOrderCreationFailed(supabase: any, event: any): Promise<Res
   // idempotency_key at the top level (which is the ord_... id).
   const orderId = failure?.id || event?.idempotency_key || "";
   if (!orderId) {
-    await alertFounder("UNHANDLED_ERROR", {
-      function: "duffel-webhook",
-      event_id: event?.id,
-      event_type: event?.type,
-      message: "order.creation_failed with no identifiable order id",
-      raw_event: event,
-    });
+    await alertFounder(
+      "UNHANDLED_ERROR",
+      {
+        function: "duffel-webhook",
+        event_id: event?.id,
+        event_type: event?.type,
+        message: "order.creation_failed with no identifiable order id",
+        raw_event: event,
+      },
+      `function:duffel-webhook+reason:creation_failed_missing_id`,
+    );
     return new Response("ok", { status: 200, headers: CORS_HEADERS });
   }
 
   const pending = await findPendingByDuffelOrderId(supabase, orderId);
   if (!pending) {
-    await alertFounder("UNHANDLED_ERROR", {
-      function: "duffel-webhook",
-      event_type: event.type,
-      duffel_order_id: orderId,
-      message: "order.creation_failed for a duffel_order_id we don't have a pending row for",
-      severity: "HIGH",
-    });
+    await alertFounder(
+      "UNHANDLED_ERROR",
+      {
+        function: "duffel-webhook",
+        event_type: event.type,
+        duffel_order_id: orderId,
+        message: "order.creation_failed for a duffel_order_id we don't have a pending row for",
+        severity: "HIGH",
+      },
+      `function:duffel-webhook+reason:creation_failed_unknown_order_id`,
+    );
     return new Response("ok", { status: 200, headers: CORS_HEADERS });
   }
 
@@ -419,15 +447,19 @@ serve(async (req) => {
       const isNoisy = verify.reason === "missing_signature_header"
                    || verify.reason === "empty_body";
       if (!isNoisy) {
-        await alertFounder("UNHANDLED_ERROR", {
-          function: "duffel-webhook",
-          message: "Signature verification failed",
-          reason: verify.reason,
-          severity: (verify.reason?.startsWith("signature_mismatch_")
-                     || verify.reason === "timestamp_outside_replay_window")
-            ? "CRITICAL"
-            : "HIGH",
-        });
+        await alertFounder(
+          "UNHANDLED_ERROR",
+          {
+            function: "duffel-webhook",
+            message: "Signature verification failed",
+            reason: verify.reason,
+            severity: (verify.reason?.startsWith("signature_mismatch_")
+                       || verify.reason === "timestamp_outside_replay_window")
+              ? "CRITICAL"
+              : "HIGH",
+          },
+          `function:duffel-webhook+reason:${verify.reason}`,
+        );
       }
       return new Response(
         JSON.stringify({ error: "Signature verification failed" }),
@@ -440,11 +472,15 @@ serve(async (req) => {
   try {
     event = JSON.parse(rawBody);
   } catch (err) {
-    await alertFounder("UNHANDLED_ERROR", {
-      function: "duffel-webhook",
-      message: "Body signature-verified but JSON parse failed",
-      severity: "HIGH",
-    });
+    await alertFounder(
+      "UNHANDLED_ERROR",
+      {
+        function: "duffel-webhook",
+        message: "Body signature-verified but JSON parse failed",
+        severity: "HIGH",
+      },
+      `function:duffel-webhook+reason:body_parse_failed`,
+    );
     return new Response(
       JSON.stringify({ error: "invalid_json" }),
       { status: 400, headers: { ...CORS_HEADERS, "Content-Type": "application/json" } },
@@ -454,10 +490,14 @@ serve(async (req) => {
   // 4. Live-mode cross-check
   if (typeof event?.live_mode === "boolean" && !liveModeMatchesEnv(event.live_mode)) {
     // Env var says one mode; event says other. Deeply wrong. Refuse.
-    await alertFounder("DUFFEL_MODE_KEY_MISMATCH", {
-      source: "duffel-webhook",
-      reason: `event.live_mode=${event.live_mode} but DUFFEL_MODE=${DUFFEL_MODE}`,
-    });
+    await alertFounder(
+      "DUFFEL_MODE_KEY_MISMATCH",
+      {
+        source: "duffel-webhook",
+        reason: `event.live_mode=${event.live_mode} but DUFFEL_MODE=${DUFFEL_MODE}`,
+      },
+      `source:duffel-webhook`,
+    );
     return new Response(
       JSON.stringify({ error: "live_mode_mismatch" }),
       { status: 503, headers: { ...CORS_HEADERS, "Content-Type": "application/json" } },
@@ -483,13 +523,17 @@ serve(async (req) => {
     }
   } catch (err) {
     console.error("[duffel-webhook] Unhandled:", err);
-    await alertFounder("UNHANDLED_ERROR", {
-      function: "duffel-webhook",
-      event_id: event?.id,
-      event_type: event?.type,
-      error: (err as Error).message,
-      stack: (err as Error).stack,
-    });
+    await alertFounder(
+      "UNHANDLED_ERROR",
+      {
+        function: "duffel-webhook",
+        event_id: event?.id,
+        event_type: event?.type,
+        error: (err as Error).message,
+        stack: (err as Error).stack,
+      },
+      `function:duffel-webhook+reason:dispatch_exception`,
+    );
     // Non-2xx → Duffel retries. Idempotency guards handle re-fires.
     return new Response(
       JSON.stringify({ error: "internal_error" }),

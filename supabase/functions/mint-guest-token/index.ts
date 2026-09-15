@@ -36,7 +36,7 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { create } from "https://deno.land/x/djwt@v3.0.2/mod.ts";
-import { CORS_HEADERS } from "../_shared/duffel-helpers.ts";
+import { CORS_HEADERS, alertFounder } from "../_shared/duffel-helpers.ts";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SERVICE_ROLE_KEY = Deno.env.get("SERVICE_ROLE_KEY")!;
@@ -101,24 +101,8 @@ async function sha256Hex(input: string): Promise<string> {
     .join("");
 }
 
-async function alertFounderTyped(alert_type: string, context: Record<string, unknown>, dedup_key?: string) {
-  try {
-    const res = await fetch(`${SUPABASE_URL}/functions/v1/alert-founder`, {
-      method:  "POST",
-      headers: {
-        "Content-Type":  "application/json",
-        "Authorization": `Bearer ${SERVICE_ROLE_KEY}`,
-      },
-      body: JSON.stringify({ alert_type, context, dedup_key }),
-    });
-    if (!res.ok) {
-      const body = await res.text();
-      console.error(`[mint-guest-token] alertFounderTyped non-2xx: status=${res.status} type=${alert_type} body=${body.substring(0, 300)}`);
-    }
-  } catch (e) {
-    console.error(`[mint-guest-token] alertFounderTyped threw for type=${alert_type}:`, e instanceof Error ? e.message : e);
-  }
-}
+// alertFounderTyped migrated to shared alertFounder() in
+// _shared/duffel-helpers.ts (Session 41.b consolidation). Same 3-arg shape.
 
 serve(async (req) => {
   // CORS preflight
@@ -204,7 +188,7 @@ serve(async (req) => {
         console.warn(`[mint-guest-token] threshold CROSSED for pending_booking_id=${pending_booking_id} newCount=${newCount}`);
         const sourceIp = extractClientIp(req);
         const sourceIpHash = await sha256Hex(sourceIp);
-        await alertFounderTyped("GUEST_TOKEN_ATTEMPT_THRESHOLD", {
+        await alertFounder("GUEST_TOKEN_ATTEMPT_THRESHOLD", {
           pending_booking_id: pending_booking_id,
           attempt_count:      newCount,
           source_ip_hash:     sourceIpHash,

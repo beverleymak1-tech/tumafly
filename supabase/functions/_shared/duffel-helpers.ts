@@ -82,16 +82,34 @@ export const CORS_HEADERS = {
 // ── Alert helper ──────────────────────────────────────────────────────────
 // Fire-and-forget alert to the alert-founder EF. Never throws.
 
-export async function alertFounder(alertType: string, context: Record<string, unknown>) {
+// Session 41.b: extended 2-arg -> 3-arg (optional dedupKey) + .ok check per
+// RUNBOOK §1.7. Matches heartbeat/index.ts fireAlert's wire shape exactly.
+// 2-arg callers are unaffected: dedup_key is only included in the body when
+// dedupKey is truthy, so the wire body is byte-identical to pre-41.b for them.
+export async function alertFounder(
+  alertType: string,
+  context: Record<string, unknown>,
+  dedupKey?: string,
+) {
   try {
-    await fetch(ALERT_FOUNDER_URL, {
+    const res = await fetch(ALERT_FOUNDER_URL, {
       method: "POST",
       headers: {
         Authorization: `Bearer ${SERVICE_ROLE_KEY}`,
         "Content-Type": "application/json",
       },
-      body: JSON.stringify({ alert_type: alertType, context }),
+      body: JSON.stringify({
+        alert_type: alertType,
+        context,
+        ...(dedupKey ? { dedup_key: dedupKey } : {}),
+      }),
     });
+    if (!res.ok) {
+      const body = await res.text();
+      console.error(
+        `Failed to send alert (non-2xx): type=${alertType} status=${res.status} body=${body.substring(0, 300)}`,
+      );
+    }
   } catch (err) {
     console.error("Failed to send alert:", alertType, err);
   }
@@ -196,7 +214,11 @@ export async function checkModeKeyMismatch(source: string): Promise<Response | n
   if (MODE_KEY_OK) return null;
   if (!modeKeyAlertFired) {
     modeKeyAlertFired = true;
-    await alertFounder("PAYSTACK_OR_DUFFEL_MODE_KEY_MISMATCH", { source, reason: MODE_KEY_REASON });
+    await alertFounder(
+      "PAYSTACK_OR_DUFFEL_MODE_KEY_MISMATCH",
+      { source, reason: MODE_KEY_REASON },
+      `source:${source}`,
+    );
   }
   return new Response(
     JSON.stringify({ error: "Service temporarily unavailable. Please try again shortly." }),

@@ -102,11 +102,13 @@ const ALERT_CONFIG: Record<AlertType, { severity: string; subject: string; actio
     severity: "ℹ️ INFO",
     subject: "Payment did not complete",
     action: "No action needed unless customer reaches out.",
+    dedup_cooldown_minutes: 60,  // §11 (S35b): dedup per merchant_ref per hour — retry loops on same failing payment collapse
   },
   UNHANDLED_ERROR: {
       severity: "🚨 CRITICAL",
       subject: "Unhandled error in webhook",
       action: "Check logs. May indicate an outage.",
+      dedup_cooldown_minutes: 15,  // §11 (S35b): dedup per function+reason per 15min — cascading catches from same code path collapse
     },
     // ── Batch 2 refund automation (Session 25) ──────────────────────────────
     REFUND_DB_INSERT_FAILED: {
@@ -133,6 +135,7 @@ const ALERT_CONFIG: Record<AlertType, { severity: string; subject: string; actio
       severity: "ℹ️ INFO",
       subject: "Paystack refund event for unknown refund",
       action: "A refund event fired for a refund not initiated by refundBooking() (typically a manual refund from Paystack dashboard). Expected for manual refunds; reconcile if unexpected.",
+      dedup_cooldown_minutes: 1440,  // §11 (S35b): dedup per paystack_refund_id per 24hr — Paystack fires refund event lifecycle (pending→processed) on same id
     },
     REFUND_FAILED: {
       severity: "🚨 CRITICAL",
@@ -144,38 +147,45 @@ const ALERT_CONFIG: Record<AlertType, { severity: string; subject: string; actio
       severity: "⚠️ HIGH",
       subject: "Paystack webhook body was not valid JSON",
       action: "Something upstream is sending malformed payloads. Check paystack-webhook logs. If ongoing, contact Paystack support.",
+      dedup_cooldown_minutes: 15,  // §11 (S35b): dedup per event_type per 15min. S41b §10 addendum: body unparseable so event.event unavailable — sentinel `event_type:unparseable` used at fire site, still per §11 principle
     },
     PAYSTACK_SIGNATURE_FAILURE: {
       severity: "🚨 CRITICAL",
       subject: "Paystack webhook signature verification failed",
       action: "Either a bad-actor request OR a signing secret mismatch. Confirm PAYSTACK_API_KEY in env vars matches the key Paystack dashboard is signing with. If keys are correct, treat as attempted attack.",
+      dedup_cooldown_minutes: 15,  // §11 (S35b): dedup per event_type per 15min — attack bursts collapse; genuine key drift keeps re-firing until fixed
     },
     PAYSTACK_MISSING_REFERENCE: {
       severity: "🚨 CRITICAL",
       subject: "Paystack charge.success with no reference",
       action: "Payment came through but we can't match it to a merchant_ref. Paystack tx_id is in the alert context. Manually reconcile via Paystack dashboard.",
+      dedup_cooldown_minutes: 60,  // §11 (S35b): dedup per paystack_tx_id per hour — same tx retriggered by webhook retries collapses
     },
     PAYSTACK_OR_DUFFEL_MODE_KEY_MISMATCH: {
       severity: "🚨 CRITICAL",
       subject: "Environment key/mode mismatch in paystack-webhook",
       action: "DUFFEL_MODE or PAYSTACK_MODE doesn't match the corresponding API key prefix. All requests refused with 503. Fix env vars in Supabase dashboard.",
+      dedup_cooldown_minutes: 720,  // §11 (S35b): dedup per source per 12hr — cold-start config error would otherwise fire on every EF invocation until fixed
     },
     PAYSTACK_MODE_KEY_MISMATCH: {
           severity: "🚨 CRITICAL",
           subject: "Environment key/mode mismatch in verify-payment",
           action: "PAYSTACK_MODE doesn't match the PAYSTACK_API_KEY prefix. All verify-payment requests refused with 503. Fix env vars in Supabase dashboard.",
+          dedup_cooldown_minutes: 720,  // S41b §10 addendum: sibling of PAYSTACK_OR_DUFFEL_MODE_KEY_MISMATCH — same cold-start config pattern, same 12hr per source; not in §11 explicitly but shares its shape principle
         },
         // ── Duffel-touching EFs outside the main Paystack path (Session 28b audit gap-fill) ──
         DUFFEL_MODE_KEY_MISMATCH: {
           severity: "🚨 CRITICAL",
           subject: "Environment key/mode mismatch in mpesa-callback or get-baggage-options",
           action: "DUFFEL_MODE doesn't match one or both of DUFFEL_READ_KEY / DUFFEL_WRITE_KEY prefixes (post-Session-35b split), OR the legacy DUFFEL_API_KEY fallback used by an unmigrated EF. All calls to that EF refused with 503. Fix env vars in Supabase dashboard: DUFFEL_READ_KEY + DUFFEL_WRITE_KEY should both start with `duffel_test_` when DUFFEL_MODE=sandbox, `duffel_live_` when DUFFEL_MODE=production.",
+          dedup_cooldown_minutes: 720,  // §11 (S35b): dedup per source per 12hr — cold-start config error would otherwise flood on every EF invocation until fixed
         },
         // ── Async Duffel decoupling (Session 28b commit #7b-ii) ─────────────────
         PROCESS_DUFFEL_PENDING_NOT_FOUND: {
           severity: "⚠️ HIGH",
           subject: "process-duffel-booking fired for missing pending_booking row",
           action: "DB webhook fired with a pending_booking_id that no longer exists in the pending_bookings table. Either the row was deleted between transition and this EF's read (unusual — check for admin action), or the webhook payload is malformed. Check the pending_booking_id in context and reconcile against the row's history in booking_status_history.",
+          dedup_cooldown_minutes: 60,  // §11 (S35b): dedup per pending_booking_id per hour — DB-webhook retries on same missing row collapse
         },
         PROCESS_DUFFEL_PAYSTACK_VERIFY_MISMATCH: {
           severity: "⚠️ HIGH",
@@ -201,6 +211,7 @@ const ALERT_CONFIG: Record<AlertType, { severity: string; subject: string; actio
           severity: "⚠️ HIGH",
           subject: "send-confirmation returned non-2xx or threw",
           action: "Booking is safe — customer is 'booked' in DB and at Duffel. Only the confirmation email failed. retry-stuck-bookings (#9) sweeps 'booked' rows with NULL confirmation_email_sent_at and retries. If this fires more than once for the same row, investigate send-confirmation and RESEND_API_KEY. Customer will not have their e-ticket until email delivers — WhatsApp them their PNR + ticket numbers if 15+ minutes have passed since booking.",
+          dedup_cooldown_minutes: 60,  // §11 (S35b): dedup per pending_booking_id per hour — retry-stuck-bookings' 60s cadence would otherwise flood on same failing row (Session 40.b root cause: this alert type was the self-DoS)
         },
         // ── Session 40.b — race_lost defensive classification (double-fire fix) ──
         // Fires ONLY on the anomalous sub-case: process-duffel-booking classified
@@ -216,27 +227,32 @@ const ALERT_CONFIG: Record<AlertType, { severity: string; subject: string; actio
           severity: "⚠️ HIGH",
           subject: "Duffel says offer already booked, but no booking record found",
           action: "process-duffel-booking got 'offer_request_already_booked' from Duffel (meaning some invocation won the race and booked this offer), but a query for the winning bookings row by pending_booking_id found nothing. No refund was fired and pending_bookings.status was left untouched, specifically so this state stays reconcilable. Most likely: a timing gap — the winning invocation's Duffel order succeeded but its bookings-table INSERT hasn't landed yet. Check pending_booking_id in context: (1) requery `SELECT * FROM bookings WHERE pending_booking_id = '{pending_booking_id}'` after a minute — if it now exists, this was just the timing gap and no action is needed; (2) if still empty after a few minutes, check Duffel dashboard directly for an order tied to this offer_request — a real ticket may exist that our DB never recorded (same class as BOOKED_NO_DB_RECORD); (3) check pending_bookings.status for this row — if still duffel_pending, the entry guard will let a future retry attempt Duffel again once whatever caused the gap clears, which is safe; do not force a status change or refund until you've confirmed via Duffel dashboard whether a real order exists.",
+          dedup_cooldown_minutes: 60,  // S41b §12 fresh judgment: dedup per pending_booking_id per hour — timing-gap race would otherwise fire per DB-webhook retry until winner's bookings INSERT lands
         },
         // ── S-06 chargeback lifecycle (Paystack dispute events) ────────────────
         CHARGEBACK_OPENED: {
           severity: "🚨 CRITICAL",
           subject: "Chargeback opened — customer disputed a payment",
           action: "Customer's bank filed a chargeback. Response deadline is typically 7-14 days depending on card scheme. Check prior_status + flown fields in context: (a) prior_status='confirmed' + flown=false = normal in-flight booking dispute, gather evidence (booking record, comms, PNR); (b) prior_status='confirmed' + flown=true = FRIENDLY FRAUD (customer flew then disputed), high-priority; (c) prior_status != 'confirmed' = PRE-EXISTING CANCEL STATE, potential double-loss, investigate immediately. Respond via Paystack dashboard → Disputes.",
+          dedup_cooldown_minutes: 1440,  // §11 (S35b): dedup per dispute_code per 24hr — Paystack fires webhook lifecycle (create/remind/resolve) potentially on same dispute; batch reminder day cycle collapses
         },
         CHARGEBACK_REMINDER: {
           severity: "⚠️ HIGH",
           subject: "Chargeback response deadline approaching",
           action: "Paystack has re-notified us that a dispute response is still outstanding. Deadline is typically 48-72 hours away. If we haven't responded yet, drop everything — miss the deadline and the dispute auto-loses. Respond via Paystack dashboard → Disputes.",
+          dedup_cooldown_minutes: 1440,  // §11 (S35b): dedup per dispute_code per 24hr — Paystack may re-send remind webhook multiple times per day; one alert per dispute per day is enough operationally
         },
         CHARGEBACK_RESOLVED_WON: {
           severity: "ℹ️ INFO",
           subject: "Chargeback resolved — merchant won",
           action: "Dispute closed in our favor. Funds stay with us. Booking transitioned to chargeback_won (internal state; customer-facing UX unchanged from confirmed). No action required — log for records.",
+          dedup_cooldown_minutes: 1440,  // §11 (S35b): dedup per dispute_code per 24hr — resolve webhook may re-fire on same dispute
         },
         CHARGEBACK_RESOLVED_LOST: {
                   severity: "🚨 CRITICAL",
                   subject: "Chargeback resolved — merchant lost, funds pulled back",
                   action: "Dispute closed against us. Paystack has withdrawn the disputed amount. Booking transitioned to chargeback_lost. Check flown field: (a) flown=false = ticket still valid at Duffel, consider cancelling via Duffel dashboard to avoid double-loss (no refund from airline but frees the seat); (b) flown=true = friendly fraud, no recovery path, add customer to internal block-list for future consideration. Check prior_status: if != 'confirmed', this is a double-loss (we refunded AND lost the chargeback), escalate.",
+                  dedup_cooldown_minutes: 1440,  // §11 (S35b): dedup per dispute_code per 24hr — resolve webhook may re-fire on same dispute
                 },
                 // ── S-07 OTP throttle enforcement (per-IP from otp-precheck; per-phone from send-otp) ──
                         OTP_THROTTLE_HIT: {
@@ -250,13 +266,26 @@ const ALERT_CONFIG: Record<AlertType, { severity: string; subject: string; actio
                           severity: "⚠️ HIGH",
                           subject: "OTP SMS delivery failed at Africa's Talking",
                           action: "Africa's Talking API returned non-2xx for an OTP send request. Customer did NOT receive their OTP; they'll be stuck at the sign-in screen. Check context: phone_sha256, at_http_status, at_message. If at_http_status is 5xx: likely AT outage — check status.africastalking.com. If 4xx: likely AT_API_KEY or account-balance issue — check AT dashboard for account balance + key validity. If pattern persists, reach out to affected user via WhatsApp fallback with a magic-link workaround (currently manual — future enhancement in send-otp).",
-                          // No dedup — each failure is distinct + intermittent; want visibility on all.
+                          // Session 41.b §11 (S35b) supersede: 15min dedup per at_http_status.
+                          // Prior comment "No dedup — each failure is distinct + intermittent"
+                          // conflates two things: distinct customer impact is real, but AT
+                          // outages fire this alert on EVERY OTP request during the outage
+                          // window. Dedup on at_http_status collapses AT-outage storms while
+                          // still surfacing distinct failure classes (4xx vs 5xx) immediately.
+                          // Session 40.b self-DoS was AT-outage-shaped for CONFIRMATION_EMAIL_FAILED
+                          // and would have hit here too if OTP delivery failed at scale.
+                          dedup_cooldown_minutes: 15,
                         },
                         OTP_STATUS_NON_SUCCESS: {
                           severity: "⚠️ HIGH",
                           subject: "OTP send succeeded but AT reported per-recipient failure",
                           action: "AT accepted the OTP send request but returned a non-Success status for one or more recipients. Customer may not have received their OTP. Check context: phone_sha256, at_status_code, at_message. Common at_status_code values: 401 (invalid number format), 402 (insufficient AT credit — TOP UP), 403 (blacklisted by carrier). If credit-related, top up AT account at dashboard.africastalking.com immediately. If number-related, reach out to affected user via WhatsApp fallback.",
-                          // No dedup — each failure is distinct + intermittent.
+                          // Session 41.b §11 (S35b) supersede: 15min dedup per at_status_code.
+                          // Prior comment "No dedup — each failure is distinct + intermittent"
+                          // applies to per-recipient details but at_status_code is a small
+                          // fixed set (401/402/403). Credit-exhausted (402) especially fires
+                          // on EVERY OTP request until top-up — precisely the storm shape §11 dedups.
+                          dedup_cooldown_minutes: 15,
                         },
                         // ── S-11 guest-token brute-force threshold (mint-guest-token) ──
                         GUEST_TOKEN_ATTEMPT_THRESHOLD: {

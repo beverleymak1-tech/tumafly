@@ -24,6 +24,7 @@
 // own rateInfo. Authoritative re-validation happens in initialize-payment.
 
 import { serve } from 'https://deno.land/std@0.208.0/http/server.ts';
+import { alertFounder } from '../_shared/duffel-helpers.ts';
 
 const DUFFEL_READ_KEY = Deno.env.get('DUFFEL_READ_KEY') || Deno.env.get('DUFFEL_API_KEY') || '';
 const DUFFEL_API_KEY = Deno.env.get('DUFFEL_API_KEY') || '';
@@ -63,23 +64,13 @@ if (!DUFFEL_API_KEY) {
 }
 let modeKeyAlertFired = false;
 
-// Standardized two-arg shape to match all other EFs (Session 28b #7b-ii-alerts).
-// Prior three-arg (level, code, detail) also sent { level, code, detail } as the
-// body, but alert-founder reads { alert_type, context } — so this helper was
-// silently dropping every fire. Two bugs stacked (wrong signature + wrong body
-// shape), both closed here.
-async function alertFounder(alertType: string, context: Record<string, unknown>) {
-  try {
-    await fetch(`${SUPABASE_URL}/functions/v1/alert-founder`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${SERVICE_ROLE_KEY}`,
-      },
-      body: JSON.stringify({ alert_type: alertType, context }),
-    });
-  } catch (_) { /* swallow — alerts must never block the response */ }
-}
+// alertFounder migrated to _shared/duffel-helpers.ts (Session 41.b consolidation).
+// Historical note (Session 28b #7b-ii-alerts / Session 35b): this local copy
+// carried two stacked bugs before those fixes — wrong arg signature (3-arg
+// level/code/detail) and wrong body shape not matching alert-founder's
+// { alert_type, context } contract, plus the SUPABASE_SERVICE_ROLE_KEY vs
+// SERVICE_ROLE_KEY env-var bug (Session 35b). The shared helper is the
+// single point of truth now — no more local drift possible.
 
 // ── FX: convert any Duffel currency to KES ─────────────────────────────────
 // Mirrors the toKES helper in initialize-payment so prices the user sees on the
@@ -134,10 +125,14 @@ serve(async (req: Request) => {
   if (!MODE_KEY_OK) {
     if (!modeKeyAlertFired) {
       modeKeyAlertFired = true;
-      await alertFounder("DUFFEL_MODE_KEY_MISMATCH", {
-              source: "get-baggage-options",
-              reason: MODE_KEY_REASON,
-            });
+      await alertFounder(
+        "DUFFEL_MODE_KEY_MISMATCH",
+        {
+                source: "get-baggage-options",
+                reason: MODE_KEY_REASON,
+              },
+        `source:get-baggage-options`,
+      );
     }
     return new Response(
       JSON.stringify({ error: 'Service temporarily unavailable. Please try again shortly.' }),

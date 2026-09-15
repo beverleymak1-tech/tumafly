@@ -22,6 +22,7 @@
 
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { alertFounder } from "../_shared/duffel-helpers.ts";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SERVICE_ROLE_KEY = Deno.env.get("SERVICE_ROLE_KEY")!;
@@ -30,27 +31,12 @@ const PAYSTACK_API_KEY = Deno.env.get("PAYSTACK_API_KEY")!;
 const PAYSTACK_MODE = (Deno.env.get("PAYSTACK_MODE") || "test").toLowerCase();
 const PAYSTACK_BASE_URL = "https://api.paystack.co";
 
-const ALERT_FOUNDER_URL = `${SUPABASE_URL}/functions/v1/alert-founder`;
-
 const CORS_HEADERS = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers": "authorization, content-type",
 };
 
-async function alertFounder(alertType: string, context: Record<string, unknown>) {
-  try {
-    await fetch(ALERT_FOUNDER_URL, {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${SERVICE_ROLE_KEY}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({ alert_type: alertType, context }),
-    });
-  } catch (err) {
-    console.error("Failed to send alert:", alertType, err);
-  }
-}
+// alertFounder migrated to _shared/duffel-helpers.ts (Session 41.b consolidation)
 
 // ── Paystack mode/key guard ───────────────────────────────────────────────
 // This EF doesn't call Duffel — no Duffel check needed. Just Paystack.
@@ -79,7 +65,11 @@ async function checkModeKeyMismatch(source: string): Promise<Response | null> {
   if (MODE_KEY_OK) return null;
   if (!modeKeyAlertFired) {
     modeKeyAlertFired = true;
-    await alertFounder("PAYSTACK_MODE_KEY_MISMATCH", { source, reason: MODE_KEY_REASON });
+    await alertFounder(
+      "PAYSTACK_MODE_KEY_MISMATCH",
+      { source, reason: MODE_KEY_REASON },
+      `source:${source}`,
+    );
   }
   return new Response(
     JSON.stringify({ error: "Service temporarily unavailable. Please try again shortly." }),
@@ -298,12 +288,16 @@ serve(async (req) => {
 
   } catch (err) {
     console.error("[verify-payment] unhandled error:", err);
-    await alertFounder("UNHANDLED_ERROR", {
-      source: "verify-payment",
-      reference,
-      error: (err as Error).message,
-      stack: (err as Error).stack,
-    });
+    await alertFounder(
+      "UNHANDLED_ERROR",
+      {
+        source: "verify-payment",
+        reference,
+        error: (err as Error).message,
+        stack: (err as Error).stack,
+      },
+      `function:verify-payment+reason:top_level_catch`,
+    );
     return new Response(
       JSON.stringify({ error: "Internal error" }),
       { status: 500, headers: { ...CORS_HEADERS, "Content-Type": "application/json" } },

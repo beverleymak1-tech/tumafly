@@ -1,5 +1,6 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { alertFounder } from "../_shared/duffel-helpers.ts";
 
 const DUFFEL_WRITE_KEY = Deno.env.get("DUFFEL_WRITE_KEY") || Deno.env.get("DUFFEL_API_KEY")!;
 const DUFFEL_API_KEY = Deno.env.get("DUFFEL_API_KEY")!;
@@ -11,28 +12,13 @@ const DUFFEL_MODE = (Deno.env.get("DUFFEL_MODE") || "production").toLowerCase();
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SERVICE_ROLE_KEY = Deno.env.get("SERVICE_ROLE_KEY")!;
 const SEND_CONFIRMATION_URL = `${SUPABASE_URL}/functions/v1/send-confirmation`;
-const ALERT_FOUNDER_URL = `${SUPABASE_URL}/functions/v1/alert-founder`;
 
 const CORS_HEADERS = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers": "authorization, content-type",
 };
 
-// Fire-and-forget alert helper
-async function alertFounder(alertType: string, context: Record<string, unknown>) {
-  try {
-    await fetch(ALERT_FOUNDER_URL, {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${SERVICE_ROLE_KEY}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({ alert_type: alertType, context }),
-    });
-  } catch (err) {
-    console.error("Failed to send alert:", alertType, err);
-  }
-}
+// alertFounder migrated to _shared/duffel-helpers.ts (Session 41.b consolidation)
 
 // ── Mode/key mismatch guard ───────────────────────────────────────────────
 // Fires once at cold start if DUFFEL_MODE doesn't match the key prefix.
@@ -65,7 +51,11 @@ async function checkDuffelModeKeyMismatch(
   if (MODE_KEY_OK) return null;
   if (!modeKeyAlertFired) {
     modeKeyAlertFired = true;
-    await alertFounder("DUFFEL_MODE_KEY_MISMATCH", { source, reason: MODE_KEY_REASON });
+    await alertFounder(
+      "DUFFEL_MODE_KEY_MISMATCH",
+      { source, reason: MODE_KEY_REASON },
+      `source:${source}`,
+    );
   }
   return new Response(
     JSON.stringify({ error: "Service temporarily unavailable. Please try again shortly." }),
@@ -127,11 +117,15 @@ serve(async (req) => {
 
     if (pendingErr || !pending) {
       console.error("Callback for unknown CheckoutRequestID:", checkoutRequestId);
-      await alertFounder("UNHANDLED_ERROR", {
-        message: "M-Pesa callback for unknown CheckoutRequestID",
-        checkout_request_id: checkoutRequestId,
-        daraja_payload: body,
-      });
+      await alertFounder(
+        "UNHANDLED_ERROR",
+        {
+          message: "M-Pesa callback for unknown CheckoutRequestID",
+          checkout_request_id: checkoutRequestId,
+          daraja_payload: body,
+        },
+        `function:mpesa-callback+reason:unknown_checkout_request_id`,
+      );
       return darajaAck();
     }
 
@@ -155,14 +149,18 @@ serve(async (req) => {
         })
         .eq("id", pending.id);
 
-      await alertFounder("PAYMENT_FAILED", {
-        merchant_ref: pending.merchant_ref,
-        checkout_request_id: checkoutRequestId,
-        result_code: resultCode,
-        result_desc: resultDesc,
-        customer_email: pending.contact.email,
-        customer_phone: pending.contact.phone_number,
-      });
+      await alertFounder(
+        "PAYMENT_FAILED",
+        {
+          merchant_ref: pending.merchant_ref,
+          checkout_request_id: checkoutRequestId,
+          result_code: resultCode,
+          result_desc: resultDesc,
+          customer_email: pending.contact.email,
+          customer_phone: pending.contact.phone_number,
+        },
+        `merchant_ref:${pending.merchant_ref}`,
+      );
 
       return darajaAck();
     }
@@ -222,12 +220,16 @@ serve(async (req) => {
    if (claimErr) {
      console.error("Atomic claim error:", claimErr);
      // Don't ack — let Daraja retry once Supabase is healthy again.
-     await alertFounder("UNHANDLED_ERROR", {
-       function: "mpesa-callback",
-       message: "Atomic claim failed at booking step",
-       pending_id: pending.id,
-       error: claimErr.message,
-     });
+     await alertFounder(
+       "UNHANDLED_ERROR",
+       {
+         function: "mpesa-callback",
+         message: "Atomic claim failed at booking step",
+         pending_id: pending.id,
+         error: claimErr.message,
+       },
+       `function:mpesa-callback+reason:atomic_claim_failed`,
+     );
      // Returning darajaAck() would tell Daraja "stop retrying". We want it to
      // retry so we get another chance to finish booking. Return a non-200 shape:
      return new Response(
@@ -560,11 +562,15 @@ serve(async (req) => {
 
   } catch (err) {
     console.error("CRITICAL: mpesa-callback unhandled error", err);
-    await alertFounder("UNHANDLED_ERROR", {
-      function: "mpesa-callback",
-      error: (err as Error).message,
-      stack: (err as Error).stack,
-    });
+    await alertFounder(
+      "UNHANDLED_ERROR",
+      {
+        function: "mpesa-callback",
+        error: (err as Error).message,
+        stack: (err as Error).stack,
+      },
+      `function:mpesa-callback+reason:top_level_catch`,
+    );
     // Still ack — we don't want Daraja retrying forever
     return darajaAck();
   }
