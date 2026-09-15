@@ -151,6 +151,28 @@
               '#view-booking .booking-cta-bar > .btn-secondary{display:none !important;}' +
               '#view-booking .booking-inline-cta{justify-content:flex-end !important;}';
             document.head.appendChild(s);
+            // Session 41 — clear any inherited post-pay stash from parent tab.
+            // In a new-tab booking child, tumafly_new_tab_booking=1 was set by
+            // commitOfferInNewTab immediately before window.open. Any
+            // tumafly_post_pay_* keys present here were inherited from parent
+            // sessionStorage (browsers copy at window.open time) and are
+            // definitively stale for THIS tab's booking flow — the child is
+            // committed to booking, not to recovering a completed one. Without
+            // this wipe, the body-side pre-render block at ~L12065 would treat
+            // the inherited stash as valid, render the parent's success view
+            // with the parent's PNR, and short-circuit restoreFromUrl — the
+            // exact sessionStorage-bleed bug that motivated the earlier fix
+            // (commit 84b10f6). Under Spec 3 (F5-on-success preserves PNR
+            // indefinitely), the parent's stash is deliberately not cleared
+            // on popstate-to-home, so this guard becomes the primary defense
+            // against child-tab bleed.
+            try {
+              sessionStorage.removeItem('tumafly_post_pay_ref');
+              sessionStorage.removeItem('tumafly_post_pay_pnr');
+              sessionStorage.removeItem('tumafly_post_pay_consumed');
+              sessionStorage.removeItem('tumafly_post_pay_pbid');
+              sessionStorage.removeItem('tumafly_post_pay_gtok');
+            } catch (_) {}
           } catch (_) { /* silent — never block page render */ }
         })();
     </script>
@@ -12032,7 +12054,16 @@
       // clearTimeout) all no-op cleanly when there's nothing to clear.
       if (view === 'home') {
         _wipePaymentFlowState();
-        try { _wipeTerminalStash(); } catch (_) {}
+        // Session 41 — do NOT wipe terminal stash here. Under Spec 3
+        // (F5-on-success preserves PNR), the stash must survive popstate-
+        // to-home so the bounded [home, success, home, success] history
+        // loop can re-render success when the user forwards/backs into
+        // it. The stash is cleared only on explicit user reset via
+        // resetAndGoHome ("Book another trip"), on tab close (automatic
+        // via sessionStorage per-tab lifecycle), and via the new-tab-
+        // child head-script guard defense against sessionStorage bleed.
+        // Reverses part of commit 84b10f6 — that commit was correct for
+        // Spec 2 (mixed F5 behavior); Spec 3 requires stash persistence.
       }
       showView(view, { fromPopState: true });
       // Q3: When the user navigates back to booking (e.g., Account → edit
@@ -19850,6 +19881,22 @@
           // call even if Realtime never opened for this booking.
           _closeRealtimeChannel();
           showView('success');
+          // Session 41 — pollOnce ↔ pollPostRedirect path unification.
+          // Pre-Session 41, only pollPostRedirect's confirmed branch (via
+          // renderPostRedirectSuccess) fired the Part 4a history dance
+          // (replace #booking with home, push #success). pollOnce's
+          // confirmed branch showed success but left the URL at
+          // #booking?offer=…, meaning back-nav from that rare race-case
+          // would go to whatever preceded #booking rather than home. Under
+          // Spec 3's bounded loop [home, success, home, success], both
+          // paths must produce identical history and terminal render.
+          // Invoking renderPostRedirectSuccess here achieves that: it
+          // rewrites the success hero with the confirmed template + PNR
+          // (idempotent with the pre-showView DOM prime at L19848), calls
+          // wireSuccessHelpLine (idempotent with the belt-and-braces
+          // wireSuccessHelpLine at L19855), and runs the bounded-loop
+          // history dance.
+          renderPostRedirectSuccess('confirmed', data);
           return;
         }
 
@@ -21033,7 +21080,14 @@
 
             if (state === 'confirmed') {
         _stopPhasedProgression();
-        _wipeTerminalStash();
+        // Session 41 (Spec 3) — do NOT wipe the terminal stash here.
+        // Pre-Session-41 behavior (Session 27b Part 4a): wipe on confirmed,
+        // so F5 on #success would fall through to restoreFromUrl and land
+        // on home. Spec 3 supersedes that: F5 on confirmed success must
+        // restore the PNR view indefinitely from the stash, until the
+        // user explicitly resets via "Book another trip" (resetAndGoHome)
+        // or closes the tab. See Session 41 close handoff for the doc
+        // amendment covering Framework Doc §8's sessionStorage disclosure.
         const pnr = payload?.booking?.booking_reference || '';
         hero.innerHTML = `
           <div class="success-check">✓</div>
@@ -21054,11 +21108,28 @@
         }
         // Session 27b Commit 6 Part 4a — State B navigation prep.
         // Booking is confirmed and the check mark is showing. Replace the
-        // current history entry with #home, then push a #success entry on
-        // top. Result: browser back → popstate to home. F5 → stash was
-        // already cleared by pollPostRedirect, so _isPaystackPostPay is
-        // false and restoreFromUrl handles #success → showView('home').
+        // current history entry with #home (overwriting #booking?offer=…
+        // so the user cannot browser-back into the completed booking
+        // form), then push alternating [success, home, success] entries
+        // on top for the bounded back/forward loop.
+        //
+        // Session 41 (Spec 3) supersedes the original 2-entry pattern:
+        //   Pre-S41 (2 entries): [home, success]. User at success. Back
+        //     → home. Back again → exits site. F5 → restoreFromUrl
+        //     (stash was cleared on confirmed) → showView('home').
+        //   S41 (4 entries): [home, success, home, success]. User at
+        //     last success. Back → home. Back → success (bounded-loop
+        //     back-back). Back → home. Back → exits site. Forward works
+        //     the same way in reverse (forward-forward → success from
+        //     home). F5 at any position preserves the stash and re-
+        //     renders success (or home if at a home entry, which is
+        //     handled by restoreFromUrl since the URL there has no
+        //     #success hash). #booking is unreachable from any position
+        //     in this history — the initial replace() overwrote it and
+        //     nothing else pushes it back.
         try { safeHistory('replace', { view: 'home' }, window.location.pathname); } catch (_) {}
+        try { safeHistory('push', { view: 'success' }, window.location.pathname + '#success'); } catch (_) {}
+        try { safeHistory('push', { view: 'home' }, window.location.pathname); } catch (_) {}
         try { safeHistory('push', { view: 'success' }, window.location.pathname + '#success'); } catch (_) {}
         return;
       }
@@ -21294,7 +21365,13 @@
 
         if (data?.state === 'confirmed' && data?.booking?.booking_reference) {
           _pollingActive = false;
-          _clearPostPayStash();
+          // Session 41 (Spec 3) — do NOT clear the post-pay stash on
+          // confirmed. The stash powers F5-on-#success PNR restore, which
+          // Spec 3 preserves indefinitely until explicit user reset. The
+          // failed/refund-family branches below KEEP the _clearPostPayStash
+          // calls because their terminal render is not "you're booked" —
+          // preserving the stash there would let F5 restore a stale PNR
+          // that doesn't match the actual outcome.
           renderPostRedirectSuccess('confirmed', data);
           return;
         }
@@ -21369,23 +21446,25 @@
           if (typeof showView === 'function') showView('success');
 
           // If the poll on the pre-F5 page had already confirmed and stashed
-          // the PNR alongside the ref, skip the loading state + poll entirely —
-          // the boot block already populated the success-ref. Clear the
-          // stash + consumed flag so a future booking in the same tab starts
-          // clean.
+          // the PNR alongside the ref, skip the loading state + poll entirely
+          // — the boot block already populated the success-ref.
+          //
+          // Session 41 (Spec 3) — do NOT clear the stash on consumed=1.
+          // Pre-Session-41 behavior wiped the stash here so a future booking
+          // in the same tab would start clean; the trade-off was that a
+          // subsequent F5 on the same #success view would fall through to
+          // restoreFromUrl and land on home (Session 27b Part 4a intent).
+          // Spec 3 supersedes that: F5 must always restore the PNR view.
+          // A future booking in the same tab is initiated via explicit
+          // user action ("Book another trip" → resetAndGoHome, which does
+          // wipe the stash), so we don't lose the "clean slate" property
+          // for that flow. The consumed=1 flag itself is now vestigial in
+          // this branch but retained for the boot-block's own signaling.
           let _alreadyConfirmed = false;
           try {
             _alreadyConfirmed = sessionStorage.getItem('tumafly_post_pay_consumed') === '1';
           } catch (_) {}
           if (_alreadyConfirmed) {
-            try {
-              sessionStorage.removeItem('tumafly_post_pay_pnr');
-              sessionStorage.removeItem('tumafly_post_pay_ref');
-              sessionStorage.removeItem('tumafly_post_pay_consumed');
-              // Session 28c #12 — same wipe for the two new stash keys.
-              sessionStorage.removeItem('tumafly_post_pay_pbid');
-              sessionStorage.removeItem('tumafly_post_pay_gtok');
-            } catch (_) {}
             return;
           }
 
