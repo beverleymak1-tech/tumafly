@@ -782,7 +782,25 @@ serve(async (req) => {
         body: JSON.stringify({
           to: pending.contact.email,
           order,
-          pending: { seats: storedSeats, baggages: storedBaggages },
+          // Session 41 — include pending.id and merchant_ref so send-
+          // confirmation can write audit_log rows correlated to this
+          // booking (target_type: 'pending_booking', target_id: pending.id).
+          // Without id + merchant_ref reaching send-confirmation, its
+          // confirmation_email_sent / _failed audit calls degrade to
+          // console.warn (see graceful-degrade branches in that EF's HTTP
+          // handler). Session 41 originally scoped this widening to itself
+          // and delegated the send-confirmation retrofit + this widening
+          // as coordinated changes; 41.b handoff assumed the widening was
+          // in place. Landed here after a smoke test showed 3-of-4 audit
+          // rows for merchant_ref TF-1789585…-13qk97 (missing
+          // confirmation_email_sent) despite send-confirmation being
+          // correctly retrofitted and deployed.
+          pending: {
+            id: pending.id,
+            merchant_ref: reference,
+            seats: storedSeats,
+            baggages: storedBaggages,
+          },
           breakdown_kes,
         }),
       });
