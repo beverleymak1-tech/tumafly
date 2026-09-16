@@ -18,11 +18,22 @@
 //
 // Called from the frontend with the anon key + config.toml verify_jwt=false.
 // No Turnstile check — user already passed Turnstile at initialize-payment.
+//
+// Ops-1 audit (Session 41): this EF is almost entirely a read-only state
+// reporter — paystack-webhook and process-duffel-booking own every other
+// transition in the lifecycle. The ONE place verify-payment itself performs
+// a genuine DB state transition is the atomic 'payment_failed' update below,
+// for the case where Paystack's own verify call confirms terminal failure
+// before the webhook ever arrives (or will never arrive). That's the single
+// audit point here — deliberately not on every poll, per the handoff's
+// "poll spam would flood audit_log with noise" guidance. Named
+// `payment_verification_failed` rather than `payment_verified` to avoid
+// reading as a success event alongside paystack-webhook's `payment_captured`.
 // ============================================================================
 
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
-import { alertFounder } from "../_shared/duffel-helpers.ts";
+import { alertFounder, auditLog } from "../_shared/duffel-helpers.ts";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SERVICE_ROLE_KEY = Deno.env.get("SERVICE_ROLE_KEY")!;
@@ -267,11 +278,40 @@ serve(async (req) => {
     if (pStatus === "failed" || pStatus === "abandoned" || pStatus === "reversed") {
       // Paystack terminal-failed. Webhook won't rescue this. Mark the DB
       // so retry-stuck-bookings doesn't waste effort on it.
-      await supabase
+      //
+      // Ops-1 (Session 41): .select("id") on the update lets us tell whether
+      // THIS request is the one that performed the transition. The .eq(
+      // "status", "pending") clause already makes the update atomic/
+      // idempotent across concurrent polls — this just lets us see the
+      // outcome so we don't audit a transition that didn't happen here
+      // (e.g. a second poll landing after the first already flipped the
+      // row, or the webhook winning the race in between).
+      const { data: updatedRows, error: updateErr } = await supabase
         .from("pending_bookings")
         .update({ status: "payment_failed" })
         .eq("id", pending.id)
-        .eq("status", "pending"); // atomic — only update if still pending
+        .eq("status", "pending") // atomic — only update if still pending
+        .select("id");
+
+      if (updateErr) {
+        console.error("[verify-payment] payment_failed update error:", updateErr);
+      } else if (updatedRows && updatedRows.length > 0) {
+        // This poll performed the transition — audit it. No cleartext PII:
+        // merchant_ref is our own identifier, paystack_status is Paystack's
+        // enum, from/to_status are our own enum values (SOP §6 compliant).
+        await auditLog({
+          actor_id: "verify-payment",
+          action_type: "payment_verification_failed",
+          target_type: "pending_booking",
+          target_id: pending.id,
+          payload: {
+            merchant_ref: reference,
+            paystack_status: pStatus,
+            from_status: "pending",
+            to_status: "payment_failed",
+          },
+        });
+      }
 
       return respond("failed", {
         message: pStatus === "abandoned"
