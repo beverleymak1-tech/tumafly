@@ -81,8 +81,17 @@
             var allViews = ['home','results','booking','payment','success','profile','my-trips','find-booking','itinerary'];
             var target = null;
 
-            if (isPaystackPostPay) {
-              // Post-Paystack F5 restore always lands on success.
+            if (isPaystackPostPay && hash.indexOf('success') === 0) {
+              // Post-Paystack F5 restore always lands on success — BUT only
+              // when the URL hash actually says #success. Session 41 (Spec 3)
+              // introduced a bounded [home, success, home, success] history
+              // loop with the stash preserved across F5s at any position. Pre-
+              // Session-41, stash-present ⇒ URL was #success unambiguously. Now
+              // an F5 at an intermediate home entry (URL = pathname, hash empty)
+              // also has the stash present, and without this hash check the
+              // flash guard would inject CSS to show the success view over the
+              // home URL — a phantom "You're booked" render with an empty PNR
+              // pill (bug reproduced in ca5b567 test 8).
               target = 'success';
             } else if (isOAuth) {
               // GSI doesn't redirect, so this path is dead in current builds.
@@ -167,18 +176,19 @@
             // on popstate-to-home, so this guard becomes the primary defense
             // against child-tab bleed.
             //
-            // Session 41 bug-fix follow-up: gate the wipe on URL hash. The
-            // tumafly_new_tab_booking flag survives across F5 of the child
-            // tab (by design — CSS injection above wants it to). Without
-            // this gate, an F5 of a child tab AFTER its own successful
-            // booking would re-fire the wipe and destroy the child's own
-            // legitimate post-pay stash. Initial child-tab load has URL =
-            // pathname#booking?offer=… (set by parent's window.open call);
-            // post-success has URL = pathname#success (set by Part 4a's
-            // history dance). Wipe only when we're NOT on #success — that
-            // covers initial load, booking-form-in-progress F5s, and any
-            // other pre-success state.
-            if (!window.location.hash.startsWith('#success')) {
+            // Session 41 bug-fix follow-up (ca5b567 test 8): gate the wipe
+            // on URL hash starting with #booking. The tumafly_new_tab_booking
+            // flag survives across F5 of the child tab (by design — CSS
+            // injection above wants it to). Previous condition
+            // "!hash.startsWith('#success')" incorrectly matched F5 at
+            // intermediate home entries in the bounded loop (URL = pathname,
+            // hash empty), wiping the child's own legitimate post-pay stash.
+            // "#booking"-prefix match is the right condition: only the
+            // INITIAL child-tab URL contains #booking (set by parent's
+            // window.open), and any subsequent state (#success, empty-for-
+            // loop-home) means the child has its own legitimate stash to
+            // preserve.
+            if (window.location.hash.startsWith('#booking')) {
               try {
                 sessionStorage.removeItem('tumafly_post_pay_ref');
                 sessionStorage.removeItem('tumafly_post_pay_pnr');
@@ -12110,7 +12120,21 @@
     const _isOAuthCallback = window.location.hash.includes('access_token=') || window.location.hash.includes('error=');
     let _isPaystackPostPay = false;
     try { _isPaystackPostPay = !!sessionStorage.getItem('tumafly_post_pay_ref'); } catch (_) {}
-    if (_isPaystackPostPay) {
+    // Session 41 (Spec 3) — pre-render success synchronously only when we're
+    // ACTUALLY on #success. Pre-Session-41, stash presence implied URL was
+    // #success (stash was cleared on any other terminal state). Under Spec 3
+    // the stash persists across the bounded [home, success, home, success]
+    // history loop and across "Book another trip" until the user explicitly
+    // resets — so an F5 at an intermediate home entry has the stash present
+    // but the URL is pathname (no hash). Without this hash gate, the
+    // pre-render would fire on home URLs and show a phantom success view
+    // (bug reproduced in ca5b567 test 8). The gate also protects the
+    // restoreFromUrl skip below: on intermediate home URLs, restoreFromUrl
+    // must run (or the safeHistory replace fallback must run) so the home
+    // view actually renders instead of falling through with whatever the
+    // static HTML default happened to be.
+    const _isPaystackF5OnSuccess = _isPaystackPostPay && window.location.hash.startsWith('#success');
+    if (_isPaystackF5OnSuccess) {
       // Pre-render the success view synchronously to avoid the home-view
       // flash between page paint and the on-load handler running.
       document.body.setAttribute('data-view', 'success');
@@ -12155,13 +12179,13 @@
     // skipped when state was preserved. Always attempt the restore when a
     // hash is present and we're not in a callback flow.
     let _restored = false;
-    if (!_isOAuthCallback && !_isPaystackPostPay && window.location.hash) {
+    if (!_isOAuthCallback && !_isPaystackF5OnSuccess && window.location.hash) {
       _restored = restoreFromUrl();
     }
     // Wipe URL to clean home when there was nothing to restore and we're not
     // mid-callback. The body's default data-view="home" means no showView
     // call is needed here — the home view is already the rendered one.
-    if (!_restored && !_isOAuthCallback && !_isPaystackPostPay) {
+    if (!_restored && !_isOAuthCallback && !_isPaystackF5OnSuccess) {
       // Only replace history when there isn't already a clean state — avoids
       // gratuitously overwriting a state Chrome already restored correctly.
       if (!initialState || window.location.hash) {
