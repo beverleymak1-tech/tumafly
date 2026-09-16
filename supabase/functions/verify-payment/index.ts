@@ -296,10 +296,14 @@ serve(async (req) => {
       if (updateErr) {
         console.error("[verify-payment] payment_failed update error:", updateErr);
       } else if (updatedRows && updatedRows.length > 0) {
-        // This poll performed the transition — audit it. No cleartext PII:
-        // merchant_ref is our own identifier, paystack_status is Paystack's
-        // enum, from/to_status are our own enum values (SOP §6 compliant).
-        await auditLog({
+        // This poll performed the transition — audit it. Fire-and-forget with
+        // .catch so an audit_log write failure doesn't 500 the customer's
+        // poll (matches Session 40 pattern in initialize-payment /
+        // paystack-webhook / process-duffel-booking, and Session 41
+        // send-confirmation). No cleartext PII: merchant_ref is our own
+        // identifier, paystack_status is Paystack's enum, from/to_status are
+        // our own enum values (SOP §6 compliant).
+        auditLog({
           actor_id: "verify-payment",
           action_type: "payment_verification_failed",
           target_type: "pending_booking",
@@ -310,7 +314,7 @@ serve(async (req) => {
             from_status: "pending",
             to_status: "payment_failed",
           },
-        });
+        }).catch((err) => console.error("[verify-payment] auditLog failed:", err));
       }
 
       return respond("failed", {
