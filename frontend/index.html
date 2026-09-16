@@ -19712,6 +19712,21 @@
       try { clearPaymentReturn(); } catch (_) {}
       // Route to #success and reuse the post-redirect polling state machine.
       activeMerchantRef = ref;
+      // Session 41 bug-fix — overwrite the current history entry (#booking?
+      // offer=X) with #success BEFORE showView. Without this, showView('success')
+      // at line 9768 pushes a new #success entry ON TOP of #booking?offer=X,
+      // leaving the booking URL alive at the bottom of history. Later, Part 4a's
+      // replace(home) inside renderPostRedirectSuccess('confirmed') overwrites
+      // the CURRENT entry only (the pushed #success), not the underlying
+      // #booking?offer=X — so back-nav eventually surfaces it (bug reproduced
+      // in commit 665f14e testing). Doing replace() here first lets showView's
+      // push guard at line 9767 no-op (currentState.view === 'success' matches),
+      // and the underlying #booking?offer=X is gone before Part 4a even runs.
+      // Payment has succeeded; committing to #success here is safe — the user
+      // will never legitimately need to go back to the booking form.
+      try {
+        safeHistory('replace', { view: 'success' }, window.location.pathname + '#success');
+      } catch (_) {}
       if (typeof showView === 'function') showView('success');
       // Session 28c #13 — kick off the guided 60-second phased progression.
       // Replaces the plain spinner. Progress bar + phase copy driven by
@@ -19901,6 +19916,15 @@
           // are no longer interesting to this page. Idempotent — safe to
           // call even if Realtime never opened for this booking.
           _closeRealtimeChannel();
+          // Session 41 bug-fix — see matching comment in _handlePaystackSuccess
+          // (~L19714). pollOnce fires in the rare race where a Realtime poke
+          // arrives before Paystack's onSuccess callback. Same fix: overwrite
+          // #booking?offer=X with #success in history before showView pushes,
+          // so back-nav past Part 4a's bounded loop lands on home/exits rather
+          // than surfacing the underlying booking URL.
+          try {
+            safeHistory('replace', { view: 'success' }, window.location.pathname + '#success');
+          } catch (_) {}
           showView('success');
           // Session 41 — pollOnce ↔ pollPostRedirect path unification.
           // Pre-Session 41, only pollPostRedirect's confirmed branch (via
