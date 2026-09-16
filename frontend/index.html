@@ -21535,6 +21535,20 @@
           let ref = null;
           try { ref = sessionStorage.getItem('tumafly_post_pay_ref'); } catch (_) {}
           if (!ref) return;
+          // Session 41 (Spec 3) bug-fix follow-up (763aea0 test 8): also
+          // require URL hash to be #success before treating this as an
+          // F5-recovery. Pre-Session-41, stash presence implied URL was
+          // #success (stash was cleared on any other terminal state). Under
+          // Spec 3, the stash persists across the bounded [home, success,
+          // home, success] history loop and across "Book another trip" until
+          // the user explicitly resets. Without this hash check, an F5 at an
+          // intermediate home entry (URL = pathname, hash empty) would fire
+          // this handler, set location.hash='success', showView('success'),
+          // and kick off pollPostRedirect — dragging the user back to the
+          // success view they had already navigated away from. Same fix as
+          // the three earlier F5-recovery paths (flash-guard head script,
+          // child-tab guard head script, body-side boot block).
+          if (!window.location.hash.startsWith('#success')) return;
           console.log('[Paystack] Detected post-pay stash, merchant_ref=', ref);
 
           activeMerchantRef = ref;
