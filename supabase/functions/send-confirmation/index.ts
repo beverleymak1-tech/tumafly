@@ -1,4 +1,13 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
+import { auditLog } from "../_shared/duffel-helpers.ts";
+
+// Ops-1 audit (Session 41): two audit points, both fired from the HTTP
+// handler at the bottom of this file — confirmation_email_sent on Resend
+// success, confirmation_email_failed on Resend non-2xx or any unhandled
+// exception. target_type/target_id use payload.pending.id (the
+// pending_bookings UUID the caller sends through) so these rows join into
+// the same booking timeline as every other lifecycle audit row. Payload
+// never includes `to` (the customer's email address) — SOP §6.
 
 const RESEND_API_KEY = Deno.env.get("RESEND_API_KEY");
 
@@ -479,11 +488,28 @@ serve(async (req) => {
     return new Response("ok", { headers: CORS_HEADERS });
   }
 
+  // Captured outside the try block's inner scope so the catch handler can
+  // still attribute an audit row if something fails after payload parsing
+  // succeeds (Ops-1 pattern — mirrors initialize-payment's capturedPendingId).
+  let auditPendingId: string | null = null;
+  let auditMerchantRef: string | null = null;
+  let auditBookingRef: string | null = null;
+
   try {
     const payload = await req.json();
     const { to, order, pending, breakdown_kes } = payload;
 
+    // pending.id is the pending_bookings UUID the caller (process-duffel-
+    // booking) sends through. If it's ever absent, audit calls below no-op
+    // with a console warning rather than writing an unjoinable row.
+    auditPendingId = pending?.id || null;
+    auditMerchantRef = pending?.merchant_ref || null;
+    auditBookingRef = order?.booking_reference || null;
+
     if (!to || !order?.booking_reference) {
+      // Pre-send validation failure — no email attempted, nothing to audit.
+      // Mirrors initialize-payment's pattern of not auditing pre-insert
+      // validation failures, only genuine attempted-and-failed sends.
       return new Response(JSON.stringify({ error: "Missing required fields (to, order.booking_reference)" }), {
         status: 400,
         headers: { ...CORS_HEADERS, "Content-Type": "application/json" },
@@ -512,10 +538,45 @@ serve(async (req) => {
 
     const data = await res.json();
     if (!res.ok) {
+      if (auditPendingId) {
+        await auditLog({
+          actor_id: "send-confirmation",
+          action_type: "confirmation_email_failed",
+          target_type: "pending_booking",
+          target_id: auditPendingId,
+          payload: {
+            merchant_ref: auditMerchantRef,
+            booking_reference: auditBookingRef,
+            resend_http_status: res.status,
+            // Resend error bodies are about the send itself (bad from-address,
+            // rate limit, etc.), not passenger data — but stay disciplined and
+            // pass only the error code/message shape, not a raw dump.
+            resend_error: data?.message || data?.name || "unknown",
+          },
+        });
+      } else {
+        console.warn("[send-confirmation] confirmation_email_failed not audited — pending.id missing from payload");
+      }
       return new Response(JSON.stringify({ error: data }), {
         status: res.status,
         headers: { ...CORS_HEADERS, "Content-Type": "application/json" },
       });
+    }
+
+    if (auditPendingId) {
+      await auditLog({
+        actor_id: "send-confirmation",
+        action_type: "confirmation_email_sent",
+        target_type: "pending_booking",
+        target_id: auditPendingId,
+        payload: {
+          merchant_ref: auditMerchantRef,
+          booking_reference: auditBookingRef,
+          resend_email_id: data.id,
+        },
+      });
+    } else {
+      console.warn("[send-confirmation] confirmation_email_sent not audited — pending.id missing from payload");
     }
 
     return new Response(JSON.stringify({ success: true, email_id: data.id }), {
@@ -523,6 +584,20 @@ serve(async (req) => {
     });
 
   } catch (err) {
+    console.error("[send-confirmation] unhandled error:", err);
+    if (auditPendingId) {
+      await auditLog({
+        actor_id: "send-confirmation",
+        action_type: "confirmation_email_failed",
+        target_type: "pending_booking",
+        target_id: auditPendingId,
+        payload: {
+          merchant_ref: auditMerchantRef,
+          booking_reference: auditBookingRef,
+          error: (err as Error).message,
+        },
+      });
+    }
     return new Response(JSON.stringify({ error: (err as Error).message }), {
       status: 500,
       headers: { ...CORS_HEADERS, "Content-Type": "application/json" },
