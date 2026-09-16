@@ -8196,7 +8196,7 @@
             <div class="success-check">✓</div>
             <div class="success-title">You're booked.</div>
             <p style="color:var(--text-2);max-width:42ch;margin:8px auto 0;">A confirmation is on its way to your email. Your booking reference:</p>
-            <div class="success-ref" id="success-ref">TF-XXXXXXXX</div>
+            <div class="success-ref" id="success-ref">&nbsp;</div>
         </div>
         <div class="card" style="max-width:560px;margin:24px auto;">
             <h3 style="font-size:14px;">Before you travel</h3>
@@ -12218,6 +12218,13 @@
       contactData = {};
       _wipePaymentFlowState();
       try { _wipeTerminalStash(); } catch (_) {}
+      // Session 41 — reset the Part 4a idempotency guard so that the
+      // NEXT successful booking's history dance fires normally.
+      // renderPostRedirectSuccess('confirmed') checks _confirmedHistoryDone
+      // before running the dance; without this reset, subsequent bookings
+      // in the same tab would skip the dance and leave the URL at
+      // #booking?offer=… with no bounded loop.
+      _confirmedHistoryDone = false;
       showView('home');
     }
 
@@ -20948,6 +20955,15 @@
     let _phasedProgressionTimer = null;
     let _phasedProgressionStartedAt = null;
 
+    // Session 41 — idempotency flag for Part 4a history dance in
+    // renderPostRedirectSuccess's confirmed branch. See extended comment
+    // at that call site (~L21160) for full rationale. TL;DR: set to true
+    // after the first Part 4a fires for a booking; skipped on subsequent
+    // fires (Realtime + polling races can call renderPostRedirectSuccess
+    // multiple times for one confirmed booking); reset to false in
+    // resetAndGoHome when a fresh booking flow begins.
+    let _confirmedHistoryDone = false;
+
     function _stopPhasedProgression() {
       if (_phasedProgressionTimer) {
         clearInterval(_phasedProgressionTimer);
@@ -21154,10 +21170,30 @@
         //     #success hash). #booking is unreachable from any position
         //     in this history — the initial replace() overwrote it and
         //     nothing else pushes it back.
-        try { safeHistory('replace', { view: 'home' }, window.location.pathname); } catch (_) {}
-        try { safeHistory('push', { view: 'success' }, window.location.pathname + '#success'); } catch (_) {}
-        try { safeHistory('push', { view: 'home' }, window.location.pathname); } catch (_) {}
-        try { safeHistory('push', { view: 'success' }, window.location.pathname + '#success'); } catch (_) {}
+        //
+        // Session 41 bug-fix follow-up: idempotency guard.
+        // renderPostRedirectSuccess('confirmed') can fire more than once
+        // per booking, because:
+        //   - Realtime substrate pokes call pollOnce (~L19761/19767)
+        //     which (via the pollOnce↔pollPostRedirect unification added
+        //     earlier) calls renderPostRedirectSuccess('confirmed').
+        //   - pollPostRedirect's interval-based poll ALSO lands on
+        //     confirmed and calls renderPostRedirectSuccess('confirmed').
+        // Without a guard, each fire re-runs the 4-entry Part 4a dance,
+        // stacking history entries (a triple-fire would land the user
+        // 12 backs away from the pre-history state instead of 4). Guard
+        // via the module-level flag _confirmedHistoryDone: first fire
+        // per booking runs the dance and flips the flag; subsequent
+        // fires skip. The flag is reset in resetAndGoHome (start of a
+        // fresh booking flow) so the NEXT successful booking's Part 4a
+        // fires normally.
+        if (!_confirmedHistoryDone) {
+          _confirmedHistoryDone = true;
+          try { safeHistory('replace', { view: 'home' }, window.location.pathname); } catch (_) {}
+          try { safeHistory('push', { view: 'success' }, window.location.pathname + '#success'); } catch (_) {}
+          try { safeHistory('push', { view: 'home' }, window.location.pathname); } catch (_) {}
+          try { safeHistory('push', { view: 'success' }, window.location.pathname + '#success'); } catch (_) {}
+        }
         return;
       }
 
