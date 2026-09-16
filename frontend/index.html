@@ -9593,7 +9593,26 @@
       // will re-wire with the real PNR when it lands.
       if (name === 'success') {
         const _refSlot = document.getElementById('success-ref');
-        const _ref = _refSlot ? _refSlot.textContent.trim() : '';
+        let _ref = _refSlot ? _refSlot.textContent.trim() : '';
+        // Session 41 (Spec 3) — populate the PNR pill from the stash when
+        // it's empty. Reached by popstate-to-success in the bounded [home,
+        // success, home, success] loop: back from the intermediate home
+        // entry dispatches showView('success', {fromPopState:true}), which
+        // toggles view visibility but does NOT populate the pill (the
+        // static HTML default is '&nbsp;' — an empty pill). Without this
+        // read-from-stash, the user sees a green checkmark and "You're
+        // booked" but an empty booking-reference pill. Same source of
+        // truth as F5-recovery paths (tumafly_post_pay_pnr). Graceful
+        // degrade: stash missing → pill stays empty, same as pre-fix.
+        if (!_ref || _ref === 'Confirming…') {
+          try {
+            const _stashedPnr = sessionStorage.getItem('tumafly_post_pay_pnr');
+            if (_stashedPnr && _refSlot) {
+              _refSlot.textContent = _stashedPnr;
+              _ref = _stashedPnr;
+            }
+          } catch (_) {}
+        }
         const _realRef = (_ref && _ref !== 'Confirming…' && _ref !== 'TF-XXXXXXXX') ? _ref : null;
         wireSuccessHelpLine(_realRef);
       }
