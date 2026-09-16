@@ -166,13 +166,27 @@
             // indefinitely), the parent's stash is deliberately not cleared
             // on popstate-to-home, so this guard becomes the primary defense
             // against child-tab bleed.
-            try {
-              sessionStorage.removeItem('tumafly_post_pay_ref');
-              sessionStorage.removeItem('tumafly_post_pay_pnr');
-              sessionStorage.removeItem('tumafly_post_pay_consumed');
-              sessionStorage.removeItem('tumafly_post_pay_pbid');
-              sessionStorage.removeItem('tumafly_post_pay_gtok');
-            } catch (_) {}
+            //
+            // Session 41 bug-fix follow-up: gate the wipe on URL hash. The
+            // tumafly_new_tab_booking flag survives across F5 of the child
+            // tab (by design — CSS injection above wants it to). Without
+            // this gate, an F5 of a child tab AFTER its own successful
+            // booking would re-fire the wipe and destroy the child's own
+            // legitimate post-pay stash. Initial child-tab load has URL =
+            // pathname#booking?offer=… (set by parent's window.open call);
+            // post-success has URL = pathname#success (set by Part 4a's
+            // history dance). Wipe only when we're NOT on #success — that
+            // covers initial load, booking-form-in-progress F5s, and any
+            // other pre-success state.
+            if (!window.location.hash.startsWith('#success')) {
+              try {
+                sessionStorage.removeItem('tumafly_post_pay_ref');
+                sessionStorage.removeItem('tumafly_post_pay_pnr');
+                sessionStorage.removeItem('tumafly_post_pay_consumed');
+                sessionStorage.removeItem('tumafly_post_pay_pbid');
+                sessionStorage.removeItem('tumafly_post_pay_gtok');
+              } catch (_) {}
+            }
           } catch (_) { /* silent — never block page render */ }
         })();
     </script>
@@ -21089,6 +21103,19 @@
         // or closes the tab. See Session 41 close handoff for the doc
         // amendment covering Framework Doc §8's sessionStorage disclosure.
         const pnr = payload?.booking?.booking_reference || '';
+        // Session 41 bug-fix follow-up: stash pnr for F5 recovery. Pre-
+        // Session-41 code only stashed pnr in pollOnce's confirmed branch
+        // (~L19867) which is the rare race-case path. The dominant
+        // pollPostRedirect → renderPostRedirectSuccess primary path never
+        // stashed pnr. Under Spec 2 that was fine (F5 fell through to
+        // home). Under Spec 3 F5 must restore PNR synchronously via the
+        // boot-block pre-render, which requires BOTH pnr and ref to be
+        // present in sessionStorage. Stashing here catches both paths:
+        // pollOnce race path already set pnr; pollPostRedirect primary
+        // path sets it now.
+        if (pnr) {
+          try { sessionStorage.setItem('tumafly_post_pay_pnr', pnr); } catch (_) {}
+        }
         hero.innerHTML = `
           <div class="success-check">✓</div>
           <div class="success-title">You're booked.</div>
