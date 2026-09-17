@@ -158,33 +158,40 @@ Expected: zero rows (deny-all posture confirmed).
 
 ### 3.4 End-to-end lifecycle verification (real successful booking)
 
-For any successful booking merchant_ref `TF-<...>`, the following query surfaces the full lifecycle:
+For any successful booking, the following CTE-based query surfaces the full lifecycle including the `booking_created` row (which writes with `target_type='booking'`, not `pending_booking`).
+
+**IMPORTANT:** `booking_created` writes with `target_id = bookings.id` and `target_type = 'booking'`, while the other three happy-path action_types (`payment_initialized`, `payment_captured`, `confirmation_email_sent`) write with `target_id = pending_bookings.id` and `target_type = 'pending_booking'`. This is by design — the audit anchors to whichever lifecycle-object exists at the moment the action fires. A naive query filtering only on `pending_bookings.id` misses `booking_created`. Always use the dual-target pattern below.
 
 ```sql
+WITH booking_of_interest AS (
+    SELECT
+        pb.id::text AS pending_id,
+        b.id::text  AS booking_id
+    FROM pending_bookings pb
+    LEFT JOIN bookings b ON b.pending_booking_id = pb.id
+    WHERE pb.merchant_ref = '<paste merchant ref here>'
+)
 SELECT
-  action_type,
-  actor_id,
-  target_id,
-  payload,
-  created_at
-FROM audit_log
-WHERE target_type = 'pending_booking'
-  AND target_id IN (
-    SELECT id::text
-    FROM pending_bookings
-    WHERE merchant_ref = 'TF-<paste merchant ref here>'
-  )
-ORDER BY created_at;
+    al.action_type,
+    al.actor_id,
+    al.target_type,
+    al.target_id,
+    al.payload,
+    al.created_at
+FROM audit_log al, booking_of_interest boi
+WHERE al.target_id = boi.pending_id
+   OR al.target_id = boi.booking_id
+ORDER BY al.created_at;
 ```
 
 Expected shape for a successful booking (4 rows in order):
 
-1. `initialize-payment` → `payment_initialized`
-2. `paystack-webhook` → `payment_captured`
-3. `process-duffel-booking` → `booking_created`
-4. `send-confirmation` → `confirmation_email_sent`
+1. `initialize-payment` → `payment_initialized` (target_type: `pending_booking`)
+2. `paystack-webhook` → `payment_captured` (target_type: `pending_booking`)
+3. `process-duffel-booking` → `booking_created` (target_type: **`booking`**; payload includes `pending_booking_id` as cross-reference)
+4. `send-confirmation` → `confirmation_email_sent` (target_type: `pending_booking`)
 
-Reference Session 41 test booking (2026-09-16): merchant_ref `TF-1789585987...` produced exactly this 4-row trace.
+**Reference Session 41 test booking (2026-09-17):** merchant_ref `TF-1789655296456-fh1uun` / PNR WYKR3A produced exactly this 4-row trace in ~18 seconds end-to-end from `payment_initialized` (14:28:17 UTC) to `confirmation_email_sent` (14:28:36 UTC).
 
 ### 3.5 Payload discipline spot check
 
@@ -324,9 +331,11 @@ Related legal documents:
 |---|---|---|---|
 | 2026-09-08 | S40 | Foundation migration + 4 EF retrofits (initialize-payment, paystack-webhook, process-duffel-booking, retry-stuck-bookings) | End-to-end synthetic test produced 3-row lifecycle. |
 | 2026-09-16 (a.m.) | S41 | send-confirmation retrofit — `confirmation_email_sent`, `confirmation_email_failed` action_types | Deploy `eb69416`. Awaited process-duffel-booking widening for correlation. |
-| 2026-09-16 (a.m.) | S41 | process-duffel-booking widening — request body extended with `pending.id` + `merchant_ref` for send-confirmation audit correlation | Deploy `9205870`. Real successful booking produced 4-row lifecycle trace verified against production `audit_log`. |
+| 2026-09-16 (a.m.) | S41 | process-duffel-booking widening — request body extended with `pending.id` + `merchant_ref` for send-confirmation audit correlation | Deploy `9205870`. |
 | 2026-09-16 (evening) | S41 | Manual-ops audit rows for two stuck-booking refunds (webhook-secret rotation incident) | `refund_manual` action_type, `actor_id = 'manual-ops-bev'`. Written via SQL editor in BEGIN/COMMIT block with pre-commit verification SELECT. |
-| 2026-09-16 (late) | S41 | verify-payment retrofit — `payment_verification_failed` action_type on atomic Paystack-terminal-failed transition | Deployed via `supabase functions deploy verify-payment`. Grep confirms `auditLog` import + call site. First live trigger awaits real customer failed-payment event. |
+| 2026-09-17 (early) | S41 | verify-payment retrofit — `payment_verification_failed` action_type on atomic Paystack-terminal-failed transition. Also enum drift fix: migration `session_s41_pending_booking_status_enum_extension.sql` adds `amount_mismatch` + `payment_invalid` to enum; verify-payment + mpesa-callback + payment-status corrected; paystack-webhook L645/L669 writes start succeeding post-migration. | Deploy `f5c5a38`. **HAPPY PATH verified live in production:** real booking WYKR3A / `TF-1789655296456-fh1uun` produced 4-row trace in ~18s (payment_initialized 14:28:17 → payment_captured 14:28:28 → booking_created 14:28:35 → confirmation_email_sent 14:28:36 UTC). **FAILURE PATH verified live in production:** synthetic pending_bookings row against Paystack-abandoned reference `TF-1789299505216-44m2r8` produced `payment_verification_failed` audit row with payload `paystack_status: "abandoned"`, `from_status: "pending"`, `to_status: "failed_to_create"`. Synthetic row cleaned up post-verification. |
+
+**6-of-6 lifecycle EF audit coverage genuinely verified live in production as of Session 41 close.**
 
 ---
 
