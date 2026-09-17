@@ -143,7 +143,7 @@ serve(async (req) => {
       await supabase
         .from("pending_bookings")
         .update({
-          status: "payment_failed",
+          status: "failed_to_create",
           daraja_result_code: resultCode,
           daraja_result_desc: resultDesc,
         })

@@ -1,0 +1,71 @@
+-- ============================================================================
+-- Session 41 (2026-09-16) — extend pending_booking_status enum with two values
+-- that application code has been trying to write but were never in the enum.
+-- ============================================================================
+--
+-- Class-of-issue: three EFs (paystack-webhook, mpesa-callback, verify-payment)
+-- have been writing 'amount_mismatch', 'payment_invalid', or 'payment_failed'
+-- as pending_booking status. Only 'failed_to_create' existed in the enum;
+-- the other three writes silently errored inside Postgres, the affected row
+-- was left in its prior state, and only console.error surfaced the drift.
+--
+-- 'payment_failed' has been consolidated to 'failed_to_create' in application
+-- code (see companion commit) because the two mean the same thing operationally.
+--
+-- 'amount_mismatch' and 'payment_invalid' are semantically distinct terminal
+-- states with distinct customer-facing UX messages in payment-status EF
+-- (KYC 2.4 quarantine + separate "payment could not be verified" branch).
+-- They are added to the enum here.
+--
+-- Surfaced by Session 41 verify-payment audit_log retrofit E2E test:
+-- synthetic pending_bookings row wouldn't transition to 'payment_failed'
+-- because the value wasn't in the enum. Full grep audit uncovered two more
+-- sibling instances in paystack-webhook + mpesa-callback affecting KYC 2.4
+-- quarantine claim.
+--
+-- IDEMPOTENCY: uses IF NOT EXISTS so this migration is safe to re-run.
+-- Confirmed applied to production via Supabase SQL editor on 2026-09-16.
+-- File committed to repo after production apply for repo-vs-production parity.
+--
+-- KYC alignment: closes KYC 2.4 quarantine claim (row transitions to
+-- amount_mismatch on amount mismatch, blocking Duffel order creation).
+--
+-- Session 47-49 unblock: retry-stuck-bookings can safely resume its sweep
+-- once unpaused (Session 49); orphan payment-failure rows will no longer
+-- silently sit at 'pending' but will correctly reach terminal state.
+-- ============================================================================
+
+-- NOTE: Postgres 12+ requires ADD VALUE outside an explicit transaction.
+-- Supabase SQL editor wraps each statement in an implicit transaction and
+-- commits between statements, so running the two ALTERs in the same editor
+-- run works fine. If applying via psql or a migration tool that batches
+-- multiple statements into one transaction, run each ALTER separately.
+
+ALTER TYPE pending_booking_status ADD VALUE IF NOT EXISTS 'amount_mismatch';
+ALTER TYPE pending_booking_status ADD VALUE IF NOT EXISTS 'payment_invalid';
+
+-- ============================================================================
+-- Verification (must be run in a SEPARATE editor execution — Postgres does not
+-- allow using a newly-added enum value in the same transaction that added it).
+-- ============================================================================
+--
+-- SELECT unnest(enum_range(NULL::pending_booking_status))::text AS status_value
+-- ORDER BY status_value;
+--
+-- Expected 13 rows:
+--   amount_mismatch       ← added Session 41
+--   booked
+--   booking
+--   duffel_pending
+--   failed_to_create
+--   paid
+--   paid_booking_failed
+--   paid_offer_expired
+--   payment_invalid       ← added Session 41
+--   pending
+--   pnr_issued
+--   refund_pending
+--   refunded
+--
+-- Production result confirmed 13 values on 2026-09-16.
+-- ============================================================================

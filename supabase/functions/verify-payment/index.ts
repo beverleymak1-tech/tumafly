@@ -22,7 +22,7 @@
 // Ops-1 audit (Session 41): this EF is almost entirely a read-only state
 // reporter — paystack-webhook and process-duffel-booking own every other
 // transition in the lifecycle. The ONE place verify-payment itself performs
-// a genuine DB state transition is the atomic 'payment_failed' update below,
+// a genuine DB state transition is the atomic 'failed_to_create' update below,
 // for the case where Paystack's own verify call confirms terminal failure
 // before the webhook ever arrives (or will never arrive). That's the single
 // audit point here — deliberately not on every poll, per the handoff's
@@ -98,7 +98,7 @@ async function checkModeKeyMismatch(source: string): Promise<Response | null> {
 //                    to the Paystack /verify block, which mapped to
 //                    'processing' but also fired a pointless Paystack
 //                    round-trip on every poll while Duffel was in flight.
-//   failed         — payment_failed / payment_invalid / amount_mismatch
+//   failed         — failed_to_create / payment_invalid / amount_mismatch
 //   refund_pending — refund automation in flight
 //   refunded       — Paystack has finalized the refund
 //   needs_support  — refund automation itself failed (rare; requires human)
@@ -183,7 +183,7 @@ serve(async (req) => {
       });
     }
 
-    if (pending.status === "payment_failed" || pending.status === "payment_invalid") {
+    if (pending.status === "failed_to_create" || pending.status === "payment_invalid") {
       return respond("failed", {
         message: "Your payment didn't go through. Please try again.",
       });
@@ -288,13 +288,13 @@ serve(async (req) => {
       // row, or the webhook winning the race in between).
       const { data: updatedRows, error: updateErr } = await supabase
         .from("pending_bookings")
-        .update({ status: "payment_failed" })
+        .update({ status: "failed_to_create" })
         .eq("id", pending.id)
         .eq("status", "pending") // atomic — only update if still pending
         .select("id");
 
       if (updateErr) {
-        console.error("[verify-payment] payment_failed update error:", updateErr);
+        console.error("[verify-payment] failed_to_create update error:", updateErr);
       } else if (updatedRows && updatedRows.length > 0) {
         // This poll performed the transition — audit it. Fire-and-forget with
         // .catch so an audit_log write failure doesn't 500 the customer's
@@ -312,7 +312,7 @@ serve(async (req) => {
             merchant_ref: reference,
             paystack_status: pStatus,
             from_status: "pending",
-            to_status: "payment_failed",
+            to_status: "failed_to_create",
           },
         }).catch((err) => console.error("[verify-payment] auditLog failed:", err));
       }

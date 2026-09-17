@@ -26,8 +26,6 @@ function mapStatus(raw: string): { state: string; message: string; final: boolea
       return { state: "processing", message: "Payment received, issuing your ticket...", final: false };
     case "booked":
       return { state: "confirmed", message: "Booking confirmed!", final: true };
-    case "payment_failed":
-      return { state: "failed", message: "Payment was not completed. Please try again.", final: true };
     case "payment_invalid":
       return { state: "failed", message: "Payment could not be verified. Please try again.", final: true };
     case "amount_mismatch":
