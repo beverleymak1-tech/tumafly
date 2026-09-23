@@ -5,6 +5,15 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>TumaFly</title>
     <script src="/vendor/supabase-js.umd.js"></script>
+    <script src="/vendor/supabase-js.umd.js"></script>
+    <!-- Privacy-friendly analytics by Plausible — Session 42. Cookieless,
+         EU-hosted (DE), no consent banner needed. Legal package unchanged. -->
+    <script defer src="https://plausible.io/js/pa-ZMD2X9jbS36LG203y20oL.js"></script>
+    <script>
+        window.plausible = window.plausible || function () { (plausible.q = plausible.q || []).push(arguments) };
+        plausible.init = plausible.init || function (i) { plausible.o = i || {} };
+        plausible.init();
+    </script>
     <meta name="description" content="Book flights from Nairobi with M-Pesa or card. Built for African travelers.">
     <!-- Favicon set. NOTE: we do NOT reference logo.svg here — that file is the
          "tumafly" wordmark, not the icon mark. Browsers would try to cram the
@@ -13516,6 +13525,11 @@
 
     async function runSearch({ origin, destination, date, returnDate, fromButton, alertContainer }) {
       const myInvocation = ++_runSearchInvocation;
+      _plausible('search_submitted', {
+        origin, destination,
+        trip_type: tripType,             // 'round' | 'one'
+        pax_total: passengerCount,
+      });
       // Stash the params so the fare-timer's "Search again" button can re-run the
       // same search after an offer expires mid-checkout.
       lastSearchParams = { origin, destination, date, returnDate };
@@ -13866,7 +13880,15 @@
     // FILTERS, SORT & RENDERING
     // ============================================================
     function setCurrency(c) {
+      const _prevCurrency = currentCurrency;
       currentCurrency = c;
+      if (_prevCurrency !== c) {
+        _plausible('currency_toggled', {
+          from: _prevCurrency,
+          to: c,
+          view: document.body.getAttribute('data-view') || 'home',
+        });
+      }
       // Sync the sidebar toggle (results page)
       document.getElementById('curr-kes')?.classList.toggle('active', c === 'KES');
       document.getElementById('curr-usd')?.classList.toggle('active', c === 'USD');
@@ -15093,6 +15115,13 @@
       // Back-to-results button would be actively wrong.
       try { sessionStorage.removeItem('tumafly_new_tab_booking'); } catch (_) {}
 
+      if (child) {
+        _plausible('commit_new_tab', {
+          route: lastSearchParams ? `${lastSearchParams.origin}-${lastSearchParams.destination}` : null,
+          cabin: selection?.cabin || null,
+          airline_iata: selection?.offer?.owner?.iata_code || null,
+        });
+      }
       return !!child;
     }
 
@@ -15101,6 +15130,12 @@
       if (!offer) return;
       const cabinPricing = offer.cabins[cabin];
       if (!cabinPricing) return;
+      _plausible('offer_selected', {
+        route: lastSearchParams ? `${lastSearchParams.origin}-${lastSearchParams.destination}` : null,
+        kind,                                              // 'outbound' | 'inbound' | 'oneway'
+        cabin,
+        airline_iata: offer?.owner?.iata_code || null,
+      });
       // Any new selection invalidates previously-picked seats + baggages —
       // different offer means different service_ids and possibly different
       // cabin/aircraft layout. Without clearing baggages, a stale service_id
@@ -19674,9 +19709,12 @@
         const popup = new PaystackPop();
         _paystackHandle = popup;
         popup.resumeTransaction(_paystackAccessCode, {
-          onLoad: () => { /* modal painted — nothing to do */ },
+          onLoad: () => {
+            _plausible('payment_opened', { merchant_ref: activeMerchantRef });
+          },
           onSuccess: (tx) => {
             closedWithoutSettlement = false;
+            _plausible('payment_success', { merchant_ref: activeMerchantRef });
             _handlePaystackSuccess(tx);
           },
           onCancel: () => {
@@ -21698,6 +21736,23 @@
 
     // ── Auth state ───────────────────────────────────────────────
     let currentUser = null;  // supabase User object or null
+
+    // ── Plausible event helper (Session 42) ─────────────────────────
+    // Wraps window.plausible() with base props device + logged_in on every
+    // event. The init snippet in <head> defines window.plausible as a queue-
+    // pusher even before the async script loads, so pre-load calls are
+    // buffered + replayed. Never throws; never blocks UX.
+    function _plausible(event, extraProps) {
+      try {
+        if (typeof window.plausible !== 'function') return;
+        const base = {
+          device: window.innerWidth <= 768 ? 'mobile' : 'desktop',
+          logged_in: !!currentUser,
+        };
+        window.plausible(event, { props: Object.assign(base, extraProps || {}) });
+      } catch (_) { /* never block UX */ }
+    }
+
     let authCallback = null; // fn to call after successful sign-in (post-booking nudge)
 
     // Session 28e-10.3: idempotency guard for onSignedIn.
