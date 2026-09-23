@@ -4,6 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>TumaFly</title>
+    <script src="/vendor/supabase-js.umd.js"></script>
     <meta name="description" content="Book flights from Nairobi with M-Pesa or card. Built for African travelers.">
     <!-- Favicon set. NOTE: we do NOT reference logo.svg here — that file is the
          "tumafly" wordmark, not the icon mark. Browsers would try to cram the
@@ -19849,7 +19850,7 @@
         }
 
         // 2. Lazy-import supabase-js and open a Realtime client with the JWT
-        const { createClient } = await import('https://esm.sh/@supabase/supabase-js@2');
+        const { createClient } = window.supabase;
         _realtimeClient = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
         await _realtimeClient.realtime.setAuth(mintData.token);
 
@@ -21641,7 +21642,7 @@
     function initSupabase() {
       if (_supabaseReady) return _supabaseReady;
       _supabaseReady = (async () => {
-        const { createClient } = await import('https://esm.sh/@supabase/supabase-js@2');
+        const { createClient } = window.supabase;
         _supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
           auth: {
             persistSession: true,
