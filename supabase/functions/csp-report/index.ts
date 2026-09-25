@@ -33,6 +33,7 @@
 //     missing/wrong Content-Type.
 
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
+import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
 const DEDUP_WINDOW_MS = 5 * 60 * 1000;       // 5 min
 const RATE_LIMIT_WINDOW_MS = 60 * 60 * 1000; // 1 hour
@@ -57,6 +58,21 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "content-type",
 };
 
+// Session 42 — durable violation persistence for bake analysis.
+// SOP §1.1: SERVICE_ROLE_KEY is the canonical custom secret, NOT the
+// auto-injected SUPABASE_SERVICE_ROLE_KEY. RUNBOOK §1.6 covers the
+// silent-401 class-of-issue if you use the wrong var.
+//
+// Client is nullable: if env vars are missing, DB write becomes a no-op
+// and console.log path still fires (belt-and-braces).
+const SUPABASE_URL = Deno.env.get("SUPABASE_URL");
+const SERVICE_ROLE_KEY = Deno.env.get("SERVICE_ROLE_KEY");
+const supabase = SUPABASE_URL && SERVICE_ROLE_KEY
+  ? createClient(SUPABASE_URL, SERVICE_ROLE_KEY, {
+      auth: { persistSession: false, autoRefreshToken: false },
+    })
+  : null;
+
 serve(async (req: Request) => {
   if (req.method === "OPTIONS") {
     return new Response(null, { status: 204, headers: corsHeaders });
@@ -66,6 +82,7 @@ serve(async (req: Request) => {
   }
 
   const now = Date.now();
+  const rowsToInsert: Record<string, unknown>[] = [];
 
   // Source IP for rate limiting (Supabase edge sets these)
   const ip =
@@ -177,7 +194,35 @@ serve(async (req: Request) => {
         user_agent: userAgent ? userAgent.slice(0, MAX_SAMPLE_LEN) : null,
       }),
     );
+    // Session 42: also collect for DB persistence.
+    rowsToInsert.push({
+      source_ip: ip,
+      document_uri: docUri,
+      violated_directive: directive,
+      blocked_uri: blockedUri,
+      source_file: sourceFile,
+      line_number: lineNumber,
+      script_sample: typeof sample === "string" ? sample.slice(0, MAX_SAMPLE_LEN) : null,
+      user_agent: userAgent ? userAgent.slice(0, MAX_SAMPLE_LEN) : null,
+    });
   }
 
+  // Session 42: persist collected violations. DB failure never affects
+  // the 204 response or the console.log path — CSP reports are fire-and-
+  // forget from the browser, and the log path is the belt-and-braces
+  // fallback if the DB write throws.
+  if (supabase && rowsToInsert.length > 0) {
+    try {
+      const { error } = await supabase.from("csp_violations").insert(rowsToInsert);
+      if (error) {
+        console.error("csp_violation_insert_failed", error.message);
+      }
+    } catch (e) {
+      console.error(
+        "csp_violation_insert_threw",
+        e instanceof Error ? e.message : String(e),
+      );
+    }
+  }
   return new Response(null, { status: 204, headers: corsHeaders });
 });
