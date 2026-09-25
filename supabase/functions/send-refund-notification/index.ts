@@ -1,5 +1,6 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { alertFounder, safeCompare } from "../_shared/duffel-helpers.ts";
 
 const RESEND_API_KEY = Deno.env.get("RESEND_API_KEY");
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
@@ -238,10 +239,35 @@ serve(async (req) => {
     return new Response("ok", { headers: CORS_HEADERS });
   }
 
-  const providedSecret = req.headers.get("x-webhook-secret");
-  if (!WEBHOOK_SECRET || providedSecret !== WEBHOOK_SECRET) {
+  const providedSecret = req.headers.get("x-webhook-secret") || "";
+  if (!safeCompare(providedSecret, WEBHOOK_SECRET)) {
     console.error("send-refund-notification: unauthorized");
-    return new Response("unauthorized", { status: 401, headers: CORS_HEADERS });
+    // RUNBOOK §19 durable hardening (Session 44).
+    // Fire alertFounder with signals that distinguish real rotation drift from
+    // endpoint probing. Dedup per hour per webhook_source (60 min cooldown in
+    // ALERT_CONFIG catalog); dedup_key intentionally omits hour bucket so the
+    // catalog's own cooldown governs. See RUNBOOK §19 + SOP §1.5.
+    const clientIp = req.headers.get("x-forwarded-for")?.split(",")[0]?.trim()
+      || req.headers.get("cf-connecting-ip")
+      || null;
+    const userAgent = req.headers.get("user-agent") || "";
+    const hasSupabaseHeaders = /pg_net/i.test(userAgent);
+    const providedSecretPrefix = providedSecret ? providedSecret.slice(0, 6) : null;
+    await alertFounder(
+      "WEBHOOK_SECRET_MISMATCH",
+      {
+        webhook_source: "send-refund-notification",
+        client_ip: clientIp,
+        provided_secret_prefix: providedSecretPrefix,
+        has_supabase_headers: hasSupabaseHeaders,
+        user_agent: userAgent,
+      },
+      "webhook_secret_mismatch:send-refund-notification",
+    );
+    return new Response(JSON.stringify({ error: "Unauthorized" }), {
+      status: 401,
+      headers: { ...CORS_HEADERS, "Content-Type": "application/json" },
+    });
   }
 
   try {
@@ -249,7 +275,10 @@ serve(async (req) => {
     const { type, record, old_record } = payload;
 
     if (!record || !record.id) {
-      return new Response("no record", { status: 200, headers: CORS_HEADERS });
+            return new Response(JSON.stringify({ status: "no_record" }), {
+              status: 200,
+              headers: { ...CORS_HEADERS, "Content-Type": "application/json" },
+            });
     }
 
     let branch: "initiated" | "settled" | null = null;
@@ -263,7 +292,10 @@ serve(async (req) => {
       branch = "settled";
     }
     if (!branch) {
-      return new Response("no-op event", { status: 200, headers: CORS_HEADERS });
+            return new Response(JSON.stringify({ status: "no_op_event" }), {
+              status: 200,
+              headers: { ...CORS_HEADERS, "Content-Type": "application/json" },
+            });
     }
 
     const sb = createClient(SUPABASE_URL, SERVICE_ROLE_KEY);
@@ -288,17 +320,26 @@ serve(async (req) => {
 
     if (refundErr || !refund) {
       console.error("send-refund-notification: refund fetch failed", refundErr);
-      return new Response("refund not found", { status: 200, headers: CORS_HEADERS });
+      return new Response(JSON.stringify({ status: "refund_not_found" }), {
+        status: 200,
+        headers: { ...CORS_HEADERS, "Content-Type": "application/json" },
+      });
     }
 
     if ((refund as any)[sentColumn]) {
-      return new Response(`already sent (${branch})`, { status: 200, headers: CORS_HEADERS });
+      return new Response(JSON.stringify({ status: "already_sent", branch }), {
+        status: 200,
+        headers: { ...CORS_HEADERS, "Content-Type": "application/json" },
+      });
     }
 
     const to = refund.customer_email;
     if (!to) {
       console.error("send-refund-notification: no customer_email on refund", refund.id);
-      return new Response("no recipient", { status: 200, headers: CORS_HEADERS });
+      return new Response(JSON.stringify({ status: "no_recipient" }), {
+        status: 200,
+        headers: { ...CORS_HEADERS, "Content-Type": "application/json" },
+      });
     }
 
     // S-14b: read via pending_bookings_decrypted for consistency across
@@ -322,7 +363,10 @@ serve(async (req) => {
 
     if (!RESEND_API_KEY) {
       console.error("send-refund-notification: RESEND_API_KEY missing");
-      return new Response("mail config error", { status: 500, headers: CORS_HEADERS });
+      return new Response(JSON.stringify({ error: "mail_config_error" }), {
+        status: 500,
+        headers: { ...CORS_HEADERS, "Content-Type": "application/json" },
+      });
     }
 
     const resendRes = await fetch("https://api.resend.com/emails", {
@@ -348,9 +392,9 @@ serve(async (req) => {
     if (!resendRes.ok) {
       const body = await resendRes.text();
       console.error(`send-refund-notification: resend failed status=${resendRes.status} refund=${refund.id}`);
-      return new Response(`resend failed: ${resendRes.status}`, {
+      return new Response(JSON.stringify({ error: "resend_failed", resend_status: resendRes.status }), {
         status: 502,
-        headers: CORS_HEADERS,
+        headers: { ...CORS_HEADERS, "Content-Type": "application/json" },
       });
     }
 
@@ -363,9 +407,15 @@ serve(async (req) => {
       console.error("send-refund-notification: mark-sent failed", updateErr);
     }
 
-    return new Response(`sent (${branch})`, { status: 200, headers: CORS_HEADERS });
+    return new Response(JSON.stringify({ status: "sent", branch }), {
+      status: 200,
+      headers: { ...CORS_HEADERS, "Content-Type": "application/json" },
+    });
   } catch (e) {
     console.error("send-refund-notification: unhandled", e);
-    return new Response("error", { status: 500, headers: CORS_HEADERS });
+    return new Response(JSON.stringify({ error: "unhandled" }), {
+      status: 500,
+      headers: { ...CORS_HEADERS, "Content-Type": "application/json" },
+    });
   }
 });

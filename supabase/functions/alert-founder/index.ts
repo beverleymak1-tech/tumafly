@@ -70,6 +70,17 @@ type AlertType =
   // probably months). See session_s39_heartbeat_infra.sql for full context.
   | "HEARTBEAT_STUCK_ROWS"                 // one or more pending_bookings rows past 15min in customer-money-taken non-terminal state
   | "HEARTBEAT_CRON_FAILURES"              // non-2xx/timeout/error responses from pg_net HTTP callers in trailing 60min
+  // Session 44 — RUNBOOK §19 durable hardening. Auth guard failure at webhook-
+  // target EFs (send-refund-notification, process-duffel-booking). Fires when
+  // a request arrives without a valid x-webhook-secret. Two distinct failure
+  // modes are distinguished by context.has_supabase_headers:
+  //   true  — pg_net webhook trigger has drifted from EF env var. Real
+  //           SOP §1.5 rotation issue; blocks production traffic; page HIGH.
+  //   false — random endpoint probing / scanner traffic. Log-only; LOW.
+  // Distinguished at fire site; catalog carries HIGH default because operators
+  // page-worthy path is the one that will actually surface here (Supabase-side
+  // webhooks fire on every real row change; probing is rare).
+  | "WEBHOOK_SECRET_MISMATCH"
   | "UNKNOWN_ALERT_TYPE";                  // S-02 fallback — unregistered alert_type received, rendered synthetically to avoid silent-drop
 
 const ALERT_CONFIG: Record<AlertType, { severity: string; subject: string; action: string; dedup_cooldown_minutes?: number }> = {
@@ -307,12 +318,18 @@ const ALERT_CONFIG: Record<AlertType, { severity: string; subject: string; actio
                           action: "One or more pg_net HTTP calls (from pg_cron jobs) returned non-2xx / timed out / errored in the trailing 60 min. This is the exact class of silent failure that hid the retry-stuck-bookings vault-placeholder P0 for probably months. Investigate: (1) query `SELECT * FROM net._http_response WHERE created > NOW() - INTERVAL '2 hours' AND (status_code >= 400 OR timed_out OR error_msg IS NOT NULL) ORDER BY created DESC;` to see the full failure detail; (2) map back to which cron job originated each request (join on cron.job_run_details.start_time ≈ net._http_response.created); (3) if 401, check the auth mechanism used by that cron — most likely a vault entry drift. Fix per SOP §1 (Secret Rotation). See session_s39_heartbeat_infra.sql.",
                           dedup_cooldown_minutes: 30,
                         },
-                // ── S-02 fallback: unregistered alert types render here (never silently dropped) ──
-        UNKNOWN_ALERT_TYPE: {
-          severity: "🟡 UNKNOWN",
-          subject: "Unregistered alert type received",
-          action: "This alert_type is not registered in alert-founder's whitelist. Redacted payload attached. Add the type to the AlertType union + ALERT_CONFIG in supabase/functions/alert-founder/index.ts, then redeploy.",
-        },
+                        WEBHOOK_SECRET_MISMATCH: {
+                            severity: "HIGH",
+                            subject: "🚨 Webhook secret mismatch — refund or booking pipeline may be broken",
+                            action: "A request to a webhook-target EF (webhook_source in context) arrived with an invalid or missing x-webhook-secret. If context.has_supabase_headers = true, this is SOP §1.5 rotation drift — the Supabase Database Webhook trigger's hardcoded header value has diverged from the EF's env var. Follow SOP §1.5 (PROCESS_DUFFEL_BOOKING_WEBHOOK_SECRET or REFUND_NOTIFICATION_WEBHOOK_SECRET procedure depending on webhook_source), including Step 7 end-to-end smoke. If has_supabase_headers = false, this is likely endpoint scanning; verify with context.client_ip and provided_secret_prefix (junk-shaped prefix confirms scanning). Query: SELECT date_trunc('hour', created_at), context->>'webhook_source', COUNT(*) FROM alerts WHERE alert_type = 'WEBHOOK_SECRET_MISMATCH' GROUP BY 1,2 ORDER BY 1 DESC LIMIT 24;",
+                            dedup_cooldown_minutes: 1440, // §11 dedup per webhook_source per day. Real rotation drift keeps re-firing on every trigger — dedup collapses the storm to one alert per day per EF, until the operator fixes and Step 7 smoke confirms. Probing traffic collapses similarly (one per source per day).
+                        },
+                        // ── S-02 fallback: unregistered alert types render here (never silently dropped) ──
+                        UNKNOWN_ALERT_TYPE: {
+                        severity: "🟡 UNKNOWN",
+                        subject: "Unregistered alert type received",
+                        action: "This alert_type is not registered in alert-founder's whitelist. Redacted payload attached. Add the type to the AlertType union + ALERT_CONFIG in supabase/functions/alert-founder/index.ts, then redeploy.",
+                        },
       };
 
 function buildEmailHtml(

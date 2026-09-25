@@ -156,6 +156,28 @@ serve(async (req) => {
   const receivedSecret = req.headers.get("x-webhook-secret") || "";
   if (!safeCompare(receivedSecret, WEBHOOK_SECRET)) {
     console.error("[process-duffel-booking] Missing/invalid x-webhook-secret");
+    // RUNBOOK §19 durable hardening (Session 44).
+    // Fire alertFounder with signals that distinguish real rotation drift from
+    // endpoint probing. Dedup per hour per webhook_source (60 min cooldown in
+    // ALERT_CONFIG catalog); dedup_key intentionally omits hour bucket so the
+    // catalog's own cooldown governs. See RUNBOOK §19 + SOP §1.5.
+    const clientIp = req.headers.get("x-forwarded-for")?.split(",")[0]?.trim()
+      || req.headers.get("cf-connecting-ip")
+      || null;
+    const userAgent = req.headers.get("user-agent") || "";
+    const hasSupabaseHeaders = /pg_net/i.test(userAgent);
+    const providedSecretPrefix = receivedSecret ? receivedSecret.slice(0, 6) : null;
+    await alertFounder(
+      "WEBHOOK_SECRET_MISMATCH",
+      {
+        webhook_source: "process-duffel-booking",
+        client_ip: clientIp,
+        provided_secret_prefix: providedSecretPrefix,
+        has_supabase_headers: hasSupabaseHeaders,
+        user_agent: userAgent,
+      },
+      "webhook_secret_mismatch:process-duffel-booking",
+    );
     return new Response(JSON.stringify({ error: "Unauthorized" }), {
       status: 401,
       headers: { ...CORS_HEADERS, "Content-Type": "application/json" },

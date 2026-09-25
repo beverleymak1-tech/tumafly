@@ -79,6 +79,25 @@ export const CORS_HEADERS = {
   "Access-Control-Allow-Headers": "authorization, content-type, x-paystack-signature, x-webhook-secret",
 };
 
+// ── Webhook secret compare ────────────────────────────────────────────────
+// Constant-time string compare for webhook secret verification. Prevents
+// timing side-channels on comparison (theoretical for 32-byte random hex, but
+// free hardening). Extracted Session 44 for reuse across webhook-target EFs
+// (send-refund-notification, process-duffel-booking).
+//
+// NOTE: process-duffel-booking retains its own local copy for now — that EF
+// is production-critical and Session 54 polish batch will migrate it. This
+// shared export is used by send-refund-notification and any new webhook EFs.
+
+export function safeCompare(a: string, b: string): boolean {
+  if (!a || !b || a.length !== b.length) return false;
+  let result = 0;
+  for (let i = 0; i < a.length; i++) {
+    result |= a.charCodeAt(i) ^ b.charCodeAt(i);
+  }
+  return result === 0;
+}
+
 // ── Alert helper ──────────────────────────────────────────────────────────
 // Fire-and-forget alert to the alert-founder EF. Never throws.
 
