@@ -32,6 +32,60 @@
 
 set -uo pipefail  # NOT -e — cleanup must run even on assertion failure
 
+# ── Flag parsing ───────────────────────────────────────────────────────────
+# Session 44 §2.4 — --target flag for A3 vs prod smoke-test targeting.
+# Sets default SB_URL only if env doesn't already override. Env always wins.
+# Secrets (SERVICE_ROLE_KEY, DUFFEL_WRITE_KEY, PROCESS_DUFFEL_BOOKING_WEBHOOK_SECRET)
+# must still come from env — flag can't safely default them, and mismatch surfaces
+# loudly at the Phase 1 reachability check (401 with target-mismatch hint).
+
+TARGET=""
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --target)
+      TARGET="${2:-}"
+      shift 2
+      ;;
+    -h|--help)
+      cat <<'HELP'
+Usage: post_deploy_smoke.sh [--target a3|prod]
+
+  --target a3    Default SB_URL to A3 sandbox (nljxqcrmmkodbzsrzdba).
+                 Requires A3 SERVICE_ROLE_KEY + secrets in env.
+  --target prod  Default SB_URL to production (wmplcauhaqtyenwvkrkq).
+                 Requires production SERVICE_ROLE_KEY + secrets in env.
+  (omitted)      Use SB_URL from env; error if unset.
+
+Env vars always override --target. See head of script for required inventory.
+HELP
+      exit 0
+      ;;
+    *)
+      echo "[smoke] SETUP FAIL: unknown argument: $1" >&2
+      echo "[smoke] Run with --help for usage." >&2
+      exit 2
+      ;;
+  esac
+done
+
+case "$TARGET" in
+  a3)
+    SB_URL="${SB_URL:-https://nljxqcrmmkodbzsrzdba.supabase.co}"
+    echo "[smoke] Target: A3 sandbox (${SB_URL})"
+    ;;
+  prod)
+    SB_URL="${SB_URL:-https://wmplcauhaqtyenwvkrkq.supabase.co}"
+    echo "[smoke] Target: PRODUCTION (${SB_URL})"
+    ;;
+  "")
+    : # no --target passed; SB_URL must be set in env (bail-early check catches unset)
+    ;;
+  *)
+    echo "[smoke] SETUP FAIL: --target must be 'a3' or 'prod', got: $TARGET" >&2
+    exit 2
+    ;;
+esac
+
 # ── Config ─────────────────────────────────────────────────────────────────
 
 SB_URL="${SB_URL:-}"
@@ -126,6 +180,14 @@ echo "[smoke]   Duffel API: OK"
 if ! curl -sf -o /dev/null -H "apikey: $KEY" -H "Authorization: Bearer $KEY" \
      "$SB_URL/rest/v1/pending_bookings?limit=1&select=id"; then
   echo "[smoke] FAIL: Supabase REST unreachable or KEY invalid" >&2
+  echo "[smoke]        SB_URL=$SB_URL" >&2
+  if [ -n "$TARGET" ]; then
+    echo "[smoke]        Hint: --target=$TARGET was passed; verify SERVICE_ROLE_KEY in env" >&2
+    echo "[smoke]              matches the $TARGET project (JWTs are per-project — a" >&2
+    echo "[smoke]              production key hitting A3, or vice versa, 401s here)." >&2
+  else
+    echo "[smoke]        Hint: no --target flag passed; SB_URL came from env." >&2
+  fi
   exit 1
 fi
 echo "[smoke]   Supabase REST: OK"
