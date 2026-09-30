@@ -22641,9 +22641,6 @@
 
     // ── Auth modal ───────────────────────────────────────────────
     function openAuthModal(context) {
-      if (context === 'post-booking') {
-        authCallback = (user) => linkBookingToUser(user);
-      }
       document.getElementById('auth-overlay').classList.remove('hidden');
       document.getElementById('auth-step-choose').classList.remove('hidden');
       document.getElementById('auth-step-otp').classList.add('hidden');
@@ -23191,17 +23188,6 @@
       const nudge = document.getElementById('save-booking-nudge');
       if (!nudge) return;
       nudge.classList.toggle('hidden', !!currentUser);
-    }
-
-    async function linkBookingToUser(user) {
-      if (!activeMerchantRef || !user) return;
-      try {
-        await fetch(`${SUPABASE_URL}/functions/v1/link-booking-user`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${SUPABASE_ANON_KEY}` },
-          body: JSON.stringify({ merchant_reference: activeMerchantRef, user_id: user.id })
-        });
-      } catch (e) { console.warn('[auth] linkBookingToUser failed:', e); }
     }
 
     // ── Profile page ─────────────────────────────────────────────
