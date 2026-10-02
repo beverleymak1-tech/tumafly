@@ -129,7 +129,15 @@ jobs:
           echo "Expected deploy count: $COUNT"
 
       - name: Deploy all EFs to Production
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.TUMAFLY_PROD_CLI }}
+          PROJECT_REF: wmplcauhaqtyenwvkrkq
         run: |
+          echo "=== Diagnostic ==="
+          echo "SUPABASE_ACCESS_TOKEN length: ${#SUPABASE_ACCESS_TOKEN}"
+          echo "SUPABASE_ACCESS_TOKEN prefix: ${SUPABASE_ACCESS_TOKEN:0:4}"
+          echo "PROJECT_REF: $PROJECT_REF"
+          echo "=================="
           supabase functions deploy \
             --project-ref "$PROJECT_REF" \
             --no-verify-jwt
