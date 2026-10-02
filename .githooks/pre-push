@@ -1,0 +1,95 @@
+#!/usr/bin/env bash
+# TumaFly — pre-push merge-direction guard
+#
+# Session 45 delivery. Rejects pushes to `main` that carry A3 config artifacts.
+#
+# Protects against the staging → main merge-direction leak:
+#   - staging has frontend/index.html + frontend/_headers with A3 Supabase URL,
+#     A3 anon key, and the Cloudflare always-pass Turnstile sitekey.
+#   - main must NEVER contain those strings. If a merge from staging drags any
+#     of them in, this hook catches it before the push lands.
+#
+# ONE-TIME LOCAL SETUP (per clone, not per branch):
+#   git config core.hooksPath .githooks
+#
+# Without that config line, git uses .git/hooks/ (which this file is NOT in),
+# and the hook is inert. The Local Execution Playbook §4 covers the setup.
+#
+# To bypass (only when you intentionally need to push an A3 string to main —
+# this should essentially never happen):
+#   git push --no-verify
+
+set -euo pipefail
+
+# Signatures of A3 config that must never land on main.
+A3_PROJECT_REF="nljxqcrmmkodbzsrzdba"
+A3_TURNSTILE_SITEKEY="1x00000000000000000000AA"
+
+# Git passes remote info on stdin as:
+#   <local-ref> <local-sha> <remote-ref> <remote-sha>
+# Iterate; we only act on pushes to origin/main (any remote named "main").
+
+VIOLATIONS=0
+
+while read -r local_ref local_sha remote_ref remote_sha; do
+  # Only guard main.
+  case "$remote_ref" in
+    refs/heads/main) ;;
+    *) continue ;;
+  esac
+
+  # Deletion push — skip.
+  if [ "$local_sha" = "0000000000000000000000000000000000000000" ]; then
+    continue
+  fi
+
+  # Range of commits being pushed. If remote_sha is zero (new branch), check
+  # against the upstream merge base; otherwise against remote_sha.
+  if [ "$remote_sha" = "0000000000000000000000000000000000000000" ]; then
+    RANGE="$local_sha"
+  else
+    RANGE="${remote_sha}..${local_sha}"
+  fi
+
+  # Scan the DIFF of what's being pushed, not the whole tree. Catches NEW
+  # occurrences; pre-existing matches in historical commits are not flagged.
+  DIFF=$(git diff "$RANGE" -- 'frontend/*.html' 'frontend/_headers' 2>/dev/null || true)
+
+  if echo "$DIFF" | grep -q "^+.*$A3_PROJECT_REF"; then
+    echo "pre-push: ✗ A3 project ref '$A3_PROJECT_REF' found in staged change to main." >&2
+    VIOLATIONS=$((VIOLATIONS + 1))
+  fi
+
+  if echo "$DIFF" | grep -q "^+.*$A3_TURNSTILE_SITEKEY"; then
+    echo "pre-push: ✗ A3 always-pass Turnstile sitekey '$A3_TURNSTILE_SITEKEY' found in staged change to main." >&2
+    VIOLATIONS=$((VIOLATIONS + 1))
+  fi
+done
+
+if [ "$VIOLATIONS" -gt 0 ]; then
+  cat >&2 <<EOF
+
+pre-push: BLOCKED — $VIOLATIONS A3 artifact(s) would land on main.
+
+This almost always means a staging → main merge pulled in config lines that
+should have stayed on staging. Recovery:
+
+  1. git log -1 -p -- frontend/index.html frontend/_headers
+     (confirm the offending lines)
+  2. git reset --hard HEAD~1
+     (undo the merge locally; adjust depth if more commits need undoing)
+  3. Redo the merge, resolving the config files explicitly:
+     git merge staging
+     git checkout --ours frontend/index.html frontend/_headers
+     git add frontend/index.html frontend/_headers
+     git commit
+  4. Retry: git push origin main
+
+If this is intentional (e.g. you really need an A3 ref on main for some
+unusual reason), bypass with: git push --no-verify
+
+EOF
+  exit 1
+fi
+
+exit 0
