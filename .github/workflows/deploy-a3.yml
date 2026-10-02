@@ -1,0 +1,84 @@
+# TumaFly — A3 sandbox auto-deploy
+#
+# Triggers on push to `staging`. Deploys all Supabase Edge Functions to the
+# A3 sandbox project (nljxqcrmmkodbzsrzdba).
+#
+# Session 45 delivery. Supersedes RUNBOOK §26.6 manual branch-sync discipline
+# for the A3 half. Frontend (frontend/index.html + _headers) deploys separately
+# via Cloudflare Workers' own branch trigger — this workflow is backend EFs only.
+#
+# Shell-tab equivalent: this is what a yellow [A3] tab was doing manually.
+#
+# To add a one-off manual deploy without a push, use the "Run workflow" button
+# in the Actions tab (workflow_dispatch trigger below).
+
+name: Deploy A3 (staging → sandbox)
+
+on:
+  push:
+    branches:
+      - staging
+    paths:
+      - 'supabase/functions/**'
+      - 'supabase/config.toml'
+      - '.github/workflows/deploy-a3.yml'
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-a3
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: Deploy EFs to A3
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    permissions:
+      contents: read
+
+    env:
+      SUPABASE_ACCESS_TOKEN: ${{ secrets.TUMAFLY_A3_CLI }}
+      PROJECT_REF: nljxqcrmmkodbzsrzdba
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Supabase CLI
+        uses: supabase/setup-cli@v1
+        with:
+          version: 2.95.4
+
+      - name: Verify CLI version
+        run: supabase --version
+
+      - name: List functions to be deployed
+        run: |
+          echo "::group::Functions in supabase/functions/"
+          ls -1 supabase/functions/ | grep -v '^_shared$' | sort
+          COUNT=$(ls -1 supabase/functions/ | grep -v '^_shared$' | wc -l)
+          echo "::endgroup::"
+          echo "Expected deploy count: $COUNT"
+
+      - name: Deploy all EFs to A3
+        run: |
+          supabase functions deploy \
+            --project-ref "$PROJECT_REF" \
+            --no-verify-jwt
+        # --no-verify-jwt matches the current manual deploy flag. Individual
+        # EFs enforce their own auth via Authorization header checks.
+        # If a specific EF needs JWT verification enabled, deploy it separately
+        # or add a per-function config in supabase/config.toml.
+
+      - name: Post-deploy summary
+        if: always()
+        run: |
+          echo "## A3 deploy summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "- Project ref: \`$PROJECT_REF\`" >> $GITHUB_STEP_SUMMARY
+          echo "- Commit: \`${{ github.sha }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "- Trigger: \`${{ github.event_name }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "- Status: \`${{ job.status }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "Run \`./scripts/post_deploy_smoke.sh --target a3\` locally against this deploy." >> $GITHUB_STEP_SUMMARY

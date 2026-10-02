@@ -1,0 +1,157 @@
+# TumaFly — Production auto-deploy
+#
+# Triggers on push to `main`. Deploys all Supabase Edge Functions to the
+# production project (wmplcauhaqtyenwvkrkq).
+#
+# Session 45 delivery. Supersedes RUNBOOK §26.6 manual branch-sync discipline
+# for the prod half. Frontend (frontend/index.html + _headers) deploys separately
+# via Cloudflare Workers' own branch trigger — this workflow is backend EFs only.
+#
+# Shell-tab equivalent: this is what a red [PROD] tab was doing manually.
+#
+# GitHub environment approval gate ENABLED per Session 45 design.
+# The `production` environment must exist in repo Settings → Environments
+# with Bev listed as a required reviewer, otherwise the deploy job hangs
+# forever waiting for approval. See the Local Execution Playbook Phase 3a
+# for setup. The `scripts/deploy.sh --env prod` wrapper also keeps its
+# "type yes" prompt for terminal-triggered deploys.
+#
+# The guard step runs BEFORE the deploy job to catch A3-artifact leaks
+# before the approver is asked to review. If an A3 string is detected,
+# the guard job fails and the deploy job never requests approval.
+#
+# To add a one-off manual deploy without a push, use the "Run workflow" button
+# in the Actions tab (workflow_dispatch trigger below).
+
+name: Deploy Production (main → prod)
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'supabase/functions/**'
+      - 'supabase/config.toml'
+      - '.github/workflows/deploy-prod.yml'
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-prod
+  cancel-in-progress: false
+
+jobs:
+  guard:
+    # Runs BEFORE the deploy job and gates it. The approver only gets asked
+    # to approve if the guard passes — no point asking a human to review a
+    # deploy that's going to be blocked anyway.
+    name: Pre-deploy guard
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Guard — no A3 artifacts on main
+        # Backstop for the staging → main merge-direction leak. If an A3
+        # project ref or the always-pass Turnstile sitekey has somehow landed
+        # on main (merge mishap, hook bypassed with --no-verify, direct
+        # commit), fail hard BEFORE the approval gate is requested. See
+        # .githooks/pre-push for the primary preventative guard.
+        run: |
+          A3_PROJECT_REF="nljxqcrmmkodbzsrzdba"
+          A3_TURNSTILE_SITEKEY="1x00000000000000000000AA"
+          VIOLATIONS=0
+
+          if grep -rn "$A3_PROJECT_REF" \
+              --include='*.html' --include='_headers' \
+              --include='*.ts' --include='*.js' --include='*.toml' \
+              frontend/ supabase/ 2>/dev/null; then
+            echo "::error::A3 project ref '$A3_PROJECT_REF' found on main."
+            VIOLATIONS=$((VIOLATIONS + 1))
+          fi
+
+          if grep -rn "$A3_TURNSTILE_SITEKEY" \
+              --include='*.html' frontend/ 2>/dev/null; then
+            echo "::error::A3 always-pass Turnstile sitekey found on main."
+            VIOLATIONS=$((VIOLATIONS + 1))
+          fi
+
+          if [ "$VIOLATIONS" -gt 0 ]; then
+            echo "::error::Blocked prod deploy — A3 config leaked into main."
+            echo "::error::Revert the offending commit and redo the merge, keeping main's frontend/index.html and frontend/_headers."
+            exit 1
+          fi
+
+          echo "Guard passed: no A3 artifacts detected."
+
+  deploy:
+    name: Deploy EFs to Production
+    needs: guard
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    # The approval gate. GitHub pauses the job here and emails the required
+    # reviewers configured for the `production` environment in repo Settings.
+    # Nothing runs until an approver clicks "Approve and deploy" in the UI.
+    environment:
+      name: production
+      url: https://wmplcauhaqtyenwvkrkq.supabase.co
+
+    permissions:
+      contents: read
+
+    env:
+      SUPABASE_ACCESS_TOKEN: ${{ secrets.TUMAFLY_PROD_CLI }}
+      PROJECT_REF: wmplcauhaqtyenwvkrkq
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Supabase CLI
+        uses: supabase/setup-cli@v1
+        with:
+          version: 2.95.4
+
+      - name: Verify CLI version
+        run: supabase --version
+
+      - name: List functions to be deployed
+        run: |
+          echo "::group::Functions in supabase/functions/"
+          ls -1 supabase/functions/ | grep -v '^_shared$' | sort
+          COUNT=$(ls -1 supabase/functions/ | grep -v '^_shared$' | wc -l)
+          echo "::endgroup::"
+          echo "Expected deploy count: $COUNT"
+
+      - name: Deploy all EFs to Production
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.TUMAFLY_PROD_CLI }}
+          PROJECT_REF: wmplcauhaqtyenwvkrkq
+        run: |
+          echo "=== Diagnostic ==="
+          echo "SUPABASE_ACCESS_TOKEN length: ${#SUPABASE_ACCESS_TOKEN}"
+          echo "SUPABASE_ACCESS_TOKEN prefix: ${SUPABASE_ACCESS_TOKEN:0:4}"
+          echo "PROJECT_REF: $PROJECT_REF"
+          echo "=================="
+          supabase functions deploy \
+            --project-ref "$PROJECT_REF" \
+            --no-verify-jwt
+        # --no-verify-jwt matches the current manual deploy flag. Individual
+        # EFs enforce their own auth via Authorization header checks.
+
+      - name: Post-deploy summary
+        if: always()
+        run: |
+          echo "## Production deploy summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "- Project ref: \`$PROJECT_REF\`" >> $GITHUB_STEP_SUMMARY
+          echo "- Commit: \`${{ github.sha }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "- Trigger: \`${{ github.event_name }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "- Status: \`${{ job.status }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Operator action required:** run \`./scripts/post_deploy_smoke.sh --target prod\` locally per SOP §5." >> $GITHUB_STEP_SUMMARY

@@ -427,10 +427,6 @@ entrypoint = "./functions/send-confirmation/index.ts"
 # For example, if you want to serve static HTML pages in your function:
 # static_files = [ "./functions/send-confirmation/*.html" ]
 
-[functions.pesapal-webhook]
-enabled = true
-verify_jwt = false
-
 [functions.mpesa-callback]
 enabled = true
 verify_jwt = false
