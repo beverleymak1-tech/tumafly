@@ -23,3 +23,9 @@ deno.lock
 *.bak
 supabase/.temp/
 one-off-emails/
+
+# wrangler files
+.wrangler
+.dev.vars*
+!.dev.vars.example
+!.env.example
