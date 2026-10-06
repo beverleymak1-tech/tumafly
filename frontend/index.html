@@ -22837,6 +22837,49 @@
       }
     }
 
+    // ── OTP precheck (Session 46 — closes KYC 1.16 per-IP truthfulness) ──
+    // Fetches otp-precheck EF before sb.auth.signInWithOtp / updateUser({phone})
+    // calls so per-IP throttling can run. send-otp handles per-phone; it cannot
+    // see the client IP because Supabase Auth calls it server-to-server via the
+    // Send-SMS hook. otp-precheck is client-called, sees real client IP via
+    // cf-connecting-ip/x-forwarded-for, so it's where per-IP enforcement lives.
+    //
+    // Fail-open posture mirrors the EF's own design: any network error here
+    // → proceed with the OTP call. Denying service when the throttle EF is
+    // unreachable is worse than degrading to send-otp's per-phone-only check.
+    //
+    // Session 55 will migrate the EF from {ok, throttled} to Canonical A
+    // ({throttled} only). This helper reads `throttled` directly, not `ok`,
+    // so it continues working across that shape migration unchanged.
+    //
+    // Returns { throttled: boolean, retryMessage?: string }
+    async function otpPrecheck(phone) {
+      try {
+        const res = await fetch(`${SUPABASE_URL}/functions/v1/otp-precheck`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${SUPABASE_ANON_KEY}`,
+          },
+          body: JSON.stringify({ phone }),
+        });
+        if (res.status === 429) {
+          const body = await res.json().catch(() => ({}));
+          const minutes = body.retry_after_minutes || 15;
+          return {
+            throttled: true,
+            retryMessage: `Too many code requests from this network. Please try again in ${minutes} minute${minutes === 1 ? '' : 's'}.`,
+          };
+        }
+        // 200 (fail-closed or fail-open per EF design), 4xx other, 5xx → proceed
+        return { throttled: false };
+      } catch (err) {
+        // Fetch itself threw (DNS, offline, CORS, etc.) — fail open
+        console.warn('[otp-precheck] fetch failed, failing open:', err);
+        return { throttled: false };
+      }
+    }
+
     // ── Phone OTP ────────────────────────────────────────────────
     async function sendOtp() {
       const sel = countryPickerState['auth'] || { iso: 'KE', dial: '+254' };
@@ -22861,6 +22904,10 @@
       btn.disabled = true; btn.textContent = 'Sending…';
 
       try {
+        // Session 46 — per-IP throttle check (KYC 1.16)
+        const pre = await otpPrecheck(pendingPhone);
+        if (pre.throttled) throw new Error(pre.retryMessage);
+
         const sb = await getSupabase();
         const { error } = await sb.auth.signInWithOtp({ phone: pendingPhone });
         if (error) throw error;
@@ -22885,11 +22932,15 @@
     async function resendOtp() {
       document.getElementById('auth-resend-btn').disabled = true;
       try {
+        //Session 46 - per-IP throttle check (KYC 1.16)
+        const pre = await otpPrecheck(pendingPhone);
+        if (pre.throttled) throw new Error(pre.retryMessage);
+
         const sb = await getSupabase();
         await sb.auth.signInWithOtp({ phone: pendingPhone });
         setTimeout(() => { document.getElementById('auth-resend-btn').disabled = false; }, 30000);
       } catch (e) {
-        showAuthError('auth-otp-error', 'Failed to resend. Please wait a moment.');
+        showAuthError('auth-otp-error', e.message || 'Failed to resend. Please wait a moment.');
         document.getElementById('auth-resend-btn').disabled = false;
       }
     }
@@ -23356,6 +23407,16 @@
     async function startPhoneChange(newPhone) {
       pendingPhoneChange = newPhone;
       try {
+        // Session 46 — per-IP throttle check (KYC 1.16)
+        const pre = await otpPrecheck(newPhone);
+        if (pre.throttled) {
+           const profMsg = document.getElementById('profile-msg');
+           profMsg.textContent = pre.retryMessage;
+           profMsg.style.color = 'var(--danger)';
+           pendingPhoneChange = null;
+           return;
+        }
+
         const sb = await getSupabase();
         // Supabase sends an SMS OTP to the new phone. auth.users.phone is NOT
         // updated yet — that only happens on successful verifyOtp(phone_change).
@@ -23467,11 +23528,15 @@
       const btn = document.getElementById('auth-pc-resend-btn');
       btn.disabled = true;
       try {
+        // Session 46 — per-IP throttle check (KYC 1.16)
+        const pre = await otpPrecheck(pendingPhoneChange);
+        if (pre.throttled) throw new Error(pre.retryMessage);
+
         const sb = await getSupabase();
         await sb.auth.updateUser({ phone: pendingPhoneChange });
         setTimeout(() => { btn.disabled = false; }, 30000);
       } catch (e) {
-        showAuthError('auth-pc-error', 'Failed to resend. Please wait a moment.');
+        showAuthError('auth-pc-error', e.message || 'Failed to resend. Please wait a moment.');
         btn.disabled = false;
       }
     }
