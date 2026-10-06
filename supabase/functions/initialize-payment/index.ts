@@ -524,6 +524,7 @@ serve(async (req) => {
             continue;
           }
           return new Response(JSON.stringify({
+            code: "STALE_BAGGAGE_PASSENGER",
             error: "A baggage selection isn't valid for the selected passenger. Please reselect.",
           }), {
             status: 409,
