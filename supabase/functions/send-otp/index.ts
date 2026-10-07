@@ -267,26 +267,57 @@ Deno.serve(async (req) => {
       body: formBody.toString(),
     });
 
-    const result = await atResponse.json();
-    // Session 35b S-04: removed console.log of AT response — result.SMSMessageData.Recipients
-    // may echo phone. Success is implicit from atResponse.status check below.
-
+    // Session 46.a (follow-up): check atResponse.ok BEFORE parsing JSON.
+    // AT returns PLAINTEXT error bodies on auth failures (e.g., "The supplied
+    // authentication is invalid" when AT_API_KEY is unset or wrong), which
+    // crash .json() with a SyntaxError. Pre-this-fix, that SyntaxError bubbled
+    // to the outer catch and returned generic 500 — but 502 is the correct
+    // status for AT failures, so we handle non-2xx first without parsing.
+    // Pre-migration this bug was masked by outer catch returning OK() 200.
     if (!atResponse.ok) {
-      // Session 46.a: AT delivery HTTP failure now surfaces as structured 502
-      // so the user sees "SMS service is temporarily unavailable" instead of
-      // a silent "code sent" message. Alert still fires for operator visibility.
-      console.error(`[send-otp] AT delivery failed status=${atResponse.status}`);
+      // Try to extract a message snippet for the alert, but don't require JSON
+      // (AT returns plaintext on auth failures; we don't want to crash again).
+      let atMessageSnippet = "(not parsed — non-2xx response)";
+      try {
+        const bodyText = await atResponse.text();
+        atMessageSnippet = bodyText.substring(0, 200);
+      } catch (_e) {
+        // ignore — body unreadable
+      }
+      console.error(`[send-otp] AT delivery failed status=${atResponse.status} snippet="${atMessageSnippet}"`);
       await alertFounder(
         "OTP_DELIVERY_FAILED",
         {
           phone_sha256:   await sha256Hex(phone),
           at_http_status: atResponse.status,
-          at_message:     typeof result?.SMSMessageData?.Message === "string" ? result.SMSMessageData.Message.substring(0, 200) : "no-message",
+          at_message:     atMessageSnippet,
         },
         `at_http_status:${atResponse.status}`,
       );
       return hookError(502, AT_UNAVAILABLE_ERROR);
     }
+
+    // 2xx response — now safe to parse as JSON. If AT misbehaves and returns
+    // 2xx with non-JSON body (shouldn't happen per their docs, but defensive),
+    // treat it as a delivery failure rather than crash.
+    let result: any;
+    try {
+      result = await atResponse.json();
+    } catch (e) {
+      console.error(`[send-otp] AT 2xx response not JSON:`, e instanceof Error ? e.message : e);
+      await alertFounder(
+        "OTP_DELIVERY_FAILED",
+        {
+          phone_sha256:   await sha256Hex(phone),
+          at_http_status: atResponse.status,
+          at_message:     "(2xx but non-JSON body)",
+        },
+        `at_http_status:${atResponse.status}_nonjson`,
+      );
+      return hookError(502, AT_UNAVAILABLE_ERROR);
+    }
+    // Session 35b S-04: removed console.log of AT response — result.SMSMessageData.Recipients
+    // may echo phone. Success is implicit from atResponse.status check above.
 
     const recipients = result?.SMSMessageData?.Recipients ?? [];
     const failed = recipients.filter((r: { status: string }) => r.status !== "Success");
