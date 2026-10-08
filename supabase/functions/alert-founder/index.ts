@@ -81,7 +81,8 @@ type AlertType =
   // page-worthy path is the one that will actually surface here (Supabase-side
   // webhooks fire on every real row change; probing is rare).
   | "WEBHOOK_SECRET_MISMATCH"
-  | "UNKNOWN_ALERT_TYPE";                  // S-02 fallback — unregistered alert_type received, rendered synthetically to avoid silent-drop
+  | "SYNTHETIC_HEALTH_CHECK_FAILED"
+  | "UNKNOWN_ALERT_TYPE";                // S-02 fallback — unregistered alert_type received, rendered synthetically to avoid silent-drop
 
 const ALERT_CONFIG: Record<AlertType, { severity: string; subject: string; action: string; dedup_cooldown_minutes?: number }> = {
   PAID_NO_OFFER: {
@@ -323,6 +324,13 @@ const ALERT_CONFIG: Record<AlertType, { severity: string; subject: string; actio
                             subject: "🚨 Webhook secret mismatch — refund or booking pipeline may be broken",
                             action: "A request to a webhook-target EF (webhook_source in context) arrived with an invalid or missing x-webhook-secret. If context.has_supabase_headers = true, this is SOP §1.5 rotation drift — the Supabase Database Webhook trigger's hardcoded header value has diverged from the EF's env var. Follow SOP §1.5 (PROCESS_DUFFEL_BOOKING_WEBHOOK_SECRET or REFUND_NOTIFICATION_WEBHOOK_SECRET procedure depending on webhook_source), including Step 7 end-to-end smoke. If has_supabase_headers = false, this is likely endpoint scanning; verify with context.client_ip and provided_secret_prefix (junk-shaped prefix confirms scanning). Query: SELECT date_trunc('hour', created_at), context->>'webhook_source', COUNT(*) FROM alerts WHERE alert_type = 'WEBHOOK_SECRET_MISMATCH' GROUP BY 1,2 ORDER BY 1 DESC LIMIT 24;",
                             dedup_cooldown_minutes: 1440, // §11 dedup per webhook_source per day. Real rotation drift keeps re-firing on every trigger — dedup collapses the storm to one alert per day per EF, until the operator fixes and Step 7 smoke confirms. Probing traffic collapses similarly (one per source per day).
+                        },
+                        // ── S-17 synthetic health-check (Session 46) ────────────────────────────
+                        SYNTHETIC_HEALTH_CHECK_FAILED: {
+                        severity: "⚠️ HIGH",
+                        subject: "Synthetic health check failed",
+                        action: "A3 synthetic probe to {probed_ef} returned non-2xx or wrong shape. Check A3 Function Logs for the probed EF around the probe timestamp. Common causes: sentinel short-circuit regression (TF-SYNHC-* request not short-circuited at EF entry), signature verification broken, EF cold-start failure, or upstream Supabase/Duffel/AT dependency outage. Do NOT promote staging to main until root cause is fixed. See RUNBOOK §YY (S-17 architecture + TF-SYNHC sentinel convention).",
+                        dedup_cooldown_minutes: 15,
                         },
                         // ── S-02 fallback: unregistered alert types render here (never silently dropped) ──
                         UNKNOWN_ALERT_TYPE: {
