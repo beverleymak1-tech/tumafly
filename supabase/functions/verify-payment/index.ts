@@ -42,6 +42,14 @@ const PAYSTACK_API_KEY = Deno.env.get("PAYSTACK_API_KEY")!;
 const PAYSTACK_MODE = (Deno.env.get("PAYSTACK_MODE") || "test").toLowerCase();
 const PAYSTACK_BASE_URL = "https://api.paystack.co";
 
+ // ── S-17 synthetic sentinel pattern (Session 46 Phase 5b) ─────────────────
+ // Probes carrying TF-SYNHC-{cron,manual}-* in the designated sentinel field
+ // short-circuit the handler with a canned 200. Reserved namespace — matches
+ // nothing a real customer could produce. No DB write, no upstream call, no
+ // side effect. Ships to prod bit-identical; prod never sees these probes
+ // because health-check-synthetic (Phase 5c) is A3-only. See RUNBOOK §YY.
+const SYNTHETIC_SENTINEL_PATTERN = /^TF-SYNHC-(cron|manual)-/;
+
 const CORS_HEADERS = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers": "authorization, content-type",
@@ -138,6 +146,20 @@ serve(async (req) => {
   } else {
     const body = await req.json().catch(() => ({}));
     reference = body.reference || body.ref || body.merchant_ref || "";
+  }
+
+  // ── S-17 synthetic sentinel short-circuit (Session 46 Phase 5b) ─────────
+  if (SYNTHETIC_SENTINEL_PATTERN.test(reference)) {
+    const probeSource = reference.startsWith("TF-SYNHC-cron-") ? "cron" : "manual";
+    return new Response(JSON.stringify({
+      synthetic: true,
+      probe_source: probeSource,
+      ef: "verify-payment",
+      ok: true,
+    }), {
+      status: 200,
+      headers: { ...CORS_HEADERS, "Content-Type": "application/json" },
+    });
   }
 
   if (!reference) {

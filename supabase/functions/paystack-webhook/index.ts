@@ -57,6 +57,14 @@ import {
   refundBooking,
 } from "../_shared/duffel-helpers.ts";
 
+// ── S-17 synthetic sentinel pattern (Session 46 Phase 5b) ─────────────────
+// Probes carrying TF-SYNHC-{cron,manual}-* in the designated sentinel field
+// short-circuit the handler with a canned 200. Reserved namespace — matches
+// nothing a real customer could produce. No DB write, no upstream call, no
+// side effect. Ships to prod bit-identical; prod never sees these probes
+// because health-check-synthetic (Phase 5c) is A3-only. See RUNBOOK §YY.
+const SYNTHETIC_SENTINEL_PATTERN = /^TF-SYNHC-(cron|manual)-/;
+
 // ── Signature verification ────────────────────────────────────────────────
 // Paystack signs webhooks with HMAC-SHA512, using YOUR SECRET KEY as the HMAC
 // key, computed over the raw request body (byte-exact — no JSON re-serialization).
@@ -532,6 +540,24 @@ serve(async (req) => {
     // since the payload is untrusted).
     return new Response(JSON.stringify({ error: "Invalid signature" }), {
       status: 401,
+      headers: { ...CORS_HEADERS, "Content-Type": "application/json" },
+    });
+  }
+
+  // ── S-17 synthetic sentinel short-circuit (Session 46 Phase 5b) ─────────
+  // Fires AFTER signature verification: probe must be signed with the real
+  // Paystack secret. Phase 5c (health-check-synthetic) runs A3-only and
+  // reads PAYSTACK_SECRET_KEY_TEST to sign probes.
+  const probeSentinelPW = event?.data?.reference;
+  if (typeof probeSentinelPW === "string" && SYNTHETIC_SENTINEL_PATTERN.test(probeSentinelPW)) {
+    const probeSource = probeSentinelPW.startsWith("TF-SYNHC-cron-") ? "cron" : "manual";
+    return new Response(JSON.stringify({
+      synthetic: true,
+      probe_source: probeSource,
+      ef: "paystack-webhook",
+      ok: true,
+    }), {
+      status: 200,
       headers: { ...CORS_HEADERS, "Content-Type": "application/json" },
     });
   }

@@ -65,6 +65,13 @@ const TUMAFLY_SERVICE_FEE_KES = 1500;
 const PAYSTACK_FEE_RATE = 0.0195;
 const PAYSTACK_FEE_FLAT_KES = 30;
 
+// ── S-17 synthetic sentinel pattern (Session 46 Phase 5b) ─────────────────
+// Probes carrying TF-SYNHC-{cron,manual}-* in the designated sentinel field
+// short-circuit the handler with a canned 200. Reserved namespace — matches
+// nothing a real customer could produce. No DB write, no upstream call, no
+// side effect. Ships to prod bit-identical; prod never sees these probes
+// because health-check-synthetic (Phase 5c) is A3-only. See RUNBOOK §YY.
+const SYNTHETIC_SENTINEL_PATTERN = /^TF-SYNHC-(cron|manual)-/;
 const CORS_HEADERS = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers": "authorization, content-type",
@@ -263,6 +270,21 @@ serve(async (req) => {
 
   try {
     const { offer_id, passengers, contact, seats, baggages, turnstile_token, expected_price_kes } = await req.json();
+
+    // ── S-17 synthetic sentinel short-circuit (Session 46 Phase 5b) ─────────
+    const probeSentinelIP = passengers?.[0]?.last_name;
+    if (typeof probeSentinelIP === "string" && SYNTHETIC_SENTINEL_PATTERN.test(probeSentinelIP)) {
+      const probeSource = probeSentinelIP.startsWith("TF-SYNHC-cron-") ? "cron" : "manual";
+      return new Response(JSON.stringify({
+        synthetic: true,
+        probe_source: probeSource,
+        ef: "initialize-payment",
+        ok: true,
+      }), {
+        status: 200,
+        headers: { ...CORS_HEADERS, "Content-Type": "application/json" },
+      });
+    }
 
     // 1. Validate required fields
     if (!offer_id || !passengers?.length || !contact?.email) {
