@@ -2,15 +2,28 @@
 // Supabase Auth "Send SMS" hook → Africa's Talking SMS delivery
 // Verifies webhook signature using Standard Webhooks spec (Supabase's format).
 //
-// Session 46.a: migrated failure paths from silent HTTP 200 {} to structured
-// errors matching the Supabase Auth hook contract schema:
+// Session 46.a: three-part migration from silent HTTP 200 {} on failures to
+// user-visible error messages, working around a gotrue action-hook limitation.
+//
+// Part 1 — Structured errors on failure paths. Hook returns proper HTTP
+// status codes (429/500/502) with Supabase's documented error schema:
 //   { error: { http_code: NNN, message: "..." } }
-// Supabase Auth propagates these to the frontend's signInWithOtp() catch block
-// as the error.message. Previously the EF returned HTTP 200 {} on nearly every
-// non-happy path (throttle hit, AT API failure, missing payload, outer catch),
-// resulting in silent-degrade UX — frontend showed "we sent a code" while
-// nothing arrived. Research confirmed Supabase Auth propagates non-200 cleanly
-// when the body matches this schema.
+// Previously the EF returned 200 {} on nearly every non-happy path, causing
+// silent-degrade UX (frontend showed "we sent a code" while nothing arrived).
+//
+// Part 2 — Discovered during Phase D smoke: Supabase Auth action hooks
+// (send_sms, send_email) hardcode-mask hook response bodies with generic
+// strings regardless of schema compliance:
+//   non-200       -> "Service currently unavailable due to hook"
+//   500           -> "Unexpected status code returned from hook: 500"
+// This is architectural in gotrue, not fixable from the EF. See Session 46.a
+// close bundle for the gotrue code-path research.
+//
+// Part 3 — Side-channel workaround. For failure paths where phone is
+// reliably available (#4, #5, #6, #7), the EF upserts a row into
+// public.otp_delivery_errors with the user-facing message. Frontend intercepts
+// gotrue's mask strings in signInWithOtp() catch and queries this table by
+// phone to display the real message. See migrations/session_s46a_otp_delivery_errors_table.sql.
 //
 // Paths unchanged:
 //   - Happy path: HTTP 200 {}                        (hook contract success)
@@ -99,6 +112,46 @@ async function countPhoneAttempts(phone: string, minutes: number): Promise<numbe
   }
 }
 
+// ─── Session 46.a side-channel: write to otp_delivery_errors ─────────────────
+// Supabase Auth action hooks hardcode-mask our structured error bodies with
+// generic strings ("Service currently unavailable due to hook", "Unexpected
+// status code returned from hook: 500"), so user never sees our retry/reason
+// message directly from the hook response. Workaround: upsert the message
+// here, frontend queries this table on gotrue mask detection and displays
+// user_message. See migrations/session_s46a_otp_delivery_errors_table.sql.
+//
+// Fire-and-forget: a DB failure here must not block the hookError return.
+async function recordDeliveryError(
+  phone: string,
+  reason: "throttled_15m" | "throttled_24h" | "at_delivery_failed" | "at_recipient_failed",
+  userMessage: string,
+  retryAvailableAt: Date | null,
+): Promise<void> {
+  try {
+    const res = await fetch(`${SUPABASE_URL}/rest/v1/otp_delivery_errors`, {
+      method:  "POST",
+      headers: {
+        "apikey":        SERVICE_ROLE_KEY,
+        "Authorization": `Bearer ${SERVICE_ROLE_KEY}`,
+        "Content-Type":  "application/json",
+        "Prefer":        "resolution=merge-duplicates,return=minimal",
+      },
+      body: JSON.stringify({
+        phone_number:       phone,
+        retry_available_at: retryAvailableAt ? retryAvailableAt.toISOString() : null,
+        last_reason:        reason,
+        user_message:       userMessage,
+        updated_at:         new Date().toISOString(),
+      }),
+    });
+    if (!res.ok) {
+      console.error(`[send-otp] recordDeliveryError non-2xx: status=${res.status} reason=${reason}`);
+    }
+  } catch (e) {
+    console.error(`[send-otp] recordDeliveryError threw:`, e instanceof Error ? e.message : e);
+  }
+}
+
 // Record a phone attempt in otp_attempts.
 async function recordPhoneAttempt(phone: string): Promise<void> {
   try {
@@ -145,8 +198,13 @@ const hookError = (httpCode: number, message: string) =>
     },
   );
 
-const GENERIC_INTERNAL_ERROR = "Something went wrong sending your code. Please try again.";
-const AT_UNAVAILABLE_ERROR   = "SMS service is temporarily unavailable. Please try again shortly.";
+// User-facing message copy — Session 46.a (final table, Bev-signed-off).
+// These are the strings the user actually sees after Supabase Auth's hook-mask
+// is intercepted by the frontend. hookError() returns them in the structured
+// response (which gotrue masks away) AND recordDeliveryError() stores them
+// in the side-channel table for the frontend to read.
+const GENERIC_INTERNAL_ERROR = "Something went wrong sending your code. Please try again, or use another sign-in option.";
+const AT_UNAVAILABLE_ERROR   = "SMS service is temporarily unavailable. Please try again shortly, or use another sign-in option.";
 
 // ─── Handler ─────────────────────────────────────────────────────────────────
 Deno.serve(async (req) => {
@@ -213,6 +271,7 @@ Deno.serve(async (req) => {
     if (count15m !== null && count15m >= PHONE_WINDOW_15M_LIMIT) {
       console.warn(`[send-otp] throttle HIT (15m window): phone_15m=${count15m} limit=${PHONE_WINDOW_15M_LIMIT}`);
       const hashedPhone = await sha256Hex(phone);
+      const userMessage = `Too many requests. Please try again in ${PHONE_WINDOW_15M_MINUTES} minutes.`;
       await alertFounder("OTP_THROTTLE_HIT", {
         scope:              "phone",
         scope_value_sha256: hashedPhone,
@@ -220,15 +279,20 @@ Deno.serve(async (req) => {
         limit:              PHONE_WINDOW_15M_LIMIT,
         observed_count:     count15m,
       }, `phone:${hashedPhone}`);
-      return hookError(
-        429,
-        `Too many requests. Please try again in ${PHONE_WINDOW_15M_MINUTES} minutes.`,
+      // Session 46.a side-channel: write message for frontend to display.
+      await recordDeliveryError(
+        phone,
+        "throttled_15m",
+        userMessage,
+        new Date(Date.now() + PHONE_WINDOW_15M_MINUTES * 60 * 1000),
       );
+      return hookError(429, userMessage);
     }
 
     if (count24h !== null && count24h >= PHONE_WINDOW_24H_LIMIT) {
       console.warn(`[send-otp] throttle HIT (24h window): phone_24h=${count24h} limit=${PHONE_WINDOW_24H_LIMIT}`);
       const hashedPhone = await sha256Hex(phone);
+      const userMessage = "Too many requests. Please try again in 24 hours, or use another sign-in option.";
       await alertFounder("OTP_THROTTLE_HIT", {
         scope:              "phone",
         scope_value_sha256: hashedPhone,
@@ -236,10 +300,14 @@ Deno.serve(async (req) => {
         limit:              PHONE_WINDOW_24H_LIMIT,
         observed_count:     count24h,
       }, `phone:${hashedPhone}`);
-      return hookError(
-        429,
-        "Too many requests. Please try again in 24 hours.",
+      // Session 46.a side-channel: write message for frontend to display.
+      await recordDeliveryError(
+        phone,
+        "throttled_24h",
+        userMessage,
+        new Date(Date.now() + PHONE_WINDOW_24H_MINUTES * 60 * 1000),
       );
+      return hookError(429, userMessage);
     }
 
     // Under both limits — record this attempt, then proceed to SMS send.
@@ -294,6 +362,13 @@ Deno.serve(async (req) => {
         },
         `at_http_status:${atResponse.status}`,
       );
+      // Session 46.a side-channel: write message for frontend to display.
+      await recordDeliveryError(
+        phone,
+        "at_delivery_failed",
+        AT_UNAVAILABLE_ERROR,
+        null,
+      );
       return hookError(502, AT_UNAVAILABLE_ERROR);
     }
 
@@ -313,6 +388,13 @@ Deno.serve(async (req) => {
           at_message:     "(2xx but non-JSON body)",
         },
         `at_http_status:${atResponse.status}_nonjson`,
+      );
+      // Session 46.a side-channel: write message for frontend to display.
+      await recordDeliveryError(
+        phone,
+        "at_delivery_failed",
+        AT_UNAVAILABLE_ERROR,
+        null,
       );
       return hookError(502, AT_UNAVAILABLE_ERROR);
     }
@@ -336,6 +418,15 @@ Deno.serve(async (req) => {
           at_message:     typeof firstFailed?.status === "string" ? firstFailed.status.substring(0, 200) : "no-status",
         },
         `at_status_code:${firstFailed?.statusCode ?? 0}`,
+      );
+      // Session 46.a side-channel: distinct message for recipient-level failure
+      // (AT accepted but delivery failed) — likely bad number format or blocked
+      // carrier, so point user at the number as the thing to fix.
+      await recordDeliveryError(
+        phone,
+        "at_recipient_failed",
+        "We couldn't send a code to this number. Please check it's correct or try a different number.",
+        null,
       );
       return hookError(502, AT_UNAVAILABLE_ERROR);
     }

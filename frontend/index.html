@@ -22880,6 +22880,55 @@
       }
     }
 
+    // ── Hook-mask interception (Session 46.a — side-channel for action hooks) ──
+    // Supabase Auth action hooks (send_sms, send_email) hardcode-mask hook
+    // response bodies with generic strings ("Service currently unavailable due
+    // to hook", "Unexpected status code returned from hook: NNN") regardless of
+    // whether the hook returns the documented {error: {http_code, message}}
+    // schema. send-otp writes the real user-facing message to
+    // public.otp_delivery_errors; this helper queries that side-channel when
+    // gotrue's mask is detected and returns the real message, falling back to
+    // a unified string if no row exists.
+    //
+    // Called from the catch blocks of sendOtp(), resendOtp(), startPhoneChange().
+    // See supabase/functions/send-otp/index.ts recordDeliveryError() for the
+    // backend write side, and migrations/session_s46a_otp_delivery_errors_table.sql.
+    //
+    // Phone format: Supabase Auth strips the "+" prefix before passing to the
+    // hook, so send-otp writes rows with the no-plus form. Strip here too.
+    const GOTRUE_HOOK_MASK_RE = /Service currently unavailable due to hook|Unexpected status code returned from hook/i;
+    const SMS_UNIFIED_FALLBACK = 'Something went wrong sending your code. Please try again, or use another sign-in option.';
+
+    async function resolveHookErrorMessage(error, phoneE164) {
+      const raw = (error && error.message) || '';
+      if (!GOTRUE_HOOK_MASK_RE.test(raw)) {
+        // Not a gotrue mask — pass through whatever Supabase said.
+        return raw || 'Something went wrong. Please try again.';
+      }
+      // gotrue masked our structured message. Query side-channel.
+      const noPlusPhone = phoneE164.startsWith('+') ? phoneE164.slice(1) : phoneE164;
+      try {
+        const url = `${SUPABASE_URL}/rest/v1/otp_delivery_errors`
+          + `?phone_number=eq.${encodeURIComponent(noPlusPhone)}`
+          + `&select=user_message`;
+        const res = await fetch(url, {
+          headers: {
+            'apikey':        SUPABASE_ANON_KEY,
+            'Authorization': `Bearer ${SUPABASE_ANON_KEY}`,
+          },
+        });
+        if (res.ok) {
+          const rows = await res.json();
+          if (rows && rows[0] && rows[0].user_message) {
+            return rows[0].user_message;
+          }
+        }
+      } catch (err) {
+        console.warn('[auth] side-channel lookup failed:', err);
+      }
+      return SMS_UNIFIED_FALLBACK;
+    }
+
     // ── Phone OTP ────────────────────────────────────────────────
     async function sendOtp() {
       const sel = countryPickerState['auth'] || { iso: 'KE', dial: '+254' };
@@ -22923,7 +22972,9 @@
         });
         document.querySelector('.otp-digit').focus();
       } catch (e) {
-        showAuthError('auth-choose-error', e.message || 'Failed to send code. Try again.');
+        // Session 46.a: resolve gotrue hook mask via side-channel if present.
+        const msg = await resolveHookErrorMessage(e, pendingPhone);
+        showAuthError('auth-choose-error', msg);
       } finally {
         btn.disabled = false; btn.textContent = 'Continue';
       }
@@ -22940,7 +22991,9 @@
         await sb.auth.signInWithOtp({ phone: pendingPhone });
         setTimeout(() => { document.getElementById('auth-resend-btn').disabled = false; }, 30000);
       } catch (e) {
-        showAuthError('auth-otp-error', e.message || 'Failed to resend. Please wait a moment.');
+        // Session 46.a: resolve gotrue hook mask via side-channel if present.
+        const msg = await resolveHookErrorMessage(e, pendingPhone);
+        showAuthError('auth-otp-error', msg);
         document.getElementById('auth-resend-btn').disabled = false;
       }
     }
@@ -23424,9 +23477,12 @@
         if (error) {
           // Common case: phone already belongs to another auth user. Friendly
           // message rather than the raw Supabase string.
-          const msg = (error.message || '').toLowerCase().includes('already')
+          // Session 46.a: for gotrue-masked SMS hook errors, consult side-channel
+          // instead of showing the raw mask string.
+          const lowerMsg = (error.message || '').toLowerCase();
+          const msg = lowerMsg.includes('already')
             ? 'This phone is already linked to another account. If it\'s yours, sign out and sign in with that number.'
-            : (error.message || 'Could not start phone verification. Please try again.');
+            : await resolveHookErrorMessage(error, newPhone);
           const profMsg = document.getElementById('profile-msg');
           profMsg.textContent = msg; profMsg.style.color = 'var(--danger)';
           pendingPhoneChange = null;
@@ -23446,8 +23502,10 @@
         });
         document.querySelector('.pc-digit').focus();
       } catch (e) {
+        // Session 46.a: resolve gotrue hook mask via side-channel if present.
+        const msg = await resolveHookErrorMessage(e, newPhone);
         const profMsg = document.getElementById('profile-msg');
-        profMsg.textContent = e.message || 'Could not start phone verification.';
+        profMsg.textContent = msg;
         profMsg.style.color = 'var(--danger)';
         pendingPhoneChange = null;
       }
