@@ -340,11 +340,32 @@ const ALERT_CONFIG: Record<AlertType, { severity: string; subject: string; actio
                         },
       };
 
+// ── Template-var substitution (Session 46 Phase 5a) ──────────────────────
+// Caller supplies template_vars; subject + action strings get {varname}
+// placeholders replaced. Missing keys left as-is (visible failure, not silent).
+// Used by SYNTHETIC_HEALTH_CHECK_FAILED's {probed_ef} and available to any
+// future alert type that wants per-fire parameterisation. Severity and
+// dedup_cooldown_minutes are intentionally NOT templated — they're alert
+// identity, not caller data.
+function applyTemplateVars(
+  s: string,
+  vars: Record<string, unknown> | undefined,
+): string {
+  if (!vars || typeof vars !== "object") return s;
+  return s.replace(/\{(\w+)\}/g, (m, k) => {
+    const v = (vars as Record<string, unknown>)[k];
+    return v !== undefined && v !== null ? String(v) : m;
+  });
+}
+
 function buildEmailHtml(
   alertType: AlertType,
   context: Record<string, unknown>,
+  templateVars?: Record<string, unknown>,
 ): string {
   const cfg = ALERT_CONFIG[alertType];
+  const resolvedSubject = applyTemplateVars(cfg.subject, templateVars);
+  const resolvedAction  = applyTemplateVars(cfg.action,  templateVars);
   const contextRows = Object.entries(context)
     .map(([k, v]) => `<tr>
       <td style="padding:6px 12px;color:#666;font-family:monospace;font-size:12px;border-bottom:1px solid #eee;vertical-align:top;">${k}</td>
@@ -361,14 +382,14 @@ function buildEmailHtml(
     <tr>
       <td style="background:#dc2626;color:#fff;padding:20px 24px;">
         <div style="font-size:13px;opacity:0.9;font-weight:600;letter-spacing:0.05em;">${cfg.severity}</div>
-        <div style="font-size:20px;font-weight:700;margin-top:4px;">${cfg.subject}</div>
+<div style="font-size:20px;font-weight:700;margin-top:4px;">${resolvedSubject}</div>
         <div style="font-size:12px;opacity:0.85;margin-top:4px;">Alert type: ${alertType}</div>
       </td>
     </tr>
     <tr>
       <td style="padding:20px 24px;border-bottom:1px solid #eee;">
         <div style="font-size:13px;color:#666;text-transform:uppercase;font-weight:600;margin-bottom:8px;">Action required</div>
-        <div style="font-size:15px;color:#111;line-height:1.5;">${cfg.action}</div>
+<div style="font-size:15px;color:#111;line-height:1.5;">${resolvedAction}</div>
       </td>
     </tr>
     <tr>
@@ -407,7 +428,7 @@ serve(async (req) => {
   }
 
   try {
-      const { alert_type, context, dedup_key: providedDedupKey } = await req.json();
+      const { alert_type, context, dedup_key: providedDedupKey, template_vars } = await req.json();
 
     // Hard-guard: alert_type must be present. Empty is a caller bug, not an
     // unknown-type (which S-02 now handles gracefully below).
@@ -481,7 +502,8 @@ serve(async (req) => {
         let emailData: { id?: string; [k: string]: unknown } = {};
 
         if (!suppressed) {
-          const html = buildEmailHtml(effectiveType, contextForEmail);
+          const resolvedSubject = applyTemplateVars(cfg.subject, template_vars);
+          const html = buildEmailHtml(effectiveType, contextForEmail, template_vars);
           emailRes = await fetch("https://api.resend.com/emails", {
             method: "POST",
             headers: {
@@ -491,7 +513,7 @@ serve(async (req) => {
             body: JSON.stringify({
               from: "TumaFly Alerts <alerts@tumafly.com>",
               to: [FOUNDER_EMAIL],
-              subject: isKnown ? `${cfg.severity} ${cfg.subject}` : `${cfg.severity} ${cfg.subject} — ${alert_type}`,
+              subject: isKnown ? `${cfg.severity} ${resolvedSubject}` : `${cfg.severity} ${resolvedSubject} — ${alert_type}`,
               html,
             }),
           });
