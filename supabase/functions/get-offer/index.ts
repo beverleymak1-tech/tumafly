@@ -200,7 +200,7 @@ serve(async (req) => {
       // Network-level failure — distinguishable from offer-expired so the
       // frontend can show "Could not connect" rather than "fare expired".
       return new Response(JSON.stringify({
-        error: { message: "Could not reach Duffel. Please check your network and try again." },
+        error: "Could not reach Duffel. Please check your network and try again.",
       }), { status: 502, headers: CORS_HEADERS });
     }
 

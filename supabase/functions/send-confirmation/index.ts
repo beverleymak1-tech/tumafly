@@ -10,6 +10,7 @@ import { auditLog } from "../_shared/duffel-helpers.ts";
 // never includes `to` (the customer's email address) — SOP §6.
 
 const RESEND_API_KEY = Deno.env.get("RESEND_API_KEY");
+const SERVICE_ROLE_KEY = Deno.env.get("SERVICE_ROLE_KEY")!;
 
 const CORS_HEADERS = {
   "Access-Control-Allow-Origin": "*",
@@ -486,6 +487,21 @@ function renderHtml(payload: any): string {
 serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response("ok", { headers: CORS_HEADERS });
+  }
+
+  // Session 46 — inline auth check. verify_jwt=false in config.toml so
+  // Supabase does not gate; without this, anyone with the anon key could
+  // POST and trigger Resend email dispatch (quota abuse + spam vector).
+  // Mirrors alert-founder's inline-compare pattern. Both legitimate callers
+  // (process-duffel-booking, mpesa-callback) send
+  // `Authorization: Bearer ${SERVICE_ROLE_KEY}` per RUNBOOK §1.6.
+  // Per docs/security/ef_response_shape_canonical.md §8.8 + §5.1 item 3.
+  const authHeader = req.headers.get("Authorization") || "";
+  if (!authHeader.includes(SERVICE_ROLE_KEY)) {
+    return new Response(JSON.stringify({ error: "Unauthorized" }), {
+      status: 401,
+      headers: { ...CORS_HEADERS, "Content-Type": "application/json" },
+    });
   }
 
   // Captured outside the try block's inner scope so the catch handler can
