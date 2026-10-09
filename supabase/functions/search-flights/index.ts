@@ -12,6 +12,13 @@ const FALLBACK_RATES: Record<string, number> = {
   GBP: 170, USD: 130, EUR: 140, AED: 35, QAR: 36,
 };
 
+// ── S-17 synthetic sentinel pattern (Session 46 Phase 5b) ─────────────────
+// Probes carrying TF-SYNHC-{cron,manual}-* in the designated sentinel field
+// short-circuit the handler with a canned 200. Reserved namespace — matches
+// nothing a real customer could produce. No DB write, no upstream call, no
+// side effect. Ships to prod bit-identical; prod never sees these probes
+// because health-check-synthetic (Phase 5c) is A3-only. See RUNBOOK §YY.
+const SYNTHETIC_SENTINEL_PATTERN = /^TF-SYNHC-(cron|manual)-/;
 const CORS_HEADERS = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers": "authorization, content-type",
@@ -212,7 +219,24 @@ serve(async (req) => {
   }
 
   try {
-    const { origin, destination, date, return_date, passengers = 1, passenger_types, turnstile_token } = await req.json();
+    const { origin, destination, date, return_date, passengers = 1, passenger_types, turnstile_token, _probe } = await req.json();
+
+    // ── S-17 synthetic sentinel short-circuit (Session 46 Phase 5b) ─────────
+    // search-flights uses a dedicated _probe field because every business
+    // field has strict validation (IATA codes, date formats). Short-circuits
+    // before turnstile verification — the sentinel IS the probe's auth.
+    if (typeof _probe === "string" && SYNTHETIC_SENTINEL_PATTERN.test(_probe)) {
+      const probeSource = _probe.startsWith("TF-SYNHC-cron-") ? "cron" : "manual";
+      return new Response(JSON.stringify({
+        synthetic: true,
+        probe_source: probeSource,
+        ef: "search-flights",
+        ok: true,
+      }), {
+        status: 200,
+        headers: { ...CORS_HEADERS, "Content-Type": "application/json" },
+      });
+    }
 
     // §4.7 — Resolve the passengers array for Duffel. Frontend sends
     // passenger_types as the authoritative shape (built by
