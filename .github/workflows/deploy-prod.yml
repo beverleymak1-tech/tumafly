@@ -122,22 +122,46 @@ jobs:
 
       - name: List functions to be deployed
         run: |
-          echo "::group::Functions in supabase/functions/"
-          ls -1 supabase/functions/ | grep -v '^_shared$' | sort
-          COUNT=$(ls -1 supabase/functions/ | grep -v '^_shared$' | wc -l)
+          # health-check-synthetic is A3-only (S-17 Phase 5c). Excluded from
+          # prod deploy here; EF also runtime-refuses to run if SUPABASE_URL
+          # doesn't match the A3 project ref (belt + suspenders).
+          echo "::group::Functions in supabase/functions/ (excludes _shared + health-check-synthetic)"
+          ls -1 supabase/functions/ | grep -vE '^(_shared|health-check-synthetic)$' | sort
+          COUNT=$(ls -1 supabase/functions/ | grep -vE '^(_shared|health-check-synthetic)$' | wc -l)
           echo "::endgroup::"
           echo "Expected deploy count: $COUNT"
+          echo "::notice::health-check-synthetic excluded from prod deploy (A3-only; see RUNBOOK §YY)"
 
-      - name: Deploy all EFs to Production
+      - name: Deploy EFs to Production (excludes health-check-synthetic)
         env:
           SUPABASE_ACCESS_TOKEN: ${{ secrets.TUMAFLY_PROD_CLI }}
           PROJECT_REF: wmplcauhaqtyenwvkrkq
         run: |
-          supabase functions deploy \
-            --project-ref "$PROJECT_REF" \
-            --no-verify-jwt
-        # --no-verify-jwt matches the current manual deploy flag. Individual
-        # EFs enforce their own auth via Authorization header checks.
+          # Deploy functions one at a time, skipping _shared (not an EF) and
+          # health-check-synthetic (A3-only, S-17 Phase 5c). If the Supabase
+          # CLI gets a bulk-deploy-with-exclude flag in the future, this
+          # loop can be swapped for a single invocation.
+          #
+          # --no-verify-jwt matches the current manual deploy flag.
+          # Individual EFs enforce their own auth via Authorization checks.
+          FAILED=0
+          for fn in $(ls -1 supabase/functions/ | grep -vE '^(_shared|health-check-synthetic)$' | sort); do
+            echo "::group::Deploying $fn"
+            if supabase functions deploy "$fn" \
+                --project-ref "$PROJECT_REF" \
+                --no-verify-jwt; then
+              echo "  ✓ $fn deployed"
+            else
+              echo "::error::Failed to deploy $fn"
+              FAILED=$((FAILED + 1))
+            fi
+            echo "::endgroup::"
+          done
+          if [ "$FAILED" -gt 0 ]; then
+            echo "::error::$FAILED EF(s) failed to deploy — see per-function logs above"
+            exit 1
+          fi
+          echo "All EFs deployed successfully."
 
       - name: Post-deploy summary
         if: always()
