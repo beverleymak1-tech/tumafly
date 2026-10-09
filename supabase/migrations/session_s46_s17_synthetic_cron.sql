@@ -25,7 +25,7 @@
 -- ─── WHAT IT DOES ─────────────────────────────────────────────────────────
 -- Every 5 min, pg_cron calls:
 --   POST https://nljxqcrmmkodbzsrzdba.supabase.co/functions/v1/health-check-synthetic
---     Headers: Authorization: Bearer <vault.SERVICE_ROLE_KEY>
+--     Headers: Authorization: Bearer <vault.service_role_key>
 --              Content-Type:  application/json
 --     Body:    {"mode":"cron"}
 --     Timeout: 30s
@@ -72,7 +72,7 @@ BEGIN
   WHERE jobname = 's17-synthetic-health-check';
 
   -- Schedule: every 5 min, invoke health-check-synthetic with {"mode":"cron"}.
-  -- Auth via vault.SERVICE_ROLE_KEY (same convention as Session 39 crons).
+  -- Auth via vault.service_role_key (same convention as Session 39 crons).
   PERFORM cron.schedule(
     's17-synthetic-health-check',
     '*/5 * * * *',
