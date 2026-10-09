@@ -154,7 +154,7 @@ serve(async (req) => {
     return new Response(JSON.stringify({
       synthetic: true,
       probe_source: probeSource,
-	ef: "verify-payment-BROKEN",
+	ef: "verify-payment",
       ok: true,
     }), {
       status: 200,

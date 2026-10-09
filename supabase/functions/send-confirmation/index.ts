@@ -531,7 +531,7 @@ serve(async (req) => {
       return new Response(JSON.stringify({
         synthetic: true,
         probe_source: probeSource,
-        ef: "send-confirmation-BROKEN",
+        ef: "send-confirmation",
         ok: true,
       }), {
         status: 200,

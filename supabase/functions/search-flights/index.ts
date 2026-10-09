@@ -230,7 +230,7 @@ serve(async (req) => {
       return new Response(JSON.stringify({
         synthetic: true,
         probe_source: probeSource,
-        ef: "search-flights-BROKEN",
+        ef: "search-flights",
         ok: true,
       }), {
         status: 200,
