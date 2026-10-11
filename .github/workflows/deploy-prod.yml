@@ -66,9 +66,14 @@ jobs:
           A3_TURNSTILE_SITEKEY="1x00000000000000000000AA"
           VIOLATIONS=0
 
+          # Exclude health-check-synthetic/ — the S-17 probe EF deliberately
+          # contains the A3 ref as Layer 2 runtime refuse (if it ever reaches
+          # prod it checks SUPABASE_URL and refuses). Three-layer isolation
+          # by design, not a leak. See RUNBOOK §YY (S-17 Architecture).
           if grep -rn "$A3_PROJECT_REF" \
               --include='*.html' --include='_headers' \
               --include='*.ts' --include='*.js' --include='*.toml' \
+              --exclude-dir='health-check-synthetic' \
               frontend/ supabase/ 2>/dev/null; then
             echo "::error::A3 project ref '$A3_PROJECT_REF' found on main."
             VIOLATIONS=$((VIOLATIONS + 1))
