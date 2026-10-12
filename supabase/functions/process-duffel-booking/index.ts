@@ -204,6 +204,20 @@ serve(async (req) => {
 
   const supabase = createClient(SUPABASE_URL, SERVICE_ROLE_KEY);
 
+  // S48 (spec section 4.2) — TEMPORARY retry-schedule instrumentation.
+  // Captures (received_at, request_id, pending_booking_id, user_agent) at
+  // the handler head so we can measure Supabase DB-webhook retry schedule
+  // empirically during A3 soak. Removed in Session 49 close bundle along
+  // with the tempmetric_pdb_invocations table.
+  // Never throws — instrumentation must not block real work.
+  try {
+    await supabase.from("tempmetric_pdb_invocations").insert({
+      pending_booking_id: pendingId,
+      request_id: req.headers.get("x-request-id"),
+      user_agent: req.headers.get("user-agent"),
+    });
+  } catch (_) { /* instrumentation only */ }
+
   try {
     // 4. Entry-point double-fire guard: re-read live status
     // S-14b: read via pending_bookings_decrypted so pending.passengers is plaintext
@@ -228,6 +242,22 @@ serve(async (req) => {
       );
       // 200 — don't retry a nonexistent row.
       return new Response("ok", { status: 200, headers: CORS_HEADERS });
+    }
+
+    // S48 (spec section 4.2) — pre-flight idempotency check. Short-circuits
+    // retry-stampedes where a prior invocation already set duffel_order_id.
+    // Normally the step-11 compare-and-set atomic UPDATE moves status past
+    // duffel_pending at the same time as setting duffel_order_id, so the
+    // entry guard below catches most retries. This additional check covers
+    // the rare case where duffel_order_id is set but status is still at
+    // duffel_pending (backfill, future surface changes, manual intervention).
+    if (pending.duffel_order_id
+        && ["duffel_pending", "pnr_issued", "booked"].includes(pending.status)) {
+      console.log(`[process-duffel-booking] Idempotent replay: duffel_order_id=${pending.duffel_order_id} already set, status=${pending.status}, bailing clean (${pending.merchant_ref})`);
+      return new Response(
+        JSON.stringify({ idempotent_replay: true }),
+        { status: 200, headers: { ...CORS_HEADERS, "Content-Type": "application/json" } },
+      );
     }
 
     if (pending.status !== "duffel_pending") {
@@ -435,6 +465,7 @@ serve(async (req) => {
               currency: offer.total_currency,
               amount: orderTotalAmount,
             }],
+            metadata: { pending_booking_id: pending.id },  // S48: race-proof back-reference for duffel-webhook (spec §2.3)
           },
         }),
       });

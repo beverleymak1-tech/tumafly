@@ -25,6 +25,10 @@ type AlertType =
   | "PRICE_DRIFT"                          // Duffel offer price shifted >1% between search and payment init; customer prompted to re-confirm at new price
   | "PAYMENT_FAILED"                       // payment didn't complete (informational only)
   | "UNHANDLED_ERROR"                      // webhook crashed
+  | "DUFFEL_ORDER_WEBHOOK_RACE"            // S48: handler couldn't resolve event by order_id OR metadata (rare post-metadata)
+  | "DUFFEL_ORDER_UNKNOWN_ORIGIN"          // S48: Duffel event with no matching pending_booking after reconciler window
+  | "DUFFEL_WEBHOOK_PERSIST_FAILED"        // S48: eager-capture UPSERT into duffel_webhook_events failed
+  | "DUFFEL_UNEXPECTED_ROW_STATE"          // S48: pending_bookings row in state handler did not expect (replaces UNHANDLED_ERROR for L328-340, L367-377 per spec §5.2)
   // Batch 2 refund automation (Session 25)
   | "REFUND_DB_INSERT_FAILED"              // refundBooking() couldn't insert refunds row (non-duplicate)
   | "REFUND_API_FAILED"                    // Paystack /refund non-2xx
@@ -99,6 +103,31 @@ const ALERT_CONFIG: Record<AlertType, { severity: string; subject: string; actio
     severity: "⚠️ HIGH",
     subject: "Ticket issued but DB write failed",
     action: "Manually insert booking record. Ticket is valid in Duffel — customer is OK, but our records are out of sync.",
+  },
+  // ── S48 Duffel-webhook redesign (spec §5.1) ─────────────────────────────
+  DUFFEL_ORDER_WEBHOOK_RACE: {
+    severity: "ℹ️ INFO",
+    subject: "[TumaFly] Duffel order webhook race (resolved automatically)",
+    action: "Informational. The event will be picked up by the next reconciler sweep. Alert dedupes aggressively — if volume climbs, process-duffel-booking's UPDATE latency may be regressing OR metadata is being stripped by Duffel.",
+    dedup_cooldown_minutes: 1440,  // §11 (S35b) — one per day; this is designed-noise, not operator signal
+  },
+  DUFFEL_ORDER_UNKNOWN_ORIGIN: {
+    severity: "⚠️ HIGH",
+    subject: "[TumaFly] Duffel order received with no matching pending_booking",
+    action: "Check duffel_webhook_events for the event_id in payload. If the order was created via Duffel Dashboard, mark the event row outcome='external_order'. If not, investigate — likely a bug in process-duffel-booking's duffel_order_id OR metadata write path.",
+    dedup_cooldown_minutes: 60,  // §11 (S35b) — per-event_id dedup via caller; 1h cooldown enough for operator ack
+  },
+  DUFFEL_WEBHOOK_PERSIST_FAILED: {
+    severity: "🚨 CRITICAL",
+    subject: "[TumaFly] duffel-webhook could not persist incoming event",
+    action: "duffel_webhook_events UPSERT failed. Duffel will retry delivery. Check DB health, Vault availability, and alert-founder for upstream health signals.",
+    dedup_cooldown_minutes: 15,  // §11 (S35b) — retry-cycle noise ok; sustained outage keeps re-firing (desired)
+  },
+  DUFFEL_UNEXPECTED_ROW_STATE: {
+    severity: "⚠️ HIGH",
+    subject: "[TumaFly] duffel-webhook saw pending_booking row in unexpected state",
+    action: "pending_booking row did not match the state the handler branched into (e.g. order.created event arrived for a row already past duffel_pending, or a lookup by metadata resolved to a wrong state). Replaces former UNHANDLED_ERROR CRITICAL fires at duffel-webhook L328-340 and L367-377 (spec §5.2). Check duffel_webhook_events + pending_bookings for the referenced pending_booking_id to reconstruct.",
+    dedup_cooldown_minutes: 60,  // §11 (S35b) — per pending_booking_id dedup via caller; 1h operator-ack window
   },
   AMOUNT_MISMATCH: {
     severity: "⚠️ HIGH",

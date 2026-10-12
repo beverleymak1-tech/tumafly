@@ -16,17 +16,24 @@
 // Signature header: X-Duffel-Signature, format t=<ts>,v1=<hex>.
 // 5-minute timestamp window for replay protection.
 //
-// Idempotency:
-//   - Duffel replays webhooks on our non-2xx. Our handler is idempotent:
-//     compare-and-set transitions, pre-INSERT existence check on bookings,
-//     confirmation_email_sent_at atomic guard.
-//   - Same-event replays land at a row that's already at booked/pnr_issued/
-//     terminal — we no-op and 200.
+// Idempotency (Session 48 redesign — spec section 2.3):
+//   - Every signature-verified event is eager-captured into
+//     duffel_webhook_events (UNIQUE on event_id) BEFORE dispatch. Replays
+//     short-circuit to 200 at the eager-capture layer, below any handler
+//     re-work.
+//   - Compare-and-set transitions, pre-INSERT existence check on bookings,
+//     and confirmation_email_sent_at atomic guards remain as belt-and-braces.
 //
-// Idempotency-key note: event.idempotency_key at the top level appears to
-// be the Duffel order id (ord_...). We use event.data.object.id for lookup
-// and rely on our own Duffel-Idempotency-Key (== pending.id) via the
-// process-duffel-booking codepath — this webhook doesn't need to know it.
+// Lookup redesign (Session 48 — spec section 2.3):
+//   - findPendingByOrderIdOrMetadata resolves the pending row by
+//     duffel_order_id first, falling back to metadata.pending_booking_id
+//     echoed back on the event. This closes the case (b) race where our
+//     own UPDATE committing duffel_order_id hasn't landed yet.
+//   - Unresolved events (no match by order_id OR metadata) are LEFT with
+//     processed_at IS NULL for the Session 49 reconciler Sweep R1 to
+//     classify (external order vs genuine edge race). No inline alert on
+//     this case -- the former L220/L367 UNHANDLED_ERROR fires are removed
+//     per spec section 5.2.
 // ============================================================================
 
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
@@ -130,15 +137,67 @@ function documentsPopulated(order: any): boolean {
   );
 }
 
-async function findPendingByDuffelOrderId(supabase: any, orderId: string): Promise<any> {
-  // S-14b: read via pending_bookings_decrypted so pending.passengers is plaintext
-  // for the PAID_NO_TICKET alert context and any future consumer of this helper.
-  const { data } = await supabase
-    .from("pending_bookings_decrypted")
-    .select("*")
-    .eq("duffel_order_id", orderId)
-    .maybeSingle();
-  return data;
+// S48 (spec section 2.3) — replaces findPendingByDuffelOrderId. Resolves
+// pending via duffel_order_id first, then falls back to the metadata
+// back-reference that process-duffel-booking writes on POST /air/orders
+// (metadata: { pending_booking_id: pending.id }). Metadata fallback closes
+// the case (b) race where our own UPDATE committing duffel_order_id hasn't
+// yet landed by the time Duffel's webhook fires.
+async function findPendingByOrderIdOrMetadata(supabase: any, event: any): Promise<any> {
+  const orderId = event?.data?.object?.id;
+  const metaPendingId = event?.data?.object?.metadata?.pending_booking_id;
+
+  // Primary: lookup by duffel_order_id (set once process-duffel-booking's
+  // UPDATE commits).
+  // S-14b: read via pending_bookings_decrypted so pending.passengers is
+  // plaintext for the PAID_NO_TICKET alert context and other consumers.
+  if (orderId) {
+    const { data } = await supabase
+      .from("pending_bookings_decrypted")
+      .select("*")
+      .eq("duffel_order_id", orderId)
+      .maybeSingle();
+    if (data) return data;
+  }
+
+  // Fallback: lookup by metadata (race-proof back-reference).
+  if (metaPendingId) {
+    const { data } = await supabase
+      .from("pending_bookings_decrypted")
+      .select("*")
+      .eq("id", metaPendingId)
+      .maybeSingle();
+    if (data) return data;
+  }
+
+  return null;
+}
+
+// S48 (spec section 2.3) — mark a duffel_webhook_events row processed with
+// an outcome. Non-fatal: the handler already did its real work. A failed
+// marker just means the Session 49 reconciler Sweep R1 will see this event
+// as unprocessed and re-run its resolution (idempotent via the same
+// compare-and-set guards on pending_bookings).
+async function markEventProcessed(
+  supabase: any,
+  eventRowId: string,
+  outcome: "handled_inline" | "race_resolved" | "external_order" | "failed" | "noop",
+  opts?: { pendingBookingId?: string | null; errorMsg?: string | null },
+): Promise<void> {
+  if (!eventRowId) return;  // defensive; shouldn't happen in normal flow
+  const update: Record<string, any> = {
+    processed_at: new Date().toISOString(),
+    processing_outcome: outcome,
+  };
+  if (opts?.pendingBookingId !== undefined) update.pending_booking_id = opts.pendingBookingId;
+  if (opts?.errorMsg !== undefined) update.processing_error = opts.errorMsg;
+  const { error } = await supabase
+    .from("duffel_webhook_events")
+    .update(update)
+    .eq("id", eventRowId);
+  if (error) {
+    console.error(`[duffel-webhook] markEventProcessed failed for ${eventRowId}: ${error.message}`);
+  }
 }
 
 // ── Send-confirmation caller with atomic idempotency guard ────────────────
@@ -194,9 +253,17 @@ async function fireSendConfirmation(
 
 // ── Event handlers ────────────────────────────────────────────────────────
 
-async function handleOrderCreated(supabase: any, event: any): Promise<Response> {
+async function handleOrderCreated(
+  supabase: any,
+  event: any,
+  eventRowId: string,
+): Promise<Response> {
   const order = event?.data?.object;
   if (!order?.id) {
+    // Bad event shape — Duffel sent an order.created without data.object.id.
+    // Kept as UNHANDLED_ERROR (handler author did not anticipate this).
+    // No duffel_order_id available so dedup-key suffix refinement doesn't
+    // apply.
     await alertFounder(
       "UNHANDLED_ERROR",
       {
@@ -208,26 +275,30 @@ async function handleOrderCreated(supabase: any, event: any): Promise<Response> 
       },
       `function:duffel-webhook+reason:created_missing_object_id`,
     );
+    await markEventProcessed(supabase, eventRowId, "failed", {
+      errorMsg: "order.created event has no data.object.id",
+    });
     return new Response("ok", { status: 200, headers: CORS_HEADERS });
   }
 
-  const pending = await findPendingByDuffelOrderId(supabase, order.id);
+  // S48 (spec section 2.3): resolve by duffel_order_id OR by
+  // metadata.pending_booking_id. The metadata fallback closes case (b)
+  // races where process-duffel-booking's UPDATE committing duffel_order_id
+  // hasn't yet landed.
+  const pending = await findPendingByOrderIdOrMetadata(supabase, event);
   if (!pending) {
-    // Two legit cases: (a) order created via Duffel Dashboard directly,
-    // outside our system; (b) event race — process-duffel-booking hasn't
-    // yet UPDATED our row with duffel_order_id. Alert HIGH not CRITICAL
-    // because case (b) is expected and case (a) is not customer-impacting.
-    await alertFounder(
-      "UNHANDLED_ERROR",
-      {
-        function: "duffel-webhook",
-        event_type: event.type,
-        duffel_order_id: order.id,
-        booking_reference: order.booking_reference,
-        message: "order.created event fired for a duffel_order_id we don't have a pending row for. Either (a) created outside our system (Dashboard) or (b) race with process-duffel-booking's UPDATE. Not blocking.",
-        severity: "HIGH",
-      },
-      `function:duffel-webhook+reason:created_unknown_order_id`,
+    // S48 (spec section 5.2 — REMOVAL): formerly fired UNHANDLED_ERROR HIGH
+    // for every event we couldn't resolve. Removed — the metadata fallback
+    // now closes the inline race case, so a true null here means either
+    // (a) a Dashboard-created external order OR (b) a race window we failed
+    // to close by metadata too.
+    //
+    // Leave processed_at IS NULL on the event row. Session 49 reconciler
+    // Sweep R1 classifies after its 10min window:
+    //   external_order → fire DUFFEL_ORDER_UNKNOWN_ORIGIN HIGH
+    //   still-plausible edge → retry sweep
+    console.log(
+      `[duffel-webhook] order.created unresolved by order_id/metadata; leaving for reconciler (event_id=${event.id})`,
     );
     return new Response("ok", { status: 200, headers: CORS_HEADERS });
   }
@@ -259,6 +330,9 @@ async function handleOrderCreated(supabase: any, event: any): Promise<Response> 
         console.log(`[duffel-webhook] Replayed → email sent for ${pending.merchant_ref}`);
       }
     }
+    await markEventProcessed(supabase, eventRowId, "handled_inline", {
+      pendingBookingId: pending.id,
+    });
     return new Response("ok", { status: 200, headers: CORS_HEADERS });
   }
 
@@ -267,6 +341,9 @@ async function handleOrderCreated(supabase: any, event: any): Promise<Response> 
     if (!documentsPopulated(order)) {
       // Duffel event fired but documents still empty. Weird but harmless.
       console.log(`[duffel-webhook] order.created replay w/o documents for pnr_issued ${pending.merchant_ref}`);
+      await markEventProcessed(supabase, eventRowId, "handled_inline", {
+        pendingBookingId: pending.id,
+      });
       return new Response("ok", { status: 200, headers: CORS_HEADERS });
     }
     const { data: claimed } = await supabase
@@ -276,6 +353,9 @@ async function handleOrderCreated(supabase: any, event: any): Promise<Response> 
       .eq("status", "pnr_issued")
       .select();
     if (!claimed || claimed.length === 0) {
+      await markEventProcessed(supabase, eventRowId, "handled_inline", {
+        pendingBookingId: pending.id,
+      });
       return new Response("ok", { status: 200, headers: CORS_HEADERS });
     }
     const email = await fireSendConfirmation(supabase, pending, order);
@@ -296,58 +376,65 @@ async function handleOrderCreated(supabase: any, event: any): Promise<Response> 
     } else {
       console.log(`[duffel-webhook] pnr_issued → booked + email sent for ${pending.merchant_ref}`);
     }
+    await markEventProcessed(supabase, eventRowId, "handled_inline", {
+      pendingBookingId: pending.id,
+    });
     return new Response("ok", { status: 200, headers: CORS_HEADERS });
   }
 
-  // duffel_pending — this is the 202-async recovery path. process-duffel-
-  // booking got a 202, transitioned to duffel_pending (or should have),
-  // and we're now getting the actual order-created event. We can complete
-  // the flow: INSERT bookings, transition, fire email if documents populated.
-  //
-  // But: process-duffel-booking's own handling for 202 is "stay at
-  // duffel_pending; reconciler polls". So we're doing the equivalent
-  // work here in webhook form, faster than the reconciler.
-  //
-  // What we DON'T have from just the event: the offer object (needed to
-  // derive itinerary details like cabin_class, fare_brand_name). Do a
-  // GET /air/orders/<id> to get the fresh order with full data since the
-  // event might have a stale/partial snapshot.
+  // duffel_pending — process-duffel-booking got a 202 (or race) and hasn't
+  // completed yet. The row stays at duffel_pending; retry-stuck-bookings
+  // picks it up on next tick (currently paused — see RUNBOOK §13).
+  // Session 49 Sweep R2 reads duffel_webhook_events for this
+  // pending_booking_id and alerts PAID_NO_TICKET if the event stream shows
+  // order.created but the row is still duffel_pending past the sweep
+  // window. We mark the event handled_inline here — Sweep R2's reasoning
+  // is on the pending_bookings row state, not on event.processed_at.
   if (pending.status === "duffel_pending") {
-    // Nudge process-duffel-booking to do the actual work — cleaner than
-    // duplicating INSERT bookings logic here. Its idempotency-key will
-    // hit the existing order and complete the flow. But we need the
-    // secret to nudge, and we don't have it in this EF's env (it's on
-    // process-duffel-booking's side). Rather than plumbing that through,
-    // fall through to: leave at duffel_pending and let retry-stuck-
-    // bookings pick it up on next 60s tick.
-    console.log(`[duffel-webhook] order.created received for duffel_pending row ${pending.merchant_ref}; retry-stuck-bookings will complete via nudge`);
+    console.log(
+      `[duffel-webhook] order.created received for duffel_pending row ${pending.merchant_ref}; retry-stuck-bookings or Sweep R2 will complete`,
+    );
+    await markEventProcessed(supabase, eventRowId, "handled_inline", {
+      pendingBookingId: pending.id,
+    });
     return new Response("ok", { status: 200, headers: CORS_HEADERS });
   }
 
-  // Any other state (paid, pending, etc.) — unexpected but not disaster.
+  // S48 (spec section 5.2 — DOWNGRADE): any other state (paid, pending,
+  // etc.) — unexpected but not disaster. Downgraded from UNHANDLED_ERROR
+  // CRITICAL to DUFFEL_UNEXPECTED_ROW_STATE HIGH with per-pending_booking_id
+  // dedup (1h cooldown).
   await alertFounder(
-    "UNHANDLED_ERROR",
+    "DUFFEL_UNEXPECTED_ROW_STATE",
     {
       function: "duffel-webhook",
+      event_type: event.type,
       merchant_ref: pending.merchant_ref,
       pending_booking_id: pending.id,
       current_status: pending.status,
       duffel_order_id: order.id,
-      message: "order.created event fired for row in unexpected state",
-      severity: "HIGH",
     },
-    `function:duffel-webhook+reason:created_unexpected_row_state`,
+    `pending_booking_id:${pending.id}`,
   );
+  await markEventProcessed(supabase, eventRowId, "handled_inline", {
+    pendingBookingId: pending.id,
+  });
   return new Response("ok", { status: 200, headers: CORS_HEADERS });
 }
 
-async function handleOrderCreationFailed(supabase: any, event: any): Promise<Response> {
+async function handleOrderCreationFailed(
+  supabase: any,
+  event: any,
+  eventRowId: string,
+): Promise<Response> {
   const failure = event?.data?.object;
   // Duffel's order.creation_failed payload carries the failed order attempt
   // details. Look up by whatever identifier is present — Duffel populates
   // idempotency_key at the top level (which is the ord_... id).
   const orderId = failure?.id || event?.idempotency_key || "";
   if (!orderId) {
+    // Bad event shape — kept as UNHANDLED_ERROR. No duffel_order_id
+    // available so dedup-key suffix refinement doesn't apply.
     await alertFounder(
       "UNHANDLED_ERROR",
       {
@@ -359,21 +446,20 @@ async function handleOrderCreationFailed(supabase: any, event: any): Promise<Res
       },
       `function:duffel-webhook+reason:creation_failed_missing_id`,
     );
+    await markEventProcessed(supabase, eventRowId, "failed", {
+      errorMsg: "order.creation_failed with no identifiable order id",
+    });
     return new Response("ok", { status: 200, headers: CORS_HEADERS });
   }
 
-  const pending = await findPendingByDuffelOrderId(supabase, orderId);
+  // S48 (spec section 2.3): resolve by order_id OR metadata.
+  const pending = await findPendingByOrderIdOrMetadata(supabase, event);
   if (!pending) {
-    await alertFounder(
-      "UNHANDLED_ERROR",
-      {
-        function: "duffel-webhook",
-        event_type: event.type,
-        duffel_order_id: orderId,
-        message: "order.creation_failed for a duffel_order_id we don't have a pending row for",
-        severity: "HIGH",
-      },
-      `function:duffel-webhook+reason:creation_failed_unknown_order_id`,
+    // S48 (spec section 5.2 — REMOVAL): formerly fired UNHANDLED_ERROR
+    // HIGH. Removed — same rationale as handleOrderCreated's null branch.
+    // Session 49 reconciler classifies after its window.
+    console.log(
+      `[duffel-webhook] order.creation_failed unresolved by order_id/metadata; leaving for reconciler (event_id=${event.id}, duffel_order_id=${orderId})`,
     );
     return new Response("ok", { status: 200, headers: CORS_HEADERS });
   }
@@ -381,6 +467,9 @@ async function handleOrderCreationFailed(supabase: any, event: any): Promise<Res
   // Idempotent replays
   if (["paid_booking_failed", "refund_pending", "refunded",
        "paid_offer_expired", "failed_to_create"].includes(pending.status)) {
+    await markEventProcessed(supabase, eventRowId, "handled_inline", {
+      pendingBookingId: pending.id,
+    });
     return new Response("ok", { status: 200, headers: CORS_HEADERS });
   }
 
@@ -392,6 +481,9 @@ async function handleOrderCreationFailed(supabase: any, event: any): Promise<Res
     .in("status", ["duffel_pending", "pnr_issued", "booked", "paid", "pending"])
     .select();
   if (!claimed || claimed.length === 0) {
+    await markEventProcessed(supabase, eventRowId, "handled_inline", {
+      pendingBookingId: pending.id,
+    });
     return new Response("ok", { status: 200, headers: CORS_HEADERS });
   }
   await alertFounder("PAID_NO_TICKET", {
@@ -412,6 +504,9 @@ async function handleOrderCreationFailed(supabase: any, event: any): Promise<Res
     pending.processor_transaction_id,
     pending.merchant_ref,
   );
+  await markEventProcessed(supabase, eventRowId, "handled_inline", {
+    pendingBookingId: pending.id,
+  });
   return new Response("ok", { status: 200, headers: CORS_HEADERS });
 }
 
@@ -447,6 +542,8 @@ serve(async (req) => {
       const isNoisy = verify.reason === "missing_signature_header"
                    || verify.reason === "empty_body";
       if (!isNoisy) {
+        // Kept as UNHANDLED_ERROR (spec section 5.2 — KEEP). No parsed event
+        // yet so no duffel_order_id available for dedup-key suffix.
         await alertFounder(
           "UNHANDLED_ERROR",
           {
@@ -472,6 +569,8 @@ serve(async (req) => {
   try {
     event = JSON.parse(rawBody);
   } catch (err) {
+    // Kept as UNHANDLED_ERROR (spec section 5.2 — KEEP). Body unparseable
+    // so no event.id or duffel_order_id for dedup-key suffix.
     await alertFounder(
       "UNHANDLED_ERROR",
       {
@@ -506,34 +605,121 @@ serve(async (req) => {
 
   const supabase = createClient(SUPABASE_URL, SERVICE_ROLE_KEY);
 
-  // 5. Dispatch by event type
+  // 5. S48 (spec section 2.3) — EAGER-CAPTURE: persist signature-verified
+  // event into duffel_webhook_events BEFORE dispatch. UNIQUE on event_id
+  // makes replays safe no-ops at this layer, below any handler re-work.
+  // Insert-then-select-on-conflict pattern because Supabase client's upsert
+  // semantics around "return the row whether new or existing" vary by
+  // client version. This pattern is explicit and version-independent.
+  let eventRowId = "";
+  let alreadyProcessed = false;
+  try {
+    const eventRow = {
+      event_id: event.id,
+      event_type: event.type,
+      event_created_at: event.created_at ?? new Date().toISOString(),
+      live_mode: !!event.live_mode,
+      duffel_order_id: event?.data?.object?.id ?? null,
+      payload: event,
+    };
+    const { data: inserted, error: insertErr } = await supabase
+      .from("duffel_webhook_events")
+      .insert(eventRow)
+      .select("id, processed_at")
+      .single();
+    if (insertErr) {
+      // 23505 = unique_violation (replay — same event_id already captured).
+      // Also match on error message for client-version drift robustness.
+      const isDup = insertErr.code === "23505"
+        || /duplicate key/i.test(insertErr.message || "")
+        || /already exists/i.test(insertErr.message || "");
+      if (isDup) {
+        const { data: existing, error: selectErr } = await supabase
+          .from("duffel_webhook_events")
+          .select("id, processed_at")
+          .eq("event_id", event.id)
+          .single();
+        if (selectErr || !existing) {
+          throw new Error(`duplicate_event_but_select_failed: ${selectErr?.message || "no row"}`);
+        }
+        eventRowId = existing.id;
+        alreadyProcessed = !!existing.processed_at;
+      } else {
+        throw insertErr;
+      }
+    } else {
+      eventRowId = inserted.id;
+      alreadyProcessed = false;
+    }
+  } catch (err) {
+    // Rare: DB unavailable or constraint issue not a replay. Return 500 so
+    // Duffel retries — we must NOT ack an event we didn't persist.
+    console.error("[duffel-webhook] Eager-capture failed:", err);
+    await alertFounder(
+      "DUFFEL_WEBHOOK_PERSIST_FAILED",
+      {
+        function: "duffel-webhook",
+        event_id: event?.id,
+        event_type: event?.type,
+        duffel_order_id: event?.data?.object?.id,
+        error: (err as Error).message,
+      },
+      `event_id:${event?.id}`,
+    );
+    return new Response(
+      JSON.stringify({ error: "persist_failed" }),
+      { status: 500, headers: { ...CORS_HEADERS, "Content-Type": "application/json" } },
+    );
+  }
+
+  // Replay short-circuit: if processed_at was already set on an earlier
+  // delivery of the same event_id, this is a safe no-op.
+  if (alreadyProcessed) {
+    console.log(`[duffel-webhook] Replay: event ${event.id} already processed, no-op`);
+    return new Response("ok", { status: 200, headers: CORS_HEADERS });
+  }
+
+  // 6. Dispatch by event type
   try {
     switch (event?.type) {
       case "order.created":
-        return await handleOrderCreated(supabase, event);
+        return await handleOrderCreated(supabase, event, eventRowId);
       case "order.creation_failed":
-        return await handleOrderCreationFailed(supabase, event);
+        return await handleOrderCreationFailed(supabase, event, eventRowId);
       case "ping.triggered":
         // Duffel sends this when a webhook is created/updated (test ping).
         console.log("[duffel-webhook] ping.triggered received");
+        await markEventProcessed(supabase, eventRowId, "noop");
         return new Response("ok", { status: 200, headers: CORS_HEADERS });
       default:
         console.log(`[duffel-webhook] Unhandled event type: ${event?.type}`);
+        await markEventProcessed(supabase, eventRowId, "noop");
         return new Response("ok", { status: 200, headers: CORS_HEADERS });
     }
   } catch (err) {
     console.error("[duffel-webhook] Unhandled:", err);
+    // S48 (spec section 5.1) dedup refinement: include duffel_order_id when
+    // available so a sustained ambient failure on one order dedupes to one
+    // alert instead of once per 15min for 24h straight.
+    const duffelOrderId = event?.data?.object?.id;
+    const dedupKey = duffelOrderId
+      ? `function:duffel-webhook+reason:dispatch_exception+order:${duffelOrderId}`
+      : `function:duffel-webhook+reason:dispatch_exception`;
     await alertFounder(
       "UNHANDLED_ERROR",
       {
         function: "duffel-webhook",
         event_id: event?.id,
         event_type: event?.type,
+        duffel_order_id: duffelOrderId,
         error: (err as Error).message,
         stack: (err as Error).stack,
       },
-      `function:duffel-webhook+reason:dispatch_exception`,
+      dedupKey,
     );
+    await markEventProcessed(supabase, eventRowId, "failed", {
+      errorMsg: (err as Error).message,
+    });
     // Non-2xx → Duffel retries. Idempotency guards handle re-fires.
     return new Response(
       JSON.stringify({ error: "internal_error" }),

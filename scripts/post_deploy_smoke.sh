@@ -292,8 +292,16 @@ EMAIL_AT=""
 for i in $(seq 1 60); do
   BOOKING=$(curl -s "$SB_URL/rest/v1/bookings?merchant_ref=eq.$MERCHANT_REF&select=id,status,pnr,confirmation_email_sent_at" \
     -H "apikey: $KEY" -H "Authorization: Bearer $KEY")
-  # Guard against empty array — jq without ? on .[0] fails cascade on []
-  ROW_COUNT=$(echo "$BOOKING" | jq 'length' 2>/dev/null || echo 0)
+  # S48 fix (spec section 5.4): guard against both empty array AND non-array
+  # response. Previous guard used `jq 'length'` which returns the key count
+  # for objects (non-zero), causing .[0] cascade failures (~250 red stderr
+  # lines over the 4-min polling window) if PostgREST ever returned an error
+  # object or similar non-array shape. Type-check first.
+  IS_ARRAY=$(echo "$BOOKING" | jq -r 'type == "array"' 2>/dev/null || echo false)
+  ROW_COUNT=0
+  if [ "$IS_ARRAY" = "true" ]; then
+    ROW_COUNT=$(echo "$BOOKING" | jq 'length' 2>/dev/null || echo 0)
+  fi
   if [ "$ROW_COUNT" -gt 0 ]; then
     STATUS=$(echo "$BOOKING" | jq -r '.[0].status // empty')
     PNR=$(echo "$BOOKING" | jq -r '.[0].pnr // empty')
