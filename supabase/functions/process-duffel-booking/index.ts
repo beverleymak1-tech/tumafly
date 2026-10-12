@@ -230,6 +230,22 @@ serve(async (req) => {
       return new Response("ok", { status: 200, headers: CORS_HEADERS });
     }
 
+    // S48 (spec section 4.2) — pre-flight idempotency check. Short-circuits
+    // retry-stampedes where a prior invocation already set duffel_order_id.
+    // Normally the step-11 compare-and-set atomic UPDATE moves status past
+    // duffel_pending at the same time as setting duffel_order_id, so the
+    // entry guard below catches most retries. This additional check covers
+    // the rare case where duffel_order_id is set but status is still at
+    // duffel_pending (backfill, future surface changes, manual intervention).
+    if (pending.duffel_order_id
+        && ["duffel_pending", "pnr_issued", "booked"].includes(pending.status)) {
+      console.log(`[process-duffel-booking] Idempotent replay: duffel_order_id=${pending.duffel_order_id} already set, status=${pending.status}, bailing clean (${pending.merchant_ref})`);
+      return new Response(
+        JSON.stringify({ idempotent_replay: true }),
+        { status: 200, headers: { ...CORS_HEADERS, "Content-Type": "application/json" } },
+      );
+    }
+
     if (pending.status !== "duffel_pending") {
       console.log(`[process-duffel-booking] Entry guard: status is ${pending.status}, not duffel_pending — no-op bail (${pending.merchant_ref})`);
       return new Response("ok", { status: 200, headers: CORS_HEADERS });
