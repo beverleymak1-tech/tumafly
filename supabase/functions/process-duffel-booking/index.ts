@@ -204,6 +204,20 @@ serve(async (req) => {
 
   const supabase = createClient(SUPABASE_URL, SERVICE_ROLE_KEY);
 
+  // S48 (spec section 4.2) — TEMPORARY retry-schedule instrumentation.
+  // Captures (received_at, request_id, pending_booking_id, user_agent) at
+  // the handler head so we can measure Supabase DB-webhook retry schedule
+  // empirically during A3 soak. Removed in Session 49 close bundle along
+  // with the tempmetric_pdb_invocations table.
+  // Never throws — instrumentation must not block real work.
+  try {
+    await supabase.from("tempmetric_pdb_invocations").insert({
+      pending_booking_id: pendingId,
+      request_id: req.headers.get("x-request-id"),
+      user_agent: req.headers.get("user-agent"),
+    });
+  } catch (_) { /* instrumentation only */ }
+
   try {
     // 4. Entry-point double-fire guard: re-read live status
     // S-14b: read via pending_bookings_decrypted so pending.passengers is plaintext
