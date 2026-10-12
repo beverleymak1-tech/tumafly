@@ -28,6 +28,7 @@ type AlertType =
   | "DUFFEL_ORDER_WEBHOOK_RACE"            // S48: handler couldn't resolve event by order_id OR metadata (rare post-metadata)
   | "DUFFEL_ORDER_UNKNOWN_ORIGIN"          // S48: Duffel event with no matching pending_booking after reconciler window
   | "DUFFEL_WEBHOOK_PERSIST_FAILED"        // S48: eager-capture UPSERT into duffel_webhook_events failed
+  | "DUFFEL_UNEXPECTED_ROW_STATE"          // S48: pending_bookings row in state handler did not expect (replaces UNHANDLED_ERROR for L328-340, L367-377 per spec §5.2)
   // Batch 2 refund automation (Session 25)
   | "REFUND_DB_INSERT_FAILED"              // refundBooking() couldn't insert refunds row (non-duplicate)
   | "REFUND_API_FAILED"                    // Paystack /refund non-2xx
@@ -121,6 +122,12 @@ const ALERT_CONFIG: Record<AlertType, { severity: string; subject: string; actio
     subject: "[TumaFly] duffel-webhook could not persist incoming event",
     action: "duffel_webhook_events UPSERT failed. Duffel will retry delivery. Check DB health, Vault availability, and alert-founder for upstream health signals.",
     dedup_cooldown_minutes: 15,  // §11 (S35b) — retry-cycle noise ok; sustained outage keeps re-firing (desired)
+  },
+  DUFFEL_UNEXPECTED_ROW_STATE: {
+    severity: "⚠️ HIGH",
+    subject: "[TumaFly] duffel-webhook saw pending_booking row in unexpected state",
+    action: "pending_booking row did not match the state the handler branched into (e.g. order.created event arrived for a row already past duffel_pending, or a lookup by metadata resolved to a wrong state). Replaces former UNHANDLED_ERROR CRITICAL fires at duffel-webhook L328-340 and L367-377 (spec §5.2). Check duffel_webhook_events + pending_bookings for the referenced pending_booking_id to reconstruct.",
+    dedup_cooldown_minutes: 60,  // §11 (S35b) — per pending_booking_id dedup via caller; 1h operator-ack window
   },
   AMOUNT_MISMATCH: {
     severity: "⚠️ HIGH",
