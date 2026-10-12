@@ -435,6 +435,7 @@ serve(async (req) => {
               currency: offer.total_currency,
               amount: orderTotalAmount,
             }],
+            metadata: { pending_booking_id: pending.id },  // S48: race-proof back-reference for duffel-webhook (spec §2.3)
           },
         }),
       });
