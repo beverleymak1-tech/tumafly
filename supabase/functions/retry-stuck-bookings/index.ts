@@ -4,7 +4,8 @@
 // State-transition reconciler. Not a booking-creator. Runs every minute via
 // pg_cron (job id 1, schedule '* * * * *').
 //
-// Six sweep buckets (age-based, per-state):
+// Six sweep buckets (age-based, per-state) + two Session 49.a reconciler
+// sweeps:
 //
 //   paid > 60s
 //     Nudge: compare-and-set to duffel_pending. DB webhook fires
@@ -45,7 +46,7 @@
 //     Re-fire send-confirmation with atomic guard. Third fire site per
 //     handoff §4.3 (sync happy-path in #7b-ii; async in #8's order.created
 //     webhook; polled here in #9).
-//     Session 49.a step 4/7 (THIS COMMIT) adds:
+//     Session 49.a step 4/7 added:
 //       - 14d date filter: only rows created in last 14 days are eligible.
 //         Historical backlogs (e.g. the S-14b/c encrypted-view migration
 //         window of 2026-09-06 → 2026-09-10, 55 rows cleaned under SOP §13
@@ -56,6 +57,42 @@
 //         HIGH with dedup `bucket:6` (one email per day while sustained).
 //       - Per-bucket batch size: Bucket 6 drains up to 10 rows per sweep
 //         (vs default 5 for other buckets).
+//
+//   Sweep R1 — event-stream reconciliation (Session 49.a step 5/7, THIS COMMIT)
+//     Scans duffel_webhook_events WHERE processed_at IS NULL ORDER BY
+//     received_at ASC LIMIT 20. These are events the inline duffel-webhook
+//     handler could not resolve (no match by order_id OR metadata at
+//     dispatch time). Session 47 design spec §2.4 classification:
+//       - Row NOW found via findPendingByOrderIdOrMetadata (race belatedly
+//         resolved) → re-run the shared handler
+//         (_shared/duffel-order-event-handlers.ts). Mark event
+//         processing_outcome='race_resolved', pending_booking_id=…
+//       - Row NOT found AND event has metadata.pending_booking_id AND
+//         that pending row is in a terminal failure state
+//         [paid_offer_expired, paid_booking_failed, refund_pending,
+//         refunded, failed_to_create] → Duffel-sandbox-422 artifact
+//         (Session 48 soak-close finding, 8 KQ/PW/TC/W2/WB rows). Mark
+//         processing_outcome='pricing_failed_after_create'. SILENT —
+//         no alert. Extension to spec §2.4 resolution union.
+//       - Row NOT found AND received_at > 10min ago → external order
+//         (Dashboard-created, no metadata). Mark
+//         processing_outcome='external_order', fire DUFFEL_ORDER_UNKNOWN_ORIGIN
+//         with dedup event_id:${event_id}.
+//       - Row NOT found AND received_at < 10min ago → still-plausible edge
+//         race. Leave processed_at NULL, retry next sweep.
+//     Imports handleOrderCreated / handleOrderCreationFailed from
+//     _shared/duffel-order-event-handlers.ts (Session 49.a steps 1-2/7
+//     made this possible). Per spec §2.4: any handler-ran outcome →
+//     mark race_resolved; the "idempotent replay vs state transition"
+//     distinction doesn't matter at reconciler time.
+//
+//   Sweep R2 — stuck-pending reconciliation (Session 49.a step 6/7, NEXT COMMIT)
+//     Will replace Bucket 3's forceFailDuffelPending. Reads duffel_webhook_events
+//     for events matching stuck pending rows (by duffel_order_id OR
+//     metadata.pending_booking_id). Delegates PAID_NO_TICKET alerts +
+//     refund+fail decisions off event-stream truth, not Duffel API calls
+//     (which the current forceFailDuffelPending gets wrong because
+//     ?duffel_idempotency_key=X is not a supported Duffel API filter).
 //
 // Removed from v1:
 //   - Direct Duffel POST /air/orders. Replaced with nudge to
@@ -69,10 +106,11 @@
 // secret). Same pattern as v1.
 //
 // Batch sizing: BATCH_LIMIT_DEFAULT = 5 for most buckets, BATCH_LIMIT_BUCKET_6
-// = 10 for the booked-no-email bucket (email retries are cheap, backlog
-// alert fires above 10 so draining 10/sweep matches the alert threshold).
-// Cron every minute → up to 25 rows/sweep → well above real recovery
-// throughput for any single bucket.
+// = 10 for the booked-no-email bucket, BATCH_LIMIT_SWEEP_R1 = 20 for the
+// event-stream reconciler (events are cheap to classify — most are
+// terminal-state resolutions or 10-min-window checks, not Duffel API calls).
+// Cron every minute → up to 45 operations/sweep → well above real recovery
+// throughput for any single sweep.
 // ============================================================================
 
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
@@ -86,7 +124,19 @@ import {
   alertFounder,
   checkModeKeyMismatch,
   refundBooking,
+  // Session 49.a step 5/7: Sweep R1 imports the lifted primitives
+  findPendingByOrderIdOrMetadata,
+  markEventProcessed,
 } from "../_shared/duffel-helpers.ts";
+
+// Session 49.a step 5/7: Sweep R1 imports the lifted handlers directly.
+// Both callers (duffel-webhook inline, retry-stuck-bookings Sweep R1) now
+// compose the same state-transition logic. See
+// TumaFly_Session47_DesignSpec_DuffelWebhookRedesign.md §2.4 Sweep R1.
+import {
+  handleOrderCreated,
+  handleOrderCreationFailed,
+} from "../_shared/duffel-order-event-handlers.ts";
 
 const PROCESS_DUFFEL_BOOKING_URL = `${SUPABASE_URL}/functions/v1/process-duffel-booking`;
 const PROCESS_DUFFEL_BOOKING_WEBHOOK_SECRET =
@@ -127,6 +177,41 @@ const BATCH_LIMIT_BUCKET_6 = 10;
 // to one-per-day) early enough that an operator can intervene within one
 // cron tick of accrual.
 const BACKLOG_ALERT_THRESHOLD = 10;
+
+// Session 49.a step 5/7 — Sweep R1 constants
+//
+// Batch size: 20 events per sweep. Classification is cheap (mostly in-memory
+// predicate checks + the shared handler on resolved rows). Spec §2.4
+// expectation is "~0 events per sweep for normal booking traffic" because
+// metadata lookup resolves inline at the webhook handler. Non-zero sustained
+// volume = either Dashboard-created orders or genuine edge cases worth
+// investigating; 20 is enough headroom to drain backlogs quickly.
+const BATCH_LIMIT_SWEEP_R1 = 20;
+
+// 10-minute window for the "row not found" classification. Below the window,
+// the inline webhook handler + process-duffel-booking's UPDATE committing
+// duffel_order_id are still plausibly racing. Above the window, a genuine
+// resolve-by-metadata or resolve-by-order_id failure means either a
+// Dashboard-created external order (actionable: fire DUFFEL_ORDER_UNKNOWN_ORIGIN)
+// or an unexplained gap. Spec §2.4 uses 10min.
+const SWEEP_R1_RESOLUTION_WINDOW_S = 600;
+
+// Terminal failure states a pending row ends up in when a Duffel-sandbox-422
+// pattern completes. The Session 48 soak-close finding (2026-10-15, 8 unresolved
+// events traced to KQ/PW/TC/W2/WB carriers) showed Duffel internally creates
+// an order resource but returns 422 from POST /air/orders; our pending row
+// correctly moves through paid_offer_expired/paid_booking_failed and gets
+// refunded via refundBooking, but Duffel's downstream webhook event never
+// matches our (never-set) duffel_order_id. Metadata-fallback catches it in
+// Sweep R1 — if the pending row resolves to any of these terminal states,
+// we silently classify the event rather than firing a mis-targeted alert.
+const PENDING_TERMINAL_FAILURE_STATES = [
+  "paid_offer_expired",
+  "paid_booking_failed",
+  "refund_pending",
+  "refunded",
+  "failed_to_create",
+];
 
 const DUFFEL_HEADERS = {
   Authorization: `Bearer ${DUFFEL_WRITE_KEY}`,
@@ -587,6 +672,232 @@ async function checkBucket6BacklogAndAlert(
   }
 }
 
+// ── Session 49.a step 5/7 — Sweep R1 (event-stream reconciliation) ────────
+// Scans duffel_webhook_events WHERE processed_at IS NULL ORDER BY received_at
+// ASC LIMIT BATCH_LIMIT_SWEEP_R1. Classifies each unprocessed event per
+// Session 47 Design Spec §2.4 Sweep R1 + Session 49.a extension:
+//
+//   1. Row NOW found via findPendingByOrderIdOrMetadata:
+//      → re-run the shared handler (same code the webhook dispatcher runs
+//        inline). Spec §2.4: "Row now found → run handleOrderCreated logic
+//        ... Mark event processed_at=now, outcome='race_resolved'". We
+//        override whatever outcome the handler returns to 'race_resolved'
+//        because by Sweep R1 time, the handler running at all means the
+//        race belatedly resolved. The handler's own 'handled_inline' vs
+//        'race_resolved' distinction (idempotent-replay vs state-transition)
+//        doesn't matter at reconciler time.
+//
+//   2. Row NOT found AND event has metadata.pending_booking_id AND that
+//      pending row is in PENDING_TERMINAL_FAILURE_STATES (Session 48 soak-
+//      close finding — Duffel-sandbox-422 artifact pattern):
+//      → silently classify as 'pricing_failed_after_create'. No alert.
+//        This is an extension to the spec §2.4 resolution union, added for
+//        the 8 unresolved events traced on 2026-10-15 to KQ/PW/TC/W2/WB
+//        carriers. The pending row went through its correct terminal
+//        failure path; the webhook event is a Duffel-side artifact we
+//        just need to mark processed.
+//
+//   3. Row NOT found AND received_at > SWEEP_R1_RESOLUTION_WINDOW_S:
+//      → external order (Dashboard-created, no metadata). Mark
+//        'external_order', fire DUFFEL_ORDER_UNKNOWN_ORIGIN HIGH with
+//        dedup `event_id:${event_id}` (1h cooldown).
+//
+//   4. Row NOT found AND received_at <= SWEEP_R1_RESOLUTION_WINDOW_S:
+//      → still-plausible edge race. Leave processed_at NULL, retry next
+//        sweep.
+//
+// Imports from _shared (Session 49.a steps 1-2/7):
+//   - findPendingByOrderIdOrMetadata (lookup helper)
+//   - markEventProcessed (writer with the processing_outcome union)
+//   - handleOrderCreated, handleOrderCreationFailed (the actual state
+//     transition logic — same code the webhook dispatcher runs inline)
+//
+// Each event is processed independently; a failure on one event logs +
+// alerts + continues to the next. Sweep R1 as a whole never throws out of
+// its own try/catch — the outer serve handler's catch wraps everything.
+
+async function sweepUnprocessedEvents(supabase: any): Promise<any[]> {
+  const results: any[] = [];
+
+  // 1. Fetch unprocessed events, oldest first (per spec §2.2 index design).
+  const { data: events, error: scanErr } = await supabase
+    .from("duffel_webhook_events")
+    .select("*")
+    .is("processed_at", null)
+    .order("received_at", { ascending: true })
+    .limit(BATCH_LIMIT_SWEEP_R1);
+
+  if (scanErr) {
+    console.error("[sweep-r1] scan failed:", scanErr.message);
+    await alertFounder(
+      "UNHANDLED_ERROR",
+      {
+        function: "retry-stuck-bookings",
+        sweep: "R1",
+        message: "duffel_webhook_events scan failed",
+        error: scanErr.message,
+      },
+      `function:retry-stuck-bookings+reason:sweep_r1_scan_failed`,
+    );
+    return results;
+  }
+
+  if (!events || events.length === 0) {
+    return results;
+  }
+
+  console.log(`[sweep-r1] processing ${events.length} unprocessed events`);
+
+  const nowMs = Date.now();
+
+  for (const eventRow of events) {
+    try {
+      // Reconstruct the event object the shared handlers expect. The
+      // duffel_webhook_events row stores the full raw event body at `payload`.
+      const event = eventRow.payload;
+      const eventId = eventRow.id;  // row PK, not Duffel's event.id
+      const eventTypeFromRow = eventRow.event_type;
+      const receivedAtMs = new Date(eventRow.received_at).getTime();
+      const ageSec = (nowMs - receivedAtMs) / 1000;
+
+      // Classification 1: row NOW found → re-run handler, mark race_resolved.
+      const pending = await findPendingByOrderIdOrMetadata(supabase, event);
+      if (pending) {
+        // Only order.created / order.creation_failed have handler logic to
+        // re-run. ping.triggered and other noop event types should never
+        // land here with processed_at IS NULL (duffel-webhook marks them
+        // immediately), but defensively classify if they do.
+        if (eventTypeFromRow === "order.created") {
+          const result = await handleOrderCreated(supabase, event);
+          await markEventProcessed(supabase, eventId, "race_resolved", {
+            pendingBookingId: result.pendingBookingId ?? pending.id,
+            errorMsg: result.errorMsg ?? null,
+          });
+          results.push({
+            event_id: eventRow.event_id,
+            event_type: eventTypeFromRow,
+            classification: "race_resolved",
+            pending_booking_id: pending.id,
+            handler_outcome: result.outcome,
+          });
+        } else if (eventTypeFromRow === "order.creation_failed") {
+          const result = await handleOrderCreationFailed(supabase, event);
+          await markEventProcessed(supabase, eventId, "race_resolved", {
+            pendingBookingId: result.pendingBookingId ?? pending.id,
+            errorMsg: result.errorMsg ?? null,
+          });
+          results.push({
+            event_id: eventRow.event_id,
+            event_type: eventTypeFromRow,
+            classification: "race_resolved",
+            pending_booking_id: pending.id,
+            handler_outcome: result.outcome,
+          });
+        } else {
+          // Defensive: unknown event type with a resolved pending row.
+          // Mark handled_inline with the pending reference so the forensic
+          // trail is complete. No handler runs; nothing to re-do.
+          await markEventProcessed(supabase, eventId, "handled_inline", {
+            pendingBookingId: pending.id,
+          });
+          results.push({
+            event_id: eventRow.event_id,
+            event_type: eventTypeFromRow,
+            classification: "unknown_type_resolved",
+            pending_booking_id: pending.id,
+          });
+        }
+        continue;
+      }
+
+      // Row NOT found. Three sub-branches by metadata + age.
+      const metaPendingId = event?.data?.object?.metadata?.pending_booking_id;
+
+      // Classification 2: metadata resolves to a terminal failure state.
+      // Duffel-sandbox-422 artifact — Session 48 soak-close finding, Session
+      // 49.a extension to spec §2.4. Silent classification, no alert.
+      if (metaPendingId) {
+        const { data: metaPending } = await supabase
+          .from("pending_bookings")
+          .select("id, status")
+          .eq("id", metaPendingId)
+          .maybeSingle();
+        if (metaPending && PENDING_TERMINAL_FAILURE_STATES.includes(metaPending.status)) {
+          await markEventProcessed(supabase, eventId, "pricing_failed_after_create", {
+            pendingBookingId: metaPending.id,
+          });
+          results.push({
+            event_id: eventRow.event_id,
+            event_type: eventTypeFromRow,
+            classification: "pricing_failed_after_create",
+            pending_booking_id: metaPending.id,
+            pending_status: metaPending.status,
+          });
+          continue;
+        }
+      }
+
+      // Classification 3: no resolution AND event is old enough → external order.
+      if (ageSec > SWEEP_R1_RESOLUTION_WINDOW_S) {
+        await alertFounder(
+          "DUFFEL_ORDER_UNKNOWN_ORIGIN",
+          {
+            source: "retry-stuck-bookings Sweep R1",
+            event_id: eventRow.event_id,
+            event_type: eventTypeFromRow,
+            duffel_order_id: eventRow.duffel_order_id,
+            received_at: eventRow.received_at,
+            age_sec: Math.round(ageSec),
+            resolution_window_s: SWEEP_R1_RESOLUTION_WINDOW_S,
+            metadata_pending_booking_id: metaPendingId ?? null,
+          },
+          `event_id:${eventRow.event_id}`,
+        );
+        await markEventProcessed(supabase, eventId, "external_order");
+        results.push({
+          event_id: eventRow.event_id,
+          event_type: eventTypeFromRow,
+          classification: "external_order",
+          age_sec: Math.round(ageSec),
+        });
+        continue;
+      }
+
+      // Classification 4: still-plausible edge race. Leave processed_at NULL;
+      // next sweep will reclassify once age crosses the window.
+      results.push({
+        event_id: eventRow.event_id,
+        event_type: eventTypeFromRow,
+        classification: "leave_for_next_sweep",
+        age_sec: Math.round(ageSec),
+      });
+    } catch (err) {
+      console.error(`[sweep-r1] failed on event_id=${eventRow.event_id}:`, err);
+      await alertFounder(
+        "UNHANDLED_ERROR",
+        {
+          function: "retry-stuck-bookings",
+          sweep: "R1",
+          event_id: eventRow.event_id,
+          event_type: eventRow.event_type,
+          duffel_order_id: eventRow.duffel_order_id,
+          error: (err as Error).message,
+        },
+        `function:retry-stuck-bookings+reason:sweep_r1_event_threw+event:${eventRow.event_id}`,
+      );
+      // Do NOT mark the event processed — leave it for the next sweep to retry.
+      results.push({
+        event_id: eventRow.event_id,
+        event_type: eventRow.event_type,
+        classification: "sweep_r1_threw",
+        error: (err as Error).message,
+      });
+    }
+  }
+
+  return results;
+}
+
 // ── HTTP handler ──────────────────────────────────────────────────────────
 serve(async (req) => {
   if (req.method === "OPTIONS") {
@@ -686,11 +997,16 @@ serve(async (req) => {
       ...(bookedRows.data || []),
     ];
 
+    // Session 49.a step 5/7: Sweep R1 runs independently of the pending_bookings
+    // sweep. Even on a "nothing to drain" early-return path, we still process
+    // unresolved webhook events. R1's work is cheap when there are no events.
+    const sweepR1Results = await sweepUnprocessedEvents(supabase);
+
     if (allRows.length === 0) {
       // Same backlog-alert housekeeping on the no-rows path.
       await backlogAlertPromise.catch(() => {});
       return new Response(
-        JSON.stringify({ processed: 0 }),
+        JSON.stringify({ processed: 0, sweep_r1: sweepR1Results }),
         { headers: { ...CORS_HEADERS, "Content-Type": "application/json" } },
       );
     }
@@ -707,7 +1023,7 @@ serve(async (req) => {
     await backlogAlertPromise.catch(() => {});
 
     return new Response(
-      JSON.stringify({ processed: results.length, results }),
+      JSON.stringify({ processed: results.length, results, sweep_r1: sweepR1Results }),
       { headers: { ...CORS_HEADERS, "Content-Type": "application/json" } },
     );
 
