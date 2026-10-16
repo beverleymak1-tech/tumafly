@@ -25,6 +25,10 @@
 //         cleanly — usually indicates a bug in process-duffel-booking or
 //         send-confirmation. Don't refund a booked customer.)
 //       - Duffel doesn't have it → transition paid_booking_failed, refund.
+//     Session 49.a step 6/7 will replace this with Sweep R2 which uses
+//     duffel_webhook_events as the source of truth instead of a Duffel API
+//     call (closes the race window where Duffel has the order but our
+//     webhook event stream also has it, which is strictly more informative).
 //
 //   pnr_issued > 60s
 //     Poll ticket issuance: GET /air/orders/<duffel_order_id>
@@ -41,6 +45,17 @@
 //     Re-fire send-confirmation with atomic guard. Third fire site per
 //     handoff §4.3 (sync happy-path in #7b-ii; async in #8's order.created
 //     webhook; polled here in #9).
+//     Session 49.a step 4/7 (THIS COMMIT) adds:
+//       - 14d date filter: only rows created in last 14 days are eligible.
+//         Historical backlogs (e.g. the S-14b/c encrypted-view migration
+//         window of 2026-09-06 → 2026-09-10, 55 rows cleaned under SOP §13
+//         on 2026-10-15) stay out of this bucket forever. SOP §13 is the
+//         manual-ops path for those.
+//       - Pre-scan COUNT(*) backlog alert: if more than 10 rows match the
+//         Bucket 6 shape, fire STUCK_BOOKING_BACKLOG_EXCEEDS_THRESHOLD
+//         HIGH with dedup `bucket:6` (one email per day while sustained).
+//       - Per-bucket batch size: Bucket 6 drains up to 10 rows per sweep
+//         (vs default 5 for other buckets).
 //
 // Removed from v1:
 //   - Direct Duffel POST /air/orders. Replaced with nudge to
@@ -53,9 +68,11 @@
 // Auth: service_role via Authorization header (pg_cron passes it via Vault
 // secret). Same pattern as v1.
 //
-// Batch sizing: up to 5 rows per state per invocation (max 20 total).
-// Cron every minute → 300/hr per state ceiling. Well above real recovery
-// throughput.
+// Batch sizing: BATCH_LIMIT_DEFAULT = 5 for most buckets, BATCH_LIMIT_BUCKET_6
+// = 10 for the booked-no-email bucket (email retries are cheap, backlog
+// alert fires above 10 so draining 10/sweep matches the alert threshold).
+// Cron every minute → up to 25 rows/sweep → well above real recovery
+// throughput for any single bucket.
 // ============================================================================
 
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
@@ -85,7 +102,31 @@ const AGE_PNR_ISSUED_POLL_S      = 60;
 const AGE_PNR_ISSUED_FAIL_S      = 900;   // 15 min
 const AGE_BOOKED_NO_EMAIL_S      = 60;
 
-const BATCH_LIMIT = 5; // per-state cap per invocation
+// Session 49.a step 4/7 — Bucket 6 safety clause constants
+//
+// 14-day date filter on created_at (Bucket 6 scan only). Prevents the
+// retry-stuck-bookings cron, when unpaused in Session 49.b, from re-sweeping
+// the historical 55-row S-14b/c encrypted-view window backlog cleaned
+// 2026-10-15 under SOP §13 — or any future historical backlog that enters
+// a similar silent-accrual pattern. SOP §13 manual-ops is the authoritative
+// path for anything older than 14 days.
+const BUCKET_6_DATE_FILTER_DAYS = 14;
+
+// Per-bucket batch sizing. Bucket 6 drains up to 10 rows per sweep (email
+// retries are cheap; alert threshold is 10, so 10/sweep lets drain match
+// alert signal). Other buckets stay at 5 (Duffel API calls are expensive +
+// rate-limited; refund paths touch Paystack).
+const BATCH_LIMIT_DEFAULT  = 5;
+const BATCH_LIMIT_BUCKET_6 = 10;
+
+// Pre-scan threshold: COUNT(*) of Bucket 6 candidates above this triggers
+// STUCK_BOOKING_BACKLOG_EXCEEDS_THRESHOLD alert (HIGH, dedup `bucket:6` per
+// day — see alert-founder/index.ts). 10 chosen deliberately: catches the
+// Session-40.b-shaped self-DoS pattern (which built up ~50 rows before
+// anyone noticed because the alert dedup collapsed CONFIRMATION_EMAIL_FAILED
+// to one-per-day) early enough that an operator can intervene within one
+// cron tick of accrual.
+const BACKLOG_ALERT_THRESHOLD = 10;
 
 const DUFFEL_HEADERS = {
   Authorization: `Bearer ${DUFFEL_WRITE_KEY}`,
@@ -487,6 +528,65 @@ async function processRow(supabase: any, row: any): Promise<any> {
   }
 }
 
+// ── Session 49.a step 4/7 — Bucket 6 pre-scan backlog alert ───────────────
+// Fire-and-forget COUNT(*) of Bucket 6 candidates. If count exceeds
+// BACKLOG_ALERT_THRESHOLD, fire STUCK_BOOKING_BACKLOG_EXCEEDS_THRESHOLD
+// HIGH with dedup `bucket:6` (one email per day while sustained — see
+// alert-founder/index.ts). This runs BEFORE the main scan so the operator
+// sees the alert even if the scan subsequently drains some rows below the
+// threshold within the same invocation (the alert is about accrual rate,
+// not instantaneous snapshot).
+//
+// Caller passes the SAME shape as the Bucket 6 scan uses (bookedThresh +
+// fourteenDaysAgoISO) so there's no drift between what triggers the alert
+// and what the scan processes. Any divergence would be a bug.
+async function checkBucket6BacklogAndAlert(
+  supabase: any,
+  bookedThresh: string,
+  fourteenDaysAgoISO: string,
+): Promise<void> {
+  try {
+    const { count, error } = await supabase
+      .from("pending_bookings_decrypted")
+      .select("id", { count: "exact", head: true })
+      .eq("status", "booked")
+      .is("confirmation_email_sent_at", null)
+      .lte("updated_at", bookedThresh)
+      .gte("created_at", fourteenDaysAgoISO);
+
+    if (error) {
+      console.error("[retry] Bucket 6 pre-scan COUNT failed (proceeding):", error.message);
+      // Fail-open — don't block the drain on a count-query failure. If the
+      // backlog is real, the main scan will still see rows and process them;
+      // we'll just miss this alert fire. Not catastrophic.
+      return;
+    }
+
+    const totalBacklog = count ?? 0;
+    console.log(`[retry] Bucket 6 pre-scan backlog count: ${totalBacklog}`);
+
+    if (totalBacklog > BACKLOG_ALERT_THRESHOLD) {
+      await alertFounder(
+        "STUCK_BOOKING_BACKLOG_EXCEEDS_THRESHOLD",
+        {
+          bucket: 6,
+          scan_shape: "booked AND confirmation_email_sent_at IS NULL AND updated_at <= threshold AND created_at >= 14d_ago",
+          backlog_count: totalBacklog,
+          threshold: BACKLOG_ALERT_THRESHOLD,
+          date_filter_days: BUCKET_6_DATE_FILTER_DAYS,
+          booked_threshold_s: AGE_BOOKED_NO_EMAIL_S,
+          per_sweep_drain_limit: BATCH_LIMIT_BUCKET_6,
+          source: "retry-stuck-bookings pre-scan",
+        },
+        `bucket:6`,
+      );
+    }
+  } catch (err) {
+    console.error("[retry] Bucket 6 pre-scan threw (proceeding):", err);
+    // Same fail-open rationale.
+  }
+}
+
 // ── HTTP handler ──────────────────────────────────────────────────────────
 serve(async (req) => {
   if (req.method === "OPTIONS") {
@@ -520,25 +620,41 @@ serve(async (req) => {
     const dpThresh   = new Date(now.getTime() - AGE_DUFFEL_PENDING_NUDGE_S * 1000).toISOString();
     const pnrThresh  = new Date(now.getTime() - AGE_PNR_ISSUED_POLL_S * 1000).toISOString();
     const bookedThresh = new Date(now.getTime() - AGE_BOOKED_NO_EMAIL_S * 1000).toISOString();
+    // Session 49.a step 4/7: Bucket 6 date-filter floor. Anything older than
+    // this is handled by SOP §13 manual-ops path, not by this sweep.
+    const fourteenDaysAgoISO = new Date(
+      now.getTime() - BUCKET_6_DATE_FILTER_DAYS * 24 * 60 * 60 * 1000,
+    ).toISOString();
+
+    // Session 49.a step 4/7: pre-scan Bucket 6 backlog + fire alert if
+    // threshold exceeded. Fire-and-forget — runs in parallel with the main
+    // scan Promise.all so a slow count query cannot block the drain.
+    const backlogAlertPromise = checkBucket6BacklogAndAlert(
+      supabase, bookedThresh, fourteenDaysAgoISO,
+    );
 
     // S-14b: read via pending_bookings_decrypted so row.passengers is plaintext
     // in PAID_NO_TICKET alert contexts (buckets 3, 5). Buckets 1, 2, 4, 6 don't
     // read row.passengers themselves — nudges + Duffel calls + fireSendConfirmation
     // only touch id/contact/order — but consistency-of-shape matters for future dev.
+    //
+    // Session 49.a step 4/7: Bucket 6 scan adds .gte created_at filter and
+    // uses BATCH_LIMIT_BUCKET_6 (10) vs BATCH_LIMIT_DEFAULT (5) for other buckets.
     const [paidRows, dpRows, pnrRows, bookedRows] = await Promise.all([
       supabase.from("pending_bookings_decrypted").select("*")
         .eq("status", "paid").lte("updated_at", paidThresh)
-        .order("updated_at", { ascending: true }).limit(BATCH_LIMIT),
+        .order("updated_at", { ascending: true }).limit(BATCH_LIMIT_DEFAULT),
       supabase.from("pending_bookings_decrypted").select("*")
         .eq("status", "duffel_pending").lte("updated_at", dpThresh)
-        .order("updated_at", { ascending: true }).limit(BATCH_LIMIT),
+        .order("updated_at", { ascending: true }).limit(BATCH_LIMIT_DEFAULT),
       supabase.from("pending_bookings_decrypted").select("*")
         .eq("status", "pnr_issued").lte("updated_at", pnrThresh)
-        .order("updated_at", { ascending: true }).limit(BATCH_LIMIT),
+        .order("updated_at", { ascending: true }).limit(BATCH_LIMIT_DEFAULT),
       supabase.from("pending_bookings_decrypted").select("*")
         .eq("status", "booked").is("confirmation_email_sent_at", null)
         .lte("updated_at", bookedThresh)
-        .order("updated_at", { ascending: true }).limit(BATCH_LIMIT),
+        .gte("created_at", fourteenDaysAgoISO)
+        .order("updated_at", { ascending: true }).limit(BATCH_LIMIT_BUCKET_6),
     ]);
 
     if (paidRows.error || dpRows.error || pnrRows.error || bookedRows.error) {
@@ -554,6 +670,9 @@ serve(async (req) => {
         },
         `function:retry-stuck-bookings+reason:scan_query_failed`,
       );
+      // Await the backlog promise so a late alert fire isn't lost on request
+      // close. Fire-and-forget is fine mid-handler; we tidy at the exit.
+      await backlogAlertPromise.catch(() => {});
       return new Response(
         JSON.stringify({ error: "Scan failed" }),
         { status: 500, headers: { ...CORS_HEADERS, "Content-Type": "application/json" } },
@@ -568,6 +687,8 @@ serve(async (req) => {
     ];
 
     if (allRows.length === 0) {
+      // Same backlog-alert housekeeping on the no-rows path.
+      await backlogAlertPromise.catch(() => {});
       return new Response(
         JSON.stringify({ processed: 0 }),
         { headers: { ...CORS_HEADERS, "Content-Type": "application/json" } },
@@ -579,6 +700,11 @@ serve(async (req) => {
       const result = await processRow(supabase, row);
       results.push({ id: row.id, ref: row.merchant_ref, from_status: row.status, ...result });
     }
+
+    // Final housekeeping: ensure the backlog alert fire has completed before
+    // the request closes. By this point the main scan already took ~100-500ms
+    // so the promise is almost certainly resolved; the await is a safety net.
+    await backlogAlertPromise.catch(() => {});
 
     return new Response(
       JSON.stringify({ processed: results.length, results }),
