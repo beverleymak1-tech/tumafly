@@ -19,17 +19,33 @@
 //     existing order rather than creating a duplicate. No code duplication:
 //     the primary booking path handles all six response branches.
 //
-//   duffel_pending > 5min
-//     Force-fail with orphan check. GET /air/orders?duffel_idempotency_key=<id>
-//       - Duffel HAS the order → CRITICAL alert. Row stays at duffel_pending
-//         until manual reconciliation. (Duffel has it, we can't complete
-//         cleanly — usually indicates a bug in process-duffel-booking or
-//         send-confirmation. Don't refund a booked customer.)
-//       - Duffel doesn't have it → transition paid_booking_failed, refund.
-//     Session 49.a step 6/7 will replace this with Sweep R2 which uses
-//     duffel_webhook_events as the source of truth instead of a Duffel API
-//     call (closes the race window where Duffel has the order but our
-//     webhook event stream also has it, which is strictly more informative).
+//   duffel_pending > 5min  ← Session 49.a step 6/7 REPLACES this bucket
+//     Was: forceFailDuffelPending — called GET /air/orders?duffel_idempotency_key=X
+//          to check whether Duffel has the order. That query filter is NOT
+//          supported by Duffel; the filter was silently ignored and the
+//          response was unfiltered /air/orders which always had rows,
+//          making the orphan check always say "Duffel has it" and never
+//          refund. Bug since Session 28b, cause of the Session 40.b cron
+//          unschedule.
+//     Now: sweepStuckDuffelPending (Session 49.a step 6/7) — reads
+//          duffel_webhook_events as the source of truth. Session 47 Design
+//          Spec §2.4 Sweep R2 three-branch classification:
+//            - Event stream shows order.created for this row → Duffel HAS
+//              the order; fire PAID_NO_TICKET CRITICAL dedup
+//              pending_booking_id:<id> with "complete the bookings INSERT
+//              manually; do NOT refund". Row stays duffel_pending.
+//            - Event stream shows order.creation_failed for this row →
+//              force-fail + refund (same compare-and-set + alert +
+//              refundBooking as the pre-S49.a path, but reached from
+//              authoritative evidence).
+//            - No event in stream for this row AND age ≤ 10min → nudge
+//              process-duffel-booking once (same as Bucket 2).
+//            - No event in stream for this row AND age > 10min → force-fail
+//              + refund with reason "no Duffel event after 10min".
+//
+//     forceFailDuffelPending is wrapped as dead code with a DELETE-IN-S49b
+//     comment block. Session 49.b removes it when the cron is scheduled
+//     against the rewritten code.
 //
 //   pnr_issued > 60s
 //     Poll ticket issuance: GET /air/orders/<duffel_order_id>
@@ -58,41 +74,15 @@
 //       - Per-bucket batch size: Bucket 6 drains up to 10 rows per sweep
 //         (vs default 5 for other buckets).
 //
-//   Sweep R1 — event-stream reconciliation (Session 49.a step 5/7, THIS COMMIT)
+//   Sweep R1 — event-stream reconciliation (Session 49.a step 5/7)
 //     Scans duffel_webhook_events WHERE processed_at IS NULL ORDER BY
-//     received_at ASC LIMIT 20. These are events the inline duffel-webhook
-//     handler could not resolve (no match by order_id OR metadata at
-//     dispatch time). Session 47 design spec §2.4 classification:
-//       - Row NOW found via findPendingByOrderIdOrMetadata (race belatedly
-//         resolved) → re-run the shared handler
-//         (_shared/duffel-order-event-handlers.ts). Mark event
-//         processing_outcome='race_resolved', pending_booking_id=…
-//       - Row NOT found AND event has metadata.pending_booking_id AND
-//         that pending row is in a terminal failure state
-//         [paid_offer_expired, paid_booking_failed, refund_pending,
-//         refunded, failed_to_create] → Duffel-sandbox-422 artifact
-//         (Session 48 soak-close finding, 8 KQ/PW/TC/W2/WB rows). Mark
-//         processing_outcome='pricing_failed_after_create'. SILENT —
-//         no alert. Extension to spec §2.4 resolution union.
-//       - Row NOT found AND received_at > 10min ago → external order
-//         (Dashboard-created, no metadata). Mark
-//         processing_outcome='external_order', fire DUFFEL_ORDER_UNKNOWN_ORIGIN
-//         with dedup event_id:${event_id}.
-//       - Row NOT found AND received_at < 10min ago → still-plausible edge
-//         race. Leave processed_at NULL, retry next sweep.
-//     Imports handleOrderCreated / handleOrderCreationFailed from
-//     _shared/duffel-order-event-handlers.ts (Session 49.a steps 1-2/7
-//     made this possible). Per spec §2.4: any handler-ran outcome →
-//     mark race_resolved; the "idempotent replay vs state transition"
-//     distinction doesn't matter at reconciler time.
+//     received_at ASC LIMIT 20. Classifies events the inline duffel-webhook
+//     handler could not resolve at dispatch time. See sweepUnprocessedEvents
+//     below for the four classification branches.
 //
-//   Sweep R2 — stuck-pending reconciliation (Session 49.a step 6/7, NEXT COMMIT)
-//     Will replace Bucket 3's forceFailDuffelPending. Reads duffel_webhook_events
-//     for events matching stuck pending rows (by duffel_order_id OR
-//     metadata.pending_booking_id). Delegates PAID_NO_TICKET alerts +
-//     refund+fail decisions off event-stream truth, not Duffel API calls
-//     (which the current forceFailDuffelPending gets wrong because
-//     ?duffel_idempotency_key=X is not a supported Duffel API filter).
+//   Sweep R2 — stuck-pending reconciliation (Session 49.a step 6/7, THIS COMMIT)
+//     Called from processRow when a duffel_pending row ages past 5min.
+//     See sweepStuckDuffelPending below.
 //
 // Removed from v1:
 //   - Direct Duffel POST /air/orders. Replaced with nudge to
@@ -107,10 +97,8 @@
 //
 // Batch sizing: BATCH_LIMIT_DEFAULT = 5 for most buckets, BATCH_LIMIT_BUCKET_6
 // = 10 for the booked-no-email bucket, BATCH_LIMIT_SWEEP_R1 = 20 for the
-// event-stream reconciler (events are cheap to classify — most are
-// terminal-state resolutions or 10-min-window checks, not Duffel API calls).
-// Cron every minute → up to 45 operations/sweep → well above real recovery
-// throughput for any single sweep.
+// event-stream reconciler. Cron every minute → up to 45 operations/sweep →
+// well above real recovery throughput for any single sweep.
 // ============================================================================
 
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
@@ -151,6 +139,14 @@ const AGE_DUFFEL_PENDING_FAIL_S  = 300;   // 5 min
 const AGE_PNR_ISSUED_POLL_S      = 60;
 const AGE_PNR_ISSUED_FAIL_S      = 900;   // 15 min
 const AGE_BOOKED_NO_EMAIL_S      = 60;
+
+// Session 49.a step 6/7 — Sweep R2 force-fail window
+// After this age, if the event stream still has no event for the row, we
+// stop nudging and move to force-fail + refund. Spec §2.4: "if still stuck
+// 5min later with no event, force-fail + refund" — reading the 5min as
+// counting from the first Sweep R2 nudge opportunity (age > 5min), the
+// force-fail boundary lands at age > 10min.
+const AGE_DUFFEL_PENDING_SWEEP_R2_FORCE_FAIL_S = 600;  // 10 min
 
 // Session 49.a step 4/7 — Bucket 6 safety clause constants
 //
@@ -328,7 +324,34 @@ async function nudgeProcessDuffelBooking(row: any): Promise<any> {
   }
 }
 
-// Bucket 3: duffel_pending > 5min (force-fail with orphan check)
+/* ========================================================================
+ * DEAD CODE — DELETE IN SESSION 49.b
+ * ========================================================================
+ *
+ * Bucket 3's forceFailDuffelPending is retained verbatim below for one
+ * commit (Session 49.a step 6/7) so this diff is pure addition on the
+ * replacement side. Session 49.b deletes the block entirely when the
+ * cron is scheduled against the Session 49.a code.
+ *
+ * The function is NOT called anywhere after Session 49.a step 6/7 — the
+ * processRow dispatch now routes duffel_pending > 5min to
+ * sweepStuckDuffelPending (Sweep R2) instead.
+ *
+ * Why it was broken: the orphan check calls
+ *   GET /air/orders?duffel_idempotency_key=<row.id>
+ * That query parameter is NOT supported by Duffel. Duffel silently ignored
+ * the filter and returned an unfiltered /air/orders response, which almost
+ * always had data[].length > 0 because any recent order shows up. The
+ * orphan-check then said "Duffel HAS the order" and skipped the refund —
+ * meaning real paid-no-ticket customers never got refunded by the
+ * reconciler, and the alert went to CRITICAL about a "bug" that was always
+ * the orphan check itself.
+ *
+ * Sweep R2 (sweepStuckDuffelPending, below) replaces this with event-stream
+ * truth: reads duffel_webhook_events for this row's events instead of
+ * calling Duffel's broken filter.
+ * ======================================================================== */
+// deno-lint-ignore no-unused-vars
 async function forceFailDuffelPending(supabase: any, row: any): Promise<any> {
   // Orphan check: does Duffel have an order under our idempotency key?
   let orderExistsAtDuffel = false;
@@ -398,6 +421,9 @@ async function forceFailDuffelPending(supabase: any, row: any): Promise<any> {
   );
   return { outcome: "duffel_pending_force_failed_and_refund_initiated" };
 }
+/* ========================================================================
+ * END DEAD CODE — DELETE IN SESSION 49.b
+ * ======================================================================== */
 
 // Bucket 4: pnr_issued 60s - 15min (poll for ticket issuance)
 // Bucket 5: pnr_issued > 15min (cancel + force-fail)
@@ -575,6 +601,216 @@ async function retryConfirmationEmail(supabase: any, row: any): Promise<any> {
   return { outcome: "booked_email_retry_succeeded" };
 }
 
+// ── Session 49.a step 6/7 — Sweep R2 (stuck duffel_pending reconciliation) ──
+// Replaces the deleted Bucket 3 forceFailDuffelPending. Reads
+// duffel_webhook_events as the authoritative source instead of Duffel's
+// broken ?duffel_idempotency_key=X filter.
+//
+// Called from processRow for rows at status='duffel_pending' AND age >
+// AGE_DUFFEL_PENDING_FAIL_S (5 min). Classification per Session 47 Design
+// Spec §2.4 Sweep R2:
+//
+//   Event stream shows order.created for this row:
+//     → Duffel HAS the order. Fire PAID_NO_TICKET CRITICAL with instruction
+//       "complete the bookings INSERT manually; do NOT refund". Row stays
+//       at duffel_pending.
+//
+//   Event stream shows order.creation_failed for this row:
+//     → Duffel rejected it. Compare-and-set duffel_pending → paid_booking_failed,
+//       fire PAID_NO_TICKET, trigger refundBooking.
+//
+//   No event in stream for this row AND age ≤ 10min:
+//     → Nudge process-duffel-booking once (same as Bucket 2). Row stays
+//       at duffel_pending; next sweep (within 60s) will reclassify.
+//
+//   No event in stream for this row AND age > 10min:
+//     → Duffel genuinely never received our order creation request, or the
+//       webhook was lost. Compare-and-set duffel_pending → paid_booking_failed,
+//       fire PAID_NO_TICKET with reason "no Duffel event after 10min",
+//       trigger refundBooking.
+//
+// Event-stream lookup: WHERE duffel_order_id = row.duffel_order_id OR
+// payload->'data'->'object'->'metadata'->>'pending_booking_id' = row.id.
+// The duffel_order_id branch catches cases where process-duffel-booking's
+// UPDATE committed before the webhook arrived; the metadata branch catches
+// cases where the UPDATE never committed but Duffel still processed the
+// POST (sandbox-422 pattern, Dashboard-created, etc.).
+async function sweepStuckDuffelPending(
+  supabase: any,
+  row: any,
+  ageSec: number,
+): Promise<any> {
+  // 1. Scan duffel_webhook_events for events matching this pending row.
+  // Query two shapes OR'd together. Supabase client's PostgREST .or() syntax
+  // handles the compound filter.
+  const metadataPath = `payload->data->object->metadata->>pending_booking_id`;
+  let orderCreatedEvent: any = null;
+  let orderCreationFailedEvent: any = null;
+
+  try {
+    // Build the OR filter conditionally — only include duffel_order_id branch
+    // if the row has one set (defensive; usually it won't by this age without
+    // an event, but the OR must be well-formed).
+    const orFilter = row.duffel_order_id
+      ? `duffel_order_id.eq.${row.duffel_order_id},${metadataPath}.eq.${row.id}`
+      : `${metadataPath}.eq.${row.id}`;
+
+    const { data: matchingEvents, error: scanErr } = await supabase
+      .from("duffel_webhook_events")
+      .select("event_type, duffel_order_id, received_at, payload")
+      .or(orFilter)
+      .order("received_at", { ascending: true });
+
+    if (scanErr) {
+      console.error(`[sweep-r2] event-stream scan failed for ${row.merchant_ref}:`, scanErr.message);
+      await alertFounder(
+        "UNHANDLED_ERROR",
+        {
+          function: "retry-stuck-bookings",
+          sweep: "R2",
+          merchant_ref: row.merchant_ref,
+          pending_booking_id: row.id,
+          duffel_order_id: row.duffel_order_id,
+          message: "duffel_webhook_events scan failed",
+          error: scanErr.message,
+        },
+        `function:retry-stuck-bookings+reason:sweep_r2_scan_failed+pending:${row.id}`,
+      );
+      return { outcome: "sweep_r2_scan_failed", error: scanErr.message };
+    }
+
+    // Walk the matches to classify. Prefer order.creation_failed over
+    // order.created if both exist (shouldn't happen in a healthy flow, but
+    // the failed signal is the actionable one).
+    for (const ev of matchingEvents || []) {
+      if (ev.event_type === "order.creation_failed") {
+        orderCreationFailedEvent = ev;
+      } else if (ev.event_type === "order.created" && !orderCreatedEvent) {
+        orderCreatedEvent = ev;
+      }
+    }
+  } catch (err) {
+    console.error(`[sweep-r2] threw during event-stream lookup for ${row.merchant_ref}:`, err);
+    await alertFounder(
+      "UNHANDLED_ERROR",
+      {
+        function: "retry-stuck-bookings",
+        sweep: "R2",
+        merchant_ref: row.merchant_ref,
+        pending_booking_id: row.id,
+        error: (err as Error).message,
+      },
+      `function:retry-stuck-bookings+reason:sweep_r2_threw+pending:${row.id}`,
+    );
+    return { outcome: "sweep_r2_threw", error: (err as Error).message };
+  }
+
+  // Branch A: event stream shows order.creation_failed → force-fail + refund.
+  if (orderCreationFailedEvent) {
+    const { data: claimed } = await supabase
+      .from("pending_bookings")
+      .update({ status: "paid_booking_failed" })
+      .eq("id", row.id)
+      .eq("status", "duffel_pending")
+      .select();
+    if (!claimed || claimed.length === 0) {
+      return { outcome: "sweep_r2_creation_failed_already_transitioned" };
+    }
+    await alertFounder("PAID_NO_TICKET", {
+      merchant_ref: row.merchant_ref,
+      pending_booking_id: row.id,
+      duffel_offer_id: row.duffel_offer_id,
+      duffel_order_id: row.duffel_order_id,
+      amount_paid_kes: row.total_kes,
+      customer_email: row.contact?.email,
+      customer_phone: row.contact?.phone_number,
+      passengers: row.passengers,
+      source: "retry-stuck-bookings Sweep R2",
+      reason: "duffel_pending > 5min; event stream shows order.creation_failed — force-failed + refunding",
+      duffel_event_received_at: orderCreationFailedEvent.received_at,
+    });
+    await refundBooking(
+      supabase,
+      "paid_booking_failed",
+      row,
+      row.processor_transaction_id,
+      row.merchant_ref,
+      "retry-stuck-bookings",  // Session 40: sourceEf for refund_initiated audit attribution
+    );
+    return { outcome: "sweep_r2_creation_failed_force_failed_and_refund_initiated" };
+  }
+
+  // Branch B: event stream shows order.created → Duffel HAS it; alert, do NOT refund.
+  if (orderCreatedEvent) {
+    await alertFounder(
+      "PAID_NO_TICKET",
+      {
+        merchant_ref: row.merchant_ref,
+        pending_booking_id: row.id,
+        duffel_offer_id: row.duffel_offer_id,
+        duffel_order_id: orderCreatedEvent.duffel_order_id ?? row.duffel_order_id,
+        amount_paid_kes: row.total_kes,
+        customer_email: row.contact?.email,
+        customer_phone: row.contact?.phone_number,
+        passengers: row.passengers,
+        source: "retry-stuck-bookings Sweep R2",
+        reason: "duffel_pending > 5min; event stream shows order.created — Duffel HAS the order",
+        message: "Complete the bookings INSERT manually from the Duffel order. Do NOT refund — customer's booking is created at Duffel. Check Duffel dashboard for the order, verify passenger details, run process-duffel-booking manually or complete the bookings INSERT + status transition by hand.",
+        duffel_event_received_at: orderCreatedEvent.received_at,
+      },
+      `pending_booking_id:${row.id}`,
+    );
+    // Row stays at duffel_pending. Next sweep will re-fire the alert; dedup
+    // on pending_booking_id (1h cooldown per PAID_NO_TICKET's ALERT_CONFIG
+    // entry) collapses the storm until manual intervention clears the row.
+    return { outcome: "sweep_r2_order_created_alert_only_no_refund" };
+  }
+
+  // Branch C: no event in stream.
+  // Age ≤ 10min → nudge process-duffel-booking once (same as Bucket 2).
+  if (ageSec <= AGE_DUFFEL_PENDING_SWEEP_R2_FORCE_FAIL_S) {
+    const nudgeResult = await nudgeProcessDuffelBooking(row);
+    return {
+      outcome: "sweep_r2_no_event_nudged",
+      age_sec: Math.round(ageSec),
+      nudge_result: nudgeResult,
+    };
+  }
+
+  // Age > 10min → force-fail + refund.
+  const { data: claimed } = await supabase
+    .from("pending_bookings")
+    .update({ status: "paid_booking_failed" })
+    .eq("id", row.id)
+    .eq("status", "duffel_pending")
+    .select();
+  if (!claimed || claimed.length === 0) {
+    return { outcome: "sweep_r2_no_event_already_transitioned" };
+  }
+  await alertFounder("PAID_NO_TICKET", {
+    merchant_ref: row.merchant_ref,
+    pending_booking_id: row.id,
+    duffel_offer_id: row.duffel_offer_id,
+    duffel_order_id: row.duffel_order_id,
+    amount_paid_kes: row.total_kes,
+    customer_email: row.contact?.email,
+    customer_phone: row.contact?.phone_number,
+    passengers: row.passengers,
+    source: "retry-stuck-bookings Sweep R2",
+    reason: `duffel_pending > ${Math.round(AGE_DUFFEL_PENDING_SWEEP_R2_FORCE_FAIL_S / 60)}min; no Duffel event in stream — force-failed + refunding`,
+    age_sec: Math.round(ageSec),
+  });
+  await refundBooking(
+    supabase,
+    "paid_booking_failed",
+    row,
+    row.processor_transaction_id,
+    row.merchant_ref,
+    "retry-stuck-bookings",  // Session 40: sourceEf for refund_initiated audit attribution
+  );
+  return { outcome: "sweep_r2_no_event_force_failed_and_refund_initiated", age_sec: Math.round(ageSec) };
+}
+
 // ── Dispatch ──────────────────────────────────────────────────────────────
 async function processRow(supabase: any, row: any): Promise<any> {
   const ageSec = (Date.now() - new Date(row.updated_at).getTime()) / 1000;
@@ -584,7 +820,8 @@ async function processRow(supabase: any, row: any): Promise<any> {
     }
     if (row.status === "duffel_pending") {
       if (ageSec > AGE_DUFFEL_PENDING_FAIL_S) {
-        return await forceFailDuffelPending(supabase, row);
+        // Session 49.a step 6/7: Sweep R2 replaces forceFailDuffelPending.
+        return await sweepStuckDuffelPending(supabase, row, ageSec);
       }
       return await nudgeProcessDuffelBooking(row);
     }
