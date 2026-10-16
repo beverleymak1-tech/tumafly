@@ -55,6 +55,8 @@ type AlertType =
   | "CONFIRMATION_EMAIL_FAILED"            // send-confirmation returned non-2xx or threw; reconciler retries
   // Session 40.b — race_lost defensive classification (double-fire fix)
   | "RACE_LOST_NO_BOOKING"                 // Duffel says offer already booked, but no bookings row exists yet for this pending_booking_id
+  // Session 49.a — Bucket 6 backlog threshold (self-DoS detection)
+  | "STUCK_BOOKING_BACKLOG_EXCEEDS_THRESHOLD"  // retry-stuck-bookings Bucket 6 pre-scan found >10 rows; backlog accruing faster than it drains
   // S-06 chargeback lifecycle (Paystack dispute events) ──────────────────
   | "CHARGEBACK_OPENED"                    // charge.dispute.create — new dispute filed by customer's bank
   | "CHARGEBACK_REMINDER"                  // charge.dispute.remind — Paystack reminder, response deadline near
@@ -253,6 +255,33 @@ const ALERT_CONFIG: Record<AlertType, { severity: string; subject: string; actio
           subject: "send-confirmation returned non-2xx or threw",
           action: "Booking is safe — customer is 'booked' in DB and at Duffel. Only the confirmation email failed. retry-stuck-bookings (#9) sweeps 'booked' rows with NULL confirmation_email_sent_at and retries. If this fires more than once for the same row, investigate send-confirmation and RESEND_API_KEY. Customer will not have their e-ticket until email delivers — WhatsApp them their PNR + ticket numbers if 15+ minutes have passed since booking.",
           dedup_cooldown_minutes: 60,  // §11 (S35b): dedup per pending_booking_id per hour — retry-stuck-bookings' 60s cadence would otherwise flood on same failing row (Session 40.b root cause: this alert type was the self-DoS)
+        },
+        // ── Session 49.a — Bucket 6 backlog threshold (self-DoS detection) ──
+        // Fires from retry-stuck-bookings' Bucket 6 pre-scan when the COUNT(*)
+        // of candidate rows (status='booked' AND confirmation_email_sent_at
+        // IS NULL AND updated_at < threshold AND created_at >= NOW() - 14d)
+        // exceeds BACKLOG_ALERT_THRESHOLD (10). The 10-row threshold is tuned
+        // to catch Session-40.b-shaped self-DoS storms early: the 59-row
+        // backlog cleaned 2026-10-15 under SOP §13 was discovered after
+        // months of silent accrual; 10 rows means any new accrual spike
+        // surfaces within one scan interval (60s) instead of weeks.
+        //
+        // The 14-day date filter on the scan itself (Commit 4) ensures the
+        // Bucket 6 scan can only ever process recent rows — historical
+        // 55+-row backlogs under S-14b/c encrypted-view migration window
+        // (2026-09-06→2026-09-10) will NOT re-trigger this alert because
+        // their created_at is older than 14 days. This alert only ever fires
+        // on new accrual, which is the operator-actionable signal.
+        //
+        // Dedup: 1440min per `bucket:6` — one alert per day while the backlog
+        // persists. Operator-ack path, not fire-per-sweep spam. Bucket 6
+        // scans every 60s, so without this dedup, a sustained backlog would
+        // fire 1440 alerts per day instead of 1.
+        STUCK_BOOKING_BACKLOG_EXCEEDS_THRESHOLD: {
+          severity: "⚠️ HIGH",
+          subject: "[TumaFly] Bucket 6 booked-no-email backlog exceeds threshold",
+          action: "retry-stuck-bookings Bucket 6 pre-scan found more than 10 rows with status='booked' AND confirmation_email_sent_at IS NULL AND updated_at past threshold (within the last 14 days). Backlog is accruing faster than it drains — most commonly a CONFIRMATION_EMAIL_FAILED self-DoS pattern (Session 40.b historical reference) OR send-confirmation / Resend-side outage. Probe query: SELECT id, merchant_ref, created_at, updated_at, confirmation_email_sent_at FROM pending_bookings WHERE status='booked' AND confirmation_email_sent_at IS NULL AND created_at >= NOW() - INTERVAL '14 days' ORDER BY updated_at DESC. Also check recent alerts: SELECT alert_type, COUNT(*) FROM alerts WHERE created_at > NOW() - INTERVAL '1 hour' GROUP BY 1 ORDER BY 2 DESC. If backlog is older than 14 days, run SOP §13 manual-ops cleanup (not this alert path — the 14d filter excludes those from Bucket 6). Alert dedupes per day (bucket:6) so one email per day while backlog persists.",
+          dedup_cooldown_minutes: 1440,
         },
         // ── Session 40.b — race_lost defensive classification (double-fire fix) ──
         // Fires ONLY on the anomalous sub-case: process-duffel-booking classified
