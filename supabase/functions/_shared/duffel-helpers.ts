@@ -18,6 +18,10 @@
 //     this file, they share the same guard state. This is CORRECT — we
 //     want one alert per cold start regardless of how many functions
 //     triggered the check.
+//
+// Session 49.a step 1/7 (2026-10-16): lifted three functions out of
+// duffel-webhook/index.ts so retry-stuck-bookings' Sweep R1 can share
+// the same handler primitives in step 2/7. See bottom of file.
 // ============================================================================
 
 // ── Env vars ──────────────────────────────────────────────────────────────
@@ -387,4 +391,203 @@ export async function refundBooking(
       error: (err as Error).message,
     });
   }
+}
+
+// ============================================================================
+// Session 49.a step 1/7 (2026-10-16) — Duffel event-handler primitives
+// ============================================================================
+// Lifted from duffel-webhook/index.ts so retry-stuck-bookings' Sweep R1 can
+// share the same lookup + marker + confirmation-email code paths as the
+// webhook handler. Zero functional change at this point — duffel-webhook
+// imports these three functions instead of defining them locally.
+//
+// Session 49.a step 2/7 then moves handleOrderCreated and
+// handleOrderCreationFailed into _shared/duffel-order-event-handlers.ts
+// (separate file to avoid _shared/duffel-helpers.ts bloat) so both callers
+// run the same state-transition logic. The split between helpers (here) and
+// handlers (next step) keeps the modular layering honest: handlers compose
+// helpers; EFs compose handlers.
+// ============================================================================
+
+/**
+ * Session 49.a: result type returned by order-event handlers to their caller.
+ *
+ * `resolved: true` means the handler ran its substantive work (state
+ * transition, email fire, idempotent-replay recognised) and the caller
+ * should mark the event row processed with `outcome` + `pendingBookingId`.
+ *
+ * `resolved: false` means the handler could not resolve the event to a
+ * pending row by order_id OR metadata. The caller should NOT mark the event
+ * row — leave `processed_at IS NULL` so the Session 49.a Sweep R1
+ * reconciler classifies it with its 10-min window logic.
+ *
+ * Session 48 soak surfaced a new outcome `pricing_failed_after_create` for
+ * the Duffel-sandbox-422 pattern where Duffel internally creates an order
+ * resource but returns 422 from POST /air/orders; the pending row ends up
+ * in paid_offer_expired/refunded correctly but the webhook event sits
+ * unresolved. Sweep R1 writes this outcome silently (no alert). The
+ * duffel-webhook inline handler never writes it directly (never knows that
+ * context at write time).
+ */
+export type OrderEventOutcomeKind =
+  | "handled_inline"
+  | "race_resolved"
+  | "external_order"
+  | "failed"
+  | "noop"
+  | "pricing_failed_after_create";
+
+export type OrderEventOutcome = {
+  outcome: OrderEventOutcomeKind;
+  pendingBookingId?: string | null;
+  errorMsg?: string | null;
+  resolved: boolean;
+};
+
+/**
+ * Session 48 (spec section 2.3) — resolve a pending_bookings row from a
+ * Duffel webhook event. Primary lookup is by duffel_order_id (set once
+ * process-duffel-booking's UPDATE commits); fallback is by
+ * metadata.pending_booking_id (the race-proof back-reference that
+ * process-duffel-booking writes on POST /air/orders).
+ *
+ * S-14b: reads via pending_bookings_decrypted so pending.passengers is
+ * plaintext for PAID_NO_TICKET alert context and other consumers.
+ *
+ * Session 49.a: lifted from duffel-webhook/index.ts for reuse by
+ * retry-stuck-bookings' Sweep R1 reconciler.
+ */
+export async function findPendingByOrderIdOrMetadata(supabase: any, event: any): Promise<any> {
+  const orderId = event?.data?.object?.id;
+  const metaPendingId = event?.data?.object?.metadata?.pending_booking_id;
+
+  // Primary: lookup by duffel_order_id (set once process-duffel-booking's
+  // UPDATE commits).
+  if (orderId) {
+    const { data } = await supabase
+      .from("pending_bookings_decrypted")
+      .select("*")
+      .eq("duffel_order_id", orderId)
+      .maybeSingle();
+    if (data) return data;
+  }
+
+  // Fallback: lookup by metadata (race-proof back-reference).
+  if (metaPendingId) {
+    const { data } = await supabase
+      .from("pending_bookings_decrypted")
+      .select("*")
+      .eq("id", metaPendingId)
+      .maybeSingle();
+    if (data) return data;
+  }
+
+  return null;
+}
+
+/**
+ * Session 48 (spec section 2.3) — mark a duffel_webhook_events row processed
+ * with an outcome. Non-fatal: the handler already did its real work. A
+ * failed marker just means Session 49 reconciler Sweep R1 will see this
+ * event as unprocessed and re-run its resolution (idempotent via the same
+ * compare-and-set guards on pending_bookings).
+ *
+ * Session 49.a: lifted from duffel-webhook/index.ts for reuse by Sweep R1.
+ * The outcome union is extended by `pricing_failed_after_create` to
+ * classify Duffel-sandbox-422 artifacts silently (no alert, caller
+ * context only).
+ */
+export async function markEventProcessed(
+  supabase: any,
+  eventRowId: string,
+  outcome: OrderEventOutcomeKind,
+  opts?: { pendingBookingId?: string | null; errorMsg?: string | null },
+): Promise<void> {
+  if (!eventRowId) return;  // defensive; shouldn't happen in normal flow
+  const update: Record<string, any> = {
+    processed_at: new Date().toISOString(),
+    processing_outcome: outcome,
+  };
+  if (opts?.pendingBookingId !== undefined) update.pending_booking_id = opts.pendingBookingId;
+  if (opts?.errorMsg !== undefined) update.processing_error = opts.errorMsg;
+  const { error } = await supabase
+    .from("duffel_webhook_events")
+    .update(update)
+    .eq("id", eventRowId);
+  if (error) {
+    console.error(`[markEventProcessed] failed for ${eventRowId}: ${error.message}`);
+  }
+}
+
+/**
+ * Fire send-confirmation EF with atomic idempotency guard on
+ * pending_bookings.confirmation_email_sent_at. Returns a result object
+ * describing success / failure for the caller to alert on if needed.
+ *
+ * Session 49.a: lifted from duffel-webhook/index.ts for reuse by Sweep R1
+ * when it runs the handler-equivalent on a late-resolved event.
+ * retry-stuck-bookings' existing fireSendConfirmation (identical shape) is
+ * replaced by this import in Session 49.a step 4+ to collapse the two
+ * copies into one.
+ */
+export async function fireSendConfirmation(
+  supabase: any,
+  pending: any,
+  order: any,
+): Promise<{ ok: boolean; http_status?: number; body?: string; error?: string }> {
+  const storedSeats: any[] = Array.isArray(pending.contact?.seats) ? pending.contact.seats : [];
+  const storedBaggages: any[] = Array.isArray(pending.contact?.baggages) ? pending.contact.baggages : [];
+  const seatsKes = storedSeats.reduce((sum: number, s: any) => sum + (Number(s.cost_kes) || 0), 0);
+  const baggageKes = storedBaggages.reduce((sum: number, b: any) => sum + (Number(b.total_kes) || 0), 0);
+  const baggageQty = storedBaggages.reduce((sum: number, b: any) => sum + (Number(b.quantity) || 0), 0);
+  const flightKes = Math.max(0, (Number(pending.base_amount_kes) || 0) - seatsKes - baggageKes);
+  const breakdown_kes = {
+    flight: flightKes,
+    seats: seatsKes,
+    baggage: baggageKes,
+    baggage_qty: baggageQty,
+    service_fee: Number(pending.service_fee_kes) || 0,
+    processing_fee: Number(pending.processing_fee_kes) || 0,
+    total: Number(pending.total_kes) || 0,
+  };
+
+  try {
+    const emailRes = await fetch(SEND_CONFIRMATION_URL, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${SERVICE_ROLE_KEY}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        to: pending.contact.email,
+        order,
+        pending: { seats: storedSeats, baggages: storedBaggages },
+        breakdown_kes,
+      }),
+    });
+    if (!emailRes.ok) {
+      const body = await emailRes.text().catch(() => "");
+      return { ok: false, http_status: emailRes.status, body: body.slice(0, 500) };
+    }
+    await supabase
+      .from("pending_bookings")
+      .update({ confirmation_email_sent_at: new Date().toISOString() })
+      .eq("id", pending.id)
+      .is("confirmation_email_sent_at", null);
+    return { ok: true, http_status: emailRes.status };
+  } catch (err) {
+    return { ok: false, error: (err as Error).message };
+  }
+}
+
+/**
+ * Helper: documents on a Duffel order populated with electronic ticket
+ * numbers. Session 49.a lifted from duffel-webhook so handlers (next step)
+ * can reference it from _shared.
+ */
+export function documentsPopulated(order: any): boolean {
+  const docs = Array.isArray(order?.documents) ? order.documents : [];
+  return docs.some((d: any) =>
+    (d?.type === "electronic_ticket" || d?.type === "ticket") && d?.unique_identifier
+  );
 }
